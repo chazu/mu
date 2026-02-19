@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chau/mu/internal/cas"
@@ -82,7 +83,7 @@ func runBuild(args []string) int {
 		Workers:     *jobs,
 	}
 
-	fmt.Fprintf(os.Stderr, "mu build %s\n", formatTargets(targets))
+	fmt.Fprintf(os.Stderr, "mu build %s\n", strings.Join(targets, " "))
 	fmt.Fprintln(os.Stderr, "  building...")
 
 	start := time.Now()
@@ -103,18 +104,4 @@ func runBuild(args []string) int {
 	fmt.Fprintf(os.Stderr, "  \u2713 %d completed (%d cached), %d failed in %.1fs\n",
 		total, result.Cached, result.Failed, elapsed.Seconds())
 	return 0
-}
-
-func formatTargets(targets []string) string {
-	if len(targets) == 1 {
-		return targets[0]
-	}
-	s := ""
-	for i, t := range targets {
-		if i > 0 {
-			s += " "
-		}
-		s += t
-	}
-	return s
 }
