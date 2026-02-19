@@ -16,7 +16,7 @@
         sha256  (get config "sha256")
         version (get config "version")
         strip   (get config "strip_prefix")
-        tgt-name (get target "target" "tool")
+        tgt-name (get target "name" "tool")
         ;; Derive a short name from the target for file paths
         short-name (last (clojure.string/split tgt-name #"[:/]"))
         out-dir    (str "toolchains/" short-name "/" version)
@@ -33,7 +33,7 @@
                         ;; portable: try sha256sum, fall back to shasum -a 256
                         "if command -v sha256sum >/dev/null 2>&1; then sha256sum -c; else shasum -a 256 -c; fi")]
        "network"  true
-       "depends"  []
+       "depends_on"  []
        "outputs"  [archive]}
 
       ;; 2. extract — unpack or copy into bin dir
@@ -50,14 +50,14 @@
                             ;; Single binary — just copy and make executable
                             :else   (str "cp '" archive "' '" bin-dir "/" short-name "' && "
                                          "chmod +x '" bin-dir "/" short-name "'"))))]
-       "depends"  [(str short-name "/fetch")]
-       "outputs"  [bin-dir]}
+       "depends_on"  [(str short-name "/fetch")]
+       "outputs"  [(str bin-dir "/" short-name)]}
 
       ;; 3. verify — run the binary with --version
       {"id"       (str short-name "/verify")
        "command"  ["sh" "-c"
                    (str "'" bin-dir "/" short-name "' --version")]
-       "depends"  [(str short-name "/extract")]
+       "depends_on"  [(str short-name "/extract")]
        "outputs"  []}
 
       ;; 4. register — write a manifest JSON
@@ -71,10 +71,11 @@
                           "sha256"  sha256}
                          {:pretty true})
                         "\nMANIFEST_EOF")]
-       "depends"  [(str short-name "/verify")]
+       "depends_on"  [(str short-name "/verify")]
        "outputs"  [manifest]}]
 
-     "declared_outputs" [bin-dir manifest]}))
+     "declared_outputs" {"toolchain_bin" bin-dir
+                         "manifest"      manifest}}))
 
 (defn handle-request [req]
   (case (get req "method")
