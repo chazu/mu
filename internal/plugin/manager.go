@@ -74,9 +74,9 @@ func (m *Manager) Start(ctx context.Context) error {
 // Plan sends a plan request to the plugin registered for the given toolchain.
 func (m *Manager) Plan(ctx context.Context, toolchain string, target TargetInfo, deps []DepInfo, toolchainArtifacts map[string]string) (*PlanResponse, error) {
 	m.mu.RLock()
-	entry, ok := m.plugins[toolchain]
-	m.mu.RUnlock()
+	defer m.mu.RUnlock()
 
+	entry, ok := m.plugins[toolchain]
 	if !ok {
 		return nil, fmt.Errorf("no plugin registered for toolchain %q", toolchain)
 	}
