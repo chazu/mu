@@ -16,11 +16,14 @@ import (
 )
 
 func runBuild(args []string) int {
-	fs := flag.NewFlagSet("build", flag.ExitOnError)
+	fs := flag.NewFlagSet("build", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	_ = fs.Bool("verbose", false, "show plugin I/O")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	targets := fs.Args()
 	if len(targets) == 0 {
