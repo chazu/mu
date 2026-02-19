@@ -39,14 +39,16 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			if path != filepath.Clean(projectRoot) && !strings.HasPrefix(path, cleanRoot) {
 				return nil, fmt.Errorf("resolve action %q input %q: path %q escapes project root", spec.ID, name, value)
 			}
-			f, err := os.Open(path)
+			dgst, err := func() (cas.Digest, error) {
+				f, err := os.Open(path)
+				if err != nil {
+					return cas.Digest{}, err
+				}
+				defer f.Close()
+				return cas.ComputeDigest(f)
+			}()
 			if err != nil {
 				return nil, fmt.Errorf("resolve action %q input %q: %w", spec.ID, name, err)
-			}
-			dgst, err := cas.ComputeDigest(f)
-			f.Close()
-			if err != nil {
-				return nil, fmt.Errorf("resolve action %q input %q: hashing: %w", spec.ID, name, err)
 			}
 			inputs[name] = dgst
 		}
