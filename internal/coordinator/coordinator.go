@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sort"
 
 	"github.com/chau/mu/internal/cas"
 	"github.com/chau/mu/internal/config"
@@ -196,6 +197,7 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 			queue = append(queue, name)
 		}
 	}
+	sort.Strings(queue)
 
 	var sorted []string
 	for len(queue) > 0 {
@@ -203,12 +205,16 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 		queue = queue[1:]
 		sorted = append(sorted, cur)
 
+		// Collect newly ready nodes and sort them for deterministic ordering.
+		var ready []string
 		for _, dep := range dependents[cur] {
 			inDegree[dep]--
 			if inDegree[dep] == 0 {
-				queue = append(queue, dep)
+				ready = append(ready, dep)
 			}
 		}
+		sort.Strings(ready)
+		queue = append(queue, ready...)
 	}
 
 	if len(sorted) != len(required) {
