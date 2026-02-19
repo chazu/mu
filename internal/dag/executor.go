@@ -239,9 +239,12 @@ func writeFile(path string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, r)
-	return err
+	_, copyErr := io.Copy(f, r)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 // dirOf returns the directory portion of a path, or empty string for a bare filename.
