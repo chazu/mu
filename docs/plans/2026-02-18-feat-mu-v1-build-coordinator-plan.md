@@ -101,7 +101,7 @@ internal/
 |-----------|---------|---------|
 | OCI registry | `oras.land/oras-go/v2` | v2.6.0 |
 | OCI types | `github.com/opencontainers/image-spec` | v1.1.1 |
-| EDN codec | `olympos.io/encoding/edn` | latest (plugin wire format) |
+| ~~EDN codec~~ | ~~`olympos.io/encoding/edn`~~ | Removed — mu speaks JSON only. EDN handled by preprocessors/plugins. |
 | File watching | `github.com/fsnotify/fsnotify` | v1.9.0 |
 | Hashing | `crypto/sha256` (stdlib) | — |
 | Atomic writes | `github.com/google/renameio` | latest |
@@ -115,7 +115,7 @@ These decisions resolve the critical gaps identified during spec analysis. Each 
 
 **Plugin lifecycle (Gap 5):** One process per plugin per build invocation. Plugin stays alive for the duration of the build. On crash: fail the build (no auto-retry in v1). Graceful shutdown via closing stdin.
 
-**Plugin format negotiation (Gap 8):** Declared in `mu.plugins.edn` manifest via `:format` key. Default is JSON. Plugin is spawned with the declared format. No runtime negotiation.
+**Plugin format negotiation (Gap 8):** Not needed — mu only speaks JSON. Wire protocol is NDJSON. Plugins must produce/consume JSON. Babashka plugins use `json/generate-string` and `json/parse-string`. No EDN codec compiled into mu.
 
 **Plugin timeout (Gap 6):** 10s for `:discover`, 5min for `:plan`. Configurable globally in `mu.cue`. On timeout: kill plugin, fail affected targets.
 
@@ -331,77 +331,112 @@ type Action struct {
 
 ---
 
-### Phase 3: Plugin Protocol + Codec
+### Phase 3: Plugin Protocol + Manager
 
-**Goal:** Spawn plugin processes, send discover/plan requests, parse responses.
+**Goal:** Spawn plugin processes, send discover/plan requests over NDJSON, parse responses.
+
+**Design decisions (from Phase 3 review):**
+
+**JSON-only wire protocol.** mu only speaks JSON — same philosophy as config. The plugin wire protocol is NDJSON (newline-delimited JSON). One JSON object per line, one request → one response. No EDN codec compiled into mu. Babashka plugins produce JSON via `json/generate-string`. If a community wants EDN-speaking plugins, they write a thin JSON wrapper — that's their concern, not mu's. This eliminates the codec interface, EDN dependency, and format negotiation entirely.
+
+**Unified request envelope.** All requests use `{"method": "discover"|"plan", ...payload}`. Plugins dispatch on the `method` field.
+
+**Plugin discovery from mu.json.** No separate manifest file. Plugins are declared in the `"plugins"` array of `mu.json` (already part of `ProjectConfig` from Phase 5). Each entry specifies `name` and `command` (explicit command array, relative paths resolved from project root).
+
+**Synchronous 1:1 protocol.** The coordinator writes one JSON line to stdin, reads one JSON line from stdout. No message IDs, no multiplexing. The plugin's main loop: read line → handle → write line → flush.
+
+**TargetInfo, DepInfo, ActionSpec defined.** `TargetInfo` carries what the build file declares (name, toolchain, sources, config). `DepInfo` carries what a dependency *produced* (target name + artifact type→digest map). `ActionSpec` is the plugin's output — same shape as `dag.Action` but with `Inputs` as file paths/references, not resolved digests. The coordinator resolves paths → digests after receiving the response.
+
+**Plugin routing by name.** Targets declare `"toolchain": "go"`, plugins register by `"name": "go"`. Direct name→plugin lookup. The `consumes`/`produces` from discover is informational/for validation, not for routing.
 
 **Files:**
-- `internal/plugin/codec/codec.go` — `Codec` interface
-- `internal/plugin/codec/json.go` — JSON codec
-- `internal/plugin/codec/edn.go` — EDN codec
-- `internal/plugin/protocol.go` — Request/Response types
-- `internal/plugin/manager.go` — `PluginManager`
-
-**Codec interface:**
-```go
-type Codec interface {
-    Encode(v any) ([]byte, error)
-    Decode(data []byte, v any) error
-    Name() string
-}
-```
+- `internal/plugin/protocol.go` — Request/Response/TargetInfo/DepInfo/ActionSpec types
+- `internal/plugin/process.go` — Single plugin process: spawn, NDJSON I/O, timeout, stderr capture
+- `internal/plugin/manager.go` — `PluginManager`: registry of plugins, lifecycle, plan dispatch
 
 **Protocol types:**
 ```go
+// Request is the unified envelope sent to plugins.
+type Request struct {
+    Method             string            `json:"method"`                        // "discover" or "plan"
+    Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan"
+    Deps               []DepInfo         `json:"deps,omitempty"`               // set for "plan"
+    ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan"
+}
+
+// DiscoverResponse is returned by plugins for method "discover".
 type DiscoverResponse struct {
-    Name            string            `json:"name" edn:"name"`
-    Version         string            `json:"version" edn:"version"`
-    ProtocolVersion int               `json:"protocol_version" edn:"protocol-version"`
-    Consumes        []string          `json:"consumes" edn:"consumes"`
-    Produces        []string          `json:"produces" edn:"produces"`
-    ConfigSchema    map[string]any    `json:"config_schema" edn:"config-schema"`
-    Format          string            `json:"format" edn:"format"` // "json" or "edn"
+    Name            string         `json:"name"`
+    Version         string         `json:"version"`
+    ProtocolVersion int            `json:"protocol_version"`
+    Consumes        []string       `json:"consumes"`
+    Produces        []string       `json:"produces"`
+    ConfigSchema    map[string]any `json:"config_schema,omitempty"`
 }
 
-type PlanRequest struct {
-    Method             string            `json:"method" edn:"method"`
-    Target             TargetInfo        `json:"target" edn:"target"`
-    Deps               []DepInfo         `json:"deps" edn:"deps"`
-    ToolchainArtifacts map[string]string `json:"toolchain_artifacts" edn:"toolchain-artifacts"`
-}
-
+// PlanResponse is returned by plugins for method "plan".
 type PlanResponse struct {
-    Actions []ActionSpec          `json:"actions" edn:"actions"`
-    Outputs map[string]string     `json:"declared_outputs" edn:"declared-outputs"`
-    Error   string                `json:"error,omitempty" edn:"error"`
+    Actions []ActionSpec      `json:"actions"`
+    Outputs map[string]string `json:"declared_outputs"` // artifact type → output file path
+    Error   string            `json:"error,omitempty"`
+}
+
+// TargetInfo carries the build file declaration for a target.
+type TargetInfo struct {
+    Name      string         `json:"name"`      // e.g. "//lib/crypto"
+    Toolchain string         `json:"toolchain"` // e.g. "go"
+    Sources   []string       `json:"sources"`
+    Config    map[string]any `json:"config,omitempty"`
+}
+
+// DepInfo carries what a dependency produced (artifact type → digest string).
+type DepInfo struct {
+    Target    string            `json:"target"`    // e.g. "//lib/utils"
+    Artifacts map[string]string `json:"artifacts"` // e.g. {"native_library": "sha256:abc..."}
+}
+
+// ActionSpec is the plugin's output — an action template with file paths (not resolved digests).
+// The coordinator resolves paths → digests and converts to dag.Action.
+type ActionSpec struct {
+    ID        string            `json:"id"`
+    Command   []string          `json:"command"`
+    Inputs    map[string]string `json:"inputs"`              // name → file path or "{action:id}" reference
+    Outputs   []string          `json:"outputs"`             // declared output file paths
+    DependsOn []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
+    Env       map[string]string `json:"env,omitempty"`
+    Network   bool              `json:"network,omitempty"`
 }
 ```
 
 **PluginManager behaviors:**
-- Read `mu.plugins.edn` manifest to find plugins
-- Spawn plugin process (`exec.Command`)
-- Send `:discover` on startup, validate response
+- Read plugin definitions from `ProjectConfig.Plugins` (loaded from `mu.json`)
+- Spawn plugin process (`exec.Command` with command array, working dir = project root)
+- Send `{"method": "discover"}`, validate response (check `protocol_version == 1`)
 - Keep plugin alive for duration of build
-- Send `:plan` per target, parse response
+- Send `{"method": "plan", ...}` per target, parse `PlanResponse`
 - Capture stderr for error reporting
-- Timeout: 10s discover, 5min plan
-- On crash (stdin closed / exit code != 0): fail build with stderr output
+- Timeout: 10s discover, 5min plan (configurable in `mu.json`)
+- On crash (exit code != 0): fail build with stderr output
+- Graceful shutdown: close stdin, wait for process to exit
 
 **Tests:**
-- JSON codec roundtrip for all message types
-- EDN codec roundtrip for all message types
-- Spawn mock plugin (shell script), send discover, get response
+- Protocol type JSON roundtrip (marshal/unmarshal all types)
+- Spawn mock plugin (shell script that reads NDJSON, writes NDJSON), send discover, get response
 - Plan request/response with mock plugin
-- Plugin timeout (mock plugin that sleeps)
-- Plugin crash (mock plugin that exits)
+- Plugin timeout (mock plugin that sleeps past deadline)
+- Plugin crash (mock plugin that exits with code 1)
 - Stderr capture on failure
+- Protocol version mismatch → clear error
+- Plugin error response (PlanResponse with Error field set)
 
 **Acceptance criteria:**
-- [ ] JSON and EDN codecs implemented
-- [ ] PluginManager spawns and manages plugin processes
-- [ ] Discover and Plan protocol working end-to-end
+- [ ] Protocol types defined with JSON tags
+- [ ] Plugin process spawn with NDJSON I/O
+- [ ] PluginManager registers and routes to plugins by name
+- [ ] Discover and Plan protocol working end-to-end with mock plugins
 - [ ] Timeout and crash handling
-- [ ] Tests pass with mock plugins
+- [ ] Stderr capture and error reporting
+- [ ] Tests pass
 
 ---
 
