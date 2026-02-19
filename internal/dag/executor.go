@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -230,10 +231,8 @@ func (e *Executor) restoreOutputs(ctx context.Context, a *Action, result *cas.Ac
 
 // writeFile writes content from rc to the given path, creating parent dirs.
 func writeFile(path string, r io.Reader) error {
-	if dir := dirOf(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
 	f, err := os.Create(path)
 	if err != nil {
@@ -242,16 +241,6 @@ func writeFile(path string, r io.Reader) error {
 	defer f.Close()
 	_, err = io.Copy(f, r)
 	return err
-}
-
-// dirOf returns the directory portion of a path, or empty string for a bare filename.
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[:i]
-		}
-	}
-	return ""
 }
 
 // buildEnv converts an env map to the os/exec []string format.
