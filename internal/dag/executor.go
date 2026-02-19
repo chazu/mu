@@ -190,8 +190,8 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 
 		if err := e.Store.PutActionResult(ctx, key, actionResult); err != nil {
-			// Cache write failure is not fatal — log but don't fail the action.
-			// In v1 we just ignore this.
+			// Cache write failure is not fatal — warn but don't fail the action.
+			fmt.Fprintf(os.Stderr, "mu: warning: cache write for action %q: %v\n", a.ID, err)
 		}
 	}
 
