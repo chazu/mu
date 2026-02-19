@@ -10,10 +10,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/chau/mu/internal/cas"
 	"github.com/google/renameio"
 )
+
+// validHex matches a string of at least 2 lowercase hex characters.
+var validHex = regexp.MustCompile(`^[0-9a-f]{2,}$`)
 
 // DiskStore is a CAS backend that stores blobs and action results on disk.
 type DiskStore struct {
@@ -48,17 +52,32 @@ func New(root string) (*DiskStore, error) {
 	}, nil
 }
 
+// validateHash checks that a hash string is at least 2 characters and contains
+// only lowercase hex digits, preventing path traversal attacks.
+func validateHash(hash string) error {
+	if !validHex.MatchString(hash) {
+		return fmt.Errorf("disk: invalid hash %q: must be lowercase hex and at least 2 characters", hash)
+	}
+	return nil
+}
+
 // blobPath returns the filesystem path for a blob with the given digest,
 // using 2-level fan-out (first 2 hex chars as a subdirectory).
-func (s *DiskStore) blobPath(dgst cas.Digest) string {
+func (s *DiskStore) blobPath(dgst cas.Digest) (string, error) {
+	if err := validateHash(dgst.Hash); err != nil {
+		return "", err
+	}
 	h := dgst.Hash
-	return filepath.Join(s.blobDir, h[:2], h[2:])
+	return filepath.Join(s.blobDir, h[:2], h[2:]), nil
 }
 
 // actionPath returns the filesystem path for an action result identified by the
 // given action key.
-func (s *DiskStore) actionPath(key cas.ActionKey) string {
-	return filepath.Join(s.actDir, "sha256-"+key.Digest.Hash+".json")
+func (s *DiskStore) actionPath(key cas.ActionKey) (string, error) {
+	if err := validateHash(key.Digest.Hash); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.actDir, "sha256-"+key.Digest.Hash+".json"), nil
 }
 
 // Put streams data from r, computing a SHA-256 digest while writing to a
@@ -96,7 +115,10 @@ func (s *DiskStore) Put(_ context.Context, r io.Reader) (cas.Digest, error) {
 
 	// Atomic rename to final path. If two concurrent Puts produce the same
 	// digest, both rename to the same path — idempotent by construction.
-	dest := s.blobPath(dgst)
+	dest, err := s.blobPath(dgst)
+	if err != nil {
+		return cas.Digest{}, err
+	}
 	if err := os.Rename(tmpName, dest); err != nil {
 		return cas.Digest{}, fmt.Errorf("disk: rename blob: %w", err)
 	}
@@ -107,7 +129,11 @@ func (s *DiskStore) Put(_ context.Context, r io.Reader) (cas.Digest, error) {
 // Get opens the blob identified by dgst and returns a ReadCloser for its
 // content. Returns an os.ErrNotExist-wrapped error if the blob is not found.
 func (s *DiskStore) Get(_ context.Context, dgst cas.Digest) (io.ReadCloser, error) {
-	f, err := os.Open(s.blobPath(dgst))
+	p, err := s.blobPath(dgst)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(p)
 	if err != nil {
 		return nil, fmt.Errorf("disk: get blob %s: %w", dgst, err)
 	}
@@ -116,7 +142,11 @@ func (s *DiskStore) Get(_ context.Context, dgst cas.Digest) (io.ReadCloser, erro
 
 // Has reports whether the blob identified by dgst exists in the store.
 func (s *DiskStore) Has(_ context.Context, dgst cas.Digest) (bool, error) {
-	_, err := os.Stat(s.blobPath(dgst))
+	p, err := s.blobPath(dgst)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(p)
 	if err == nil {
 		return true, nil
 	}
@@ -129,7 +159,11 @@ func (s *DiskStore) Has(_ context.Context, dgst cas.Digest) (bool, error) {
 // Delete removes the blob identified by dgst. It is not an error if the blob
 // does not exist.
 func (s *DiskStore) Delete(_ context.Context, dgst cas.Digest) error {
-	err := os.Remove(s.blobPath(dgst))
+	p, err := s.blobPath(dgst)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(p)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("disk: delete blob %s: %w", dgst, err)
 	}
@@ -144,7 +178,10 @@ func (s *DiskStore) PutActionResult(_ context.Context, key cas.ActionKey, result
 		return fmt.Errorf("disk: marshal action result: %w", err)
 	}
 
-	dest := s.actionPath(key)
+	dest, err := s.actionPath(key)
+	if err != nil {
+		return err
+	}
 	if err := renameio.WriteFile(dest, data, 0o644); err != nil {
 		return fmt.Errorf("disk: write action result: %w", err)
 	}
@@ -154,7 +191,11 @@ func (s *DiskStore) PutActionResult(_ context.Context, key cas.ActionKey, result
 // GetActionResult reads and deserialises the action result for key. Returns
 // (nil, nil) on a cache miss (file not found).
 func (s *DiskStore) GetActionResult(_ context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
-	data, err := os.ReadFile(s.actionPath(key))
+	p, err := s.actionPath(key)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

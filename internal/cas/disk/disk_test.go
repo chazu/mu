@@ -139,11 +139,11 @@ func TestActionResultRoundtrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	key := cas.ActionKey{Digest: cas.NewSHA256("actionkeyhash")}
+	key := cas.ActionKey{Digest: cas.NewSHA256("aabbccdd00112233445566778899aabbccdd00112233445566778899aabbccdd")}
 	want := &cas.ActionResult{
 		ExitCode: 0,
 		Outputs: map[string]cas.Digest{
-			"out": cas.NewSHA256("outputhash"),
+			"out": cas.NewSHA256("1122334455667788990011223344556677889900112233445566778899001122"),
 		},
 	}
 
@@ -175,13 +175,51 @@ func TestGetActionResultMiss(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	key := cas.ActionKey{Digest: cas.NewSHA256("nonexistent")}
+	key := cas.ActionKey{Digest: cas.NewSHA256("ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00")}
 	got, err := s.GetActionResult(ctx, key)
 	if err != nil {
 		t.Fatalf("GetActionResult: %v", err)
 	}
 	if got != nil {
 		t.Errorf("expected nil result for missing key, got %+v", got)
+	}
+}
+
+func TestPathTraversalRejected(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		hash string
+	}{
+		{"directory traversal", "../../../etc/passwd"},
+		{"short hash", "a"},
+		{"empty hash", ""},
+		{"uppercase hex", "AABB"},
+		{"non-hex chars", "zzzzzz"},
+		{"mixed valid and slash", "aa/bb"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dgst := cas.NewSHA256(tc.hash)
+
+			_, err := s.Get(ctx, dgst)
+			if err == nil {
+				t.Error("Get: expected error for invalid hash")
+			}
+
+			_, err = s.Has(ctx, dgst)
+			if err == nil {
+				t.Error("Has: expected error for invalid hash")
+			}
+
+			err = s.Delete(ctx, dgst)
+			if err == nil {
+				t.Error("Delete: expected error for invalid hash")
+			}
+		})
 	}
 }
 
