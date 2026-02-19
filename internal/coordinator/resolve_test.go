@@ -161,6 +161,35 @@ func TestResolveMissingFile(t *testing.T) {
 	}
 }
 
+func TestResolvePathTraversal(t *testing.T) {
+	dir := t.TempDir()
+
+	cases := []string{
+		"../../../etc/passwd",
+		"../outside",
+		"subdir/../../outside",
+	}
+
+	for _, input := range cases {
+		specs := []plugin.ActionSpec{
+			{
+				ID:      "build",
+				Command: []string{"cat"},
+				Inputs:  map[string]string{"src": input},
+			},
+		}
+
+		_, err := Resolve(specs, dir)
+		if err == nil {
+			t.Errorf("expected error for traversal input %q, got nil", input)
+			continue
+		}
+		if !contains(err.Error(), "escapes project root") {
+			t.Errorf("expected 'escapes project root' error for %q, got: %s", input, err.Error())
+		}
+	}
+}
+
 func TestResolveEmptySpecs(t *testing.T) {
 	actions, err := Resolve(nil, t.TempDir())
 	if err != nil {

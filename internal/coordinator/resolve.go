@@ -34,7 +34,11 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			}
 
 			// Treat as file path relative to project root.
-			path := filepath.Join(projectRoot, value)
+			path := filepath.Clean(filepath.Join(projectRoot, value))
+			cleanRoot := filepath.Clean(projectRoot) + string(filepath.Separator)
+			if path != filepath.Clean(projectRoot) && !strings.HasPrefix(path, cleanRoot) {
+				return nil, fmt.Errorf("resolve action %q input %q: path %q escapes project root", spec.ID, name, value)
+			}
 			f, err := os.Open(path)
 			if err != nil {
 				return nil, fmt.Errorf("resolve action %q input %q: %w", spec.ID, name, err)
