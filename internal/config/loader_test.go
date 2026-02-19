@@ -193,6 +193,67 @@ func TestLoad_AlreadyPrefixedTarget(t *testing.T) {
 	}
 }
 
+func TestLoad_SkipsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+
+	// Create a real subdirectory with a BUILD.json.
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(real, "BUILD.json"), ProjectConfig{
+		Targets: []Target{
+			{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
+		},
+	})
+
+	// Create a symlinked directory pointing back to real — should be skipped.
+	symDir := filepath.Join(root, "linked")
+	if err := os.Symlink(real, symDir); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Only the target from the real directory should be loaded, not the symlink.
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target (symlinked dir should be skipped), got %d", len(cfg.Targets))
+	}
+}
+
+func TestLoad_SkipsSymlinkedFile(t *testing.T) {
+	root := t.TempDir()
+	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+
+	// Create a BUILD.json outside the project tree.
+	outside := t.TempDir()
+	writeJSON(t, filepath.Join(outside, "BUILD.json"), ProjectConfig{
+		Targets: []Target{
+			{Name: "injected", Toolchain: "go", Sources: []string{"*.go"}},
+		},
+	})
+
+	// Symlink to the outside BUILD.json inside the project — should be skipped.
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "BUILD.json"), filepath.Join(sub, "BUILD.json")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Targets) != 0 {
+		t.Fatalf("expected 0 targets (symlinked file should be skipped), got %d", len(cfg.Targets))
+	}
+}
+
 // writeJSON is a test helper that marshals v to path.
 func writeJSON(t *testing.T, path string, v any) {
 	t.Helper()

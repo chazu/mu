@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,14 +42,21 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 	}
 
 	// Walk the tree looking for BUILD.json files and merge each one.
-	err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, walkErr error) error {
+	// WalkDir (unlike Walk) does not follow symlinks, preventing infinite
+	// loops from cyclic symlinks and config injection from outside the
+	// project root.
+	err = filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if info.IsDir() {
+		// Skip symlinks entirely — both directories and files.
+		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		if info.Name() != "BUILD.json" {
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() != "BUILD.json" {
 			return nil
 		}
 
