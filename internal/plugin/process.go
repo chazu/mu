@@ -110,7 +110,9 @@ func (p *Process) send(ctx context.Context, req Request, resp any) error {
 	select {
 	case <-ctx.Done():
 		// Kill the process on timeout/cancel.
-		p.cmd.Process.Kill()
+		if p.cmd.Process != nil {
+			p.cmd.Process.Kill()
+		}
 		return fmt.Errorf("plugin %q: %w", p.name, ctx.Err())
 	case result := <-ch:
 		if result.err != nil {
