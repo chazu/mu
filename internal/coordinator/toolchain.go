@@ -1,0 +1,151 @@
+package coordinator
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"sync"
+
+	"github.com/chau/mu/internal/cas"
+)
+
+// ToolchainManifest records the artifacts produced by bootstrapping a toolchain.
+type ToolchainManifest struct {
+	Name      string            `json:"name"`      // e.g. "go"
+	Version   string            `json:"version"`   // e.g. "1.25.7"
+	Artifacts map[string]string `json:"artifacts"` // logical name -> CAS digest string (e.g. "bin/go" -> "sha256:abc...")
+}
+
+// ToolchainRegistry stores and retrieves toolchain manifests, backed by CAS for persistence.
+type ToolchainRegistry struct {
+	store     cas.Store
+	manifests map[string]*ToolchainManifest // name -> manifest (in-memory cache)
+	mu        sync.RWMutex
+}
+
+// NewToolchainRegistry creates a new ToolchainRegistry backed by the given CAS store.
+func NewToolchainRegistry(store cas.Store) *ToolchainRegistry {
+	return &ToolchainRegistry{
+		store:     store,
+		manifests: make(map[string]*ToolchainManifest),
+	}
+}
+
+// actionKey computes a deterministic ActionKey from the toolchain name and version.
+// The key material is SHA256("toolchain:<name>:<version>").
+func actionKey(name, version string) cas.ActionKey {
+	h := sha256.Sum256([]byte("toolchain:" + name + ":" + version))
+	return cas.ActionKey{
+		Digest: cas.NewSHA256(hex.EncodeToString(h[:])),
+	}
+}
+
+// Register stores the manifest in CAS as a JSON blob and caches it in-memory.
+//
+// It computes a deterministic key from name+version, stores the manifest JSON
+// as a blob, then stores an ActionResult mapping "manifest" to the blob's digest.
+func (r *ToolchainRegistry) Register(ctx context.Context, manifest *ToolchainManifest) error {
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("toolchain: marshal manifest: %w", err)
+	}
+
+	// Store the manifest JSON as a CAS blob.
+	blobDigest, err := r.store.Put(ctx, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("toolchain: put manifest blob: %w", err)
+	}
+
+	// Store an ActionResult mapping "manifest" -> blob digest.
+	key := actionKey(manifest.Name, manifest.Version)
+	result := &cas.ActionResult{
+		Outputs: map[string]cas.Digest{
+			"manifest": blobDigest,
+		},
+	}
+	if err := r.store.PutActionResult(ctx, key, result); err != nil {
+		return fmt.Errorf("toolchain: put action result: %w", err)
+	}
+
+	// Cache in-memory.
+	r.mu.Lock()
+	r.manifests[manifest.Name] = manifest
+	r.mu.Unlock()
+
+	return nil
+}
+
+// Lookup retrieves a manifest by name and version. It checks the in-memory cache
+// first, then falls back to CAS. Returns (nil, nil) if the toolchain is not found.
+func (r *ToolchainRegistry) Lookup(ctx context.Context, name, version string) (*ToolchainManifest, error) {
+	// Check in-memory cache.
+	r.mu.RLock()
+	if m, ok := r.manifests[name]; ok && m.Version == version {
+		r.mu.RUnlock()
+		return m, nil
+	}
+	r.mu.RUnlock()
+
+	// Look up in CAS.
+	key := actionKey(name, version)
+	result, err := r.store.GetActionResult(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("toolchain: get action result: %w", err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+
+	blobDigest, ok := result.Outputs["manifest"]
+	if !ok {
+		return nil, fmt.Errorf("toolchain: action result missing 'manifest' output")
+	}
+
+	rc, err := r.store.Get(ctx, blobDigest)
+	if err != nil {
+		return nil, fmt.Errorf("toolchain: get manifest blob: %w", err)
+	}
+	defer rc.Close()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("toolchain: read manifest blob: %w", err)
+	}
+
+	var manifest ToolchainManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("toolchain: unmarshal manifest: %w", err)
+	}
+
+	// Cache in-memory.
+	r.mu.Lock()
+	r.manifests[manifest.Name] = &manifest
+	r.mu.Unlock()
+
+	return &manifest, nil
+}
+
+// Get returns the cached manifest for the given toolchain name (any version).
+// It only checks the in-memory cache and returns nil if not found.
+func (r *ToolchainRegistry) Get(name string) *ToolchainManifest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.manifests[name]
+}
+
+// ArtifactsMap returns the artifacts map for the named toolchain, or nil if
+// the toolchain is not registered in the in-memory cache. This is intended
+// to be passed as toolchain_artifacts in plugin plan requests.
+func (r *ToolchainRegistry) ArtifactsMap(name string) map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.manifests[name]
+	if !ok {
+		return nil
+	}
+	return m.Artifacts
+}
