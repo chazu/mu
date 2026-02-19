@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -20,7 +21,18 @@ const maxRetries = 3
 // ForgeFetch downloads a file from url, verifies its SHA-256 hash matches
 // expectedSHA256, and atomically places it at destPath. On transient network
 // errors it retries up to 3 times with exponential backoff and jitter.
-func ForgeFetch(ctx context.Context, url string, expectedSHA256 string, destPath string) error {
+func ForgeFetch(ctx context.Context, rawURL string, expectedSHA256 string, destPath string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL %q: %w", rawURL, err)
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+		// allowed
+	default:
+		return &UnsupportedSchemeError{Scheme: parsed.Scheme, URL: rawURL}
+	}
+
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -35,7 +47,7 @@ func ForgeFetch(ctx context.Context, url string, expectedSHA256 string, destPath
 			}
 		}
 
-		lastErr = forgeFetchOnce(ctx, url, expectedSHA256, destPath)
+		lastErr = forgeFetchOnce(ctx, rawURL, expectedSHA256, destPath)
 		if lastErr == nil {
 			return nil
 		}
@@ -45,7 +57,18 @@ func ForgeFetch(ctx context.Context, url string, expectedSHA256 string, destPath
 			return lastErr
 		}
 	}
-	return fmt.Errorf("fetch %s: all %d retries exhausted: %w", url, maxRetries, lastErr)
+	return fmt.Errorf("fetch %s: all %d retries exhausted: %w", rawURL, maxRetries, lastErr)
+}
+
+// UnsupportedSchemeError is returned when the URL has a scheme other than
+// http or https.
+type UnsupportedSchemeError struct {
+	Scheme string
+	URL    string
+}
+
+func (e *UnsupportedSchemeError) Error() string {
+	return fmt.Sprintf("unsupported URL scheme %q in %s: only http and https are allowed", e.Scheme, e.URL)
 }
 
 // HashMismatchError is returned when the downloaded content does not match the
@@ -60,20 +83,20 @@ func (e *HashMismatchError) Error() string {
 }
 
 // forgeFetchOnce performs a single download attempt.
-func forgeFetchOnce(ctx context.Context, url string, expectedSHA256 string, destPath string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func forgeFetchOnce(ctx context.Context, rawURL string, expectedSHA256 string, destPath string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP GET %s: %w", url, err)
+		return fmt.Errorf("HTTP GET %s: %w", rawURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP GET %s: status %d", url, resp.StatusCode)
+		return fmt.Errorf("HTTP GET %s: status %d", rawURL, resp.StatusCode)
 	}
 
 	// Create temp file in the same directory as destPath so os.Rename is atomic.
@@ -97,7 +120,7 @@ func forgeFetchOnce(ctx context.Context, url string, expectedSHA256 string, dest
 	reader := io.TeeReader(resp.Body, hasher)
 
 	if _, err := io.Copy(tmp, reader); err != nil {
-		return fmt.Errorf("downloading %s: %w", url, err)
+		return fmt.Errorf("downloading %s: %w", rawURL, err)
 	}
 
 	if err := tmp.Close(); err != nil {
