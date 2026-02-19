@@ -33,7 +33,10 @@ func FindProjectRoot(startDir string) (string, error) {
 }
 
 // Load reads mu.json from projectRoot and then discovers and merges any
-// BUILD.json files found recursively under projectRoot.
+// BUILD files found recursively under projectRoot. When a preprocessor is
+// declared in mu.json, Load looks for BUILD.<ext> files (using the
+// preprocessor's extension) and pipes them through the external command.
+// Otherwise it falls back to BUILD.json.
 func Load(projectRoot string) (*ProjectConfig, error) {
 	rootFile := filepath.Join(projectRoot, "mu.json")
 	cfg, err := loadFile(rootFile)
@@ -41,7 +44,14 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		return nil, fmt.Errorf("loading %s: %w", rootFile, err)
 	}
 
-	// Walk the tree looking for BUILD.json files and merge each one.
+	// Determine which BUILD filename to look for and how to load it.
+	buildFileName := "BUILD.json"
+	usePP := cfg.Preprocessor != nil && cfg.Preprocessor.Extension != "" && len(cfg.Preprocessor.Command) > 0
+	if usePP {
+		buildFileName = "BUILD." + cfg.Preprocessor.Extension
+	}
+
+	// Walk the tree looking for BUILD files and merge each one.
 	// WalkDir (unlike Walk) does not follow symlinks, preventing infinite
 	// loops from cyclic symlinks and config injection from outside the
 	// project root.
@@ -56,16 +66,21 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if d.Name() != "BUILD.json" {
+		if d.Name() != buildFileName {
 			return nil
 		}
 
-		partial, err := loadFile(path)
+		var partial *ProjectConfig
+		if usePP {
+			partial, err = Preprocess(cfg.Preprocessor, path)
+		} else {
+			partial, err = loadFile(path)
+		}
 		if err != nil {
 			return fmt.Errorf("loading %s: %w", path, err)
 		}
 
-		// Compute the package path relative to project root. A BUILD.json
+		// Compute the package path relative to project root. A BUILD file
 		// sitting at projectRoot/foo/bar/ produces the prefix "//foo/bar".
 		relDir, err := filepath.Rel(projectRoot, filepath.Dir(path))
 		if err != nil {
