@@ -87,15 +87,33 @@ func (m *Manager) Plan(ctx context.Context, toolchain string, target TargetInfo,
 	return entry.process.Plan(ctx, target, deps, toolchainArtifacts)
 }
 
-// DiscoverInfo returns the discover response for a plugin, or nil if not found.
+// DiscoverInfo returns a copy of the discover response for a plugin, or nil if not found.
 func (m *Manager) DiscoverInfo(name string) *DiscoverResponse {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if entry, ok := m.plugins[name]; ok {
-		return entry.discover
+	entry, ok := m.plugins[name]
+	if !ok || entry.discover == nil {
+		return nil
 	}
-	return nil
+
+	// Return a defensive copy so callers cannot mutate internal state.
+	cpy := *entry.discover
+	if entry.discover.Consumes != nil {
+		cpy.Consumes = make([]string, len(entry.discover.Consumes))
+		copy(cpy.Consumes, entry.discover.Consumes)
+	}
+	if entry.discover.Produces != nil {
+		cpy.Produces = make([]string, len(entry.discover.Produces))
+		copy(cpy.Produces, entry.discover.Produces)
+	}
+	if entry.discover.ConfigSchema != nil {
+		cpy.ConfigSchema = make(map[string]any, len(entry.discover.ConfigSchema))
+		for k, v := range entry.discover.ConfigSchema {
+			cpy.ConfigSchema[k] = v
+		}
+	}
+	return &cpy
 }
 
 // PluginNames returns the names of all registered plugins.
