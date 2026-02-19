@@ -20,6 +20,35 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+func TestForgeFetch_UnsupportedScheme(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"ftp", "ftp://example.com/file.tar.gz"},
+		{"file", "file:///etc/passwd"},
+		{"gopher", "gopher://example.com/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), "output.txt")
+			err := ForgeFetch(context.Background(), tt.url, "abc123", dest)
+			if err == nil {
+				t.Fatal("expected error for unsupported scheme, got nil")
+			}
+
+			useErr, ok := err.(*UnsupportedSchemeError)
+			if !ok {
+				t.Fatalf("expected *UnsupportedSchemeError, got %T: %v", err, err)
+			}
+			if useErr.URL != tt.url {
+				t.Errorf("expected URL %q, got %q", tt.url, useErr.URL)
+			}
+		})
+	}
+}
+
 func TestForgeFetch_Success(t *testing.T) {
 	body := []byte("hello, world\n")
 	hash := sha256Hex(body)
