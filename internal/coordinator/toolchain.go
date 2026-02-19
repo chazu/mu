@@ -147,5 +147,9 @@ func (r *ToolchainRegistry) ArtifactsMap(name string) map[string]string {
 	if !ok {
 		return nil
 	}
-	return m.Artifacts
+	cp := make(map[string]string, len(m.Artifacts))
+	for k, v := range m.Artifacts {
+		cp[k] = v
+	}
+	return cp
 }
