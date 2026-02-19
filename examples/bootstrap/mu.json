@@ -1,0 +1,19 @@
+{
+  "plugins": [
+    {
+      "name": "bootstrap",
+      "command": ["bb", "../../plugins/bootstrap/plugin.bb"]
+    }
+  ],
+  "toolchains": [
+    {
+      "toolchain": "jq",
+      "plugin": "bootstrap",
+      "config": {
+        "version": "1.7.1",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64",
+        "sha256": "5942c9b0934e510ee61eb3e30273f1b3a1571cdf4c1f3d524a6156b9e1833a4a"
+      }
+    }
+  ]
+}

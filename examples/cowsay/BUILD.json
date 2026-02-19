@@ -1,0 +1,12 @@
+{
+  "targets": [
+    {
+      "target": "//hello:greeting",
+      "toolchain": "cowsay",
+      "sources": ["message.txt"],
+      "config": {
+        "output": "greeting.txt"
+      }
+    }
+  ]
+}

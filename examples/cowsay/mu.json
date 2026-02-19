@@ -1,0 +1,5 @@
+{
+  "plugins": [
+    {"name": "cowsay", "command": ["bb", "../../plugins/cowsay/plugin.bb"]}
+  ]
+}
