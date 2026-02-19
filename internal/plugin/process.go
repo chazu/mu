@@ -109,7 +109,9 @@ func (p *Process) send(ctx context.Context, req Request, resp any) error {
 
 	select {
 	case <-ctx.Done():
-		// Kill the process on timeout/cancel.
+		// Close stdin first so the child process sees EOF and can exit
+		// cleanly, then kill the process to ensure it doesn't linger.
+		p.stdin.Close()
 		if p.cmd.Process != nil {
 			p.cmd.Process.Kill()
 		}
