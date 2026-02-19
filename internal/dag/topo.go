@@ -26,12 +26,7 @@ func TopoSort(g *Graph) ([][]*Action, error) {
 	// Compute in-degree for each node.
 	inDegree := make(map[string]int, len(g.order))
 	for _, id := range g.order {
-		inDegree[id] += 0 // ensure every node has an entry
-		for _, dep := range g.deps[id] {
-			_ = dep // deps are edges from id -> dep (id depends on dep)
-		}
-	}
-	for _, id := range g.order {
+		// Ensure every node has an entry, then add its dependency count.
 		// Each dependency edge dep -> id means id has in-degree +1
 		// (id depends on dep, so dep must come before id).
 		inDegree[id] += len(g.deps[id])
