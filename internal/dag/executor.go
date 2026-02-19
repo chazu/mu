@@ -166,7 +166,10 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	cmd.Stderr = os.Stderr
 
 	err := cmd.Run()
-	exitCode := cmd.ProcessState.ExitCode()
+	exitCode := -1
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
 	if err != nil {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q failed: %w", a.ID, err)}
 	}
