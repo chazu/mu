@@ -12,12 +12,20 @@ import (
 	"github.com/chau/mu/internal/plugin"
 )
 
+// ToolchainBootstrapper bootstraps toolchains before the planning phase.
+// The bootstrap package provides the concrete implementation.
+type ToolchainBootstrapper interface {
+	Bootstrap(ctx context.Context, cfg *config.ProjectConfig) error
+}
+
 // Coordinator orchestrates the full mu build flow.
 type Coordinator struct {
-	ProjectRoot string
-	Config      *config.ProjectConfig
-	Store       cas.Store
-	Workers     int // 0 = runtime.NumCPU()
+	ProjectRoot       string
+	Config            *config.ProjectConfig
+	Store             cas.Store
+	ToolchainRegistry *ToolchainRegistry
+	Bootstrapper      ToolchainBootstrapper // optional; set to enable toolchain bootstrap
+	Workers           int                   // 0 = runtime.NumCPU()
 }
 
 // BuildResult summarises the outcome of a build.
@@ -45,6 +53,17 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 	}
 	defer mgr.Close()
 
+	// 1b. Bootstrap toolchains if any are declared.
+	registry := c.ToolchainRegistry
+	if registry == nil {
+		registry = NewToolchainRegistry(c.Store)
+	}
+	if len(c.Config.Toolchains) > 0 && c.Bootstrapper != nil {
+		if err := c.Bootstrapper.Bootstrap(ctx, c.Config); err != nil {
+			return nil, fmt.Errorf("coordinator: bootstrap: %w", err)
+		}
+	}
+
 	// 2. Resolve target graph (topological order, leaves first).
 	targets, err := c.resolveTargets(targetNames)
 	if err != nil {
@@ -71,7 +90,7 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 			})
 		}
 
-		plan, err := mgr.Plan(ctx, t.Toolchain, ti, deps, nil)
+		plan, err := mgr.Plan(ctx, t.Toolchain, ti, deps, registry.ArtifactsMap(t.Toolchain))
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: planning target %q: %w", t.Name, err)
 		}
