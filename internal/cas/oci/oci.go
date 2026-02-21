@@ -1,0 +1,274 @@
+// Package oci implements a content-addressable store backed by an OCI registry.
+//
+// Blobs map directly to OCI blobs. Action results are stored as OCI manifests
+// tagged by the action key hash, with each output as a layer descriptor and the
+// result metadata as the config blob. This means standard OCI tools (crane,
+// skopeo, etc.) can inspect the cache.
+package oci
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/chau/mu/internal/cas"
+	godigest "github.com/opencontainers/go-digest"
+	specs "github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/errdef"
+)
+
+const (
+	MediaTypeMuBlob   = "application/vnd.mu.blob.v1"
+	MediaTypeMuAction = "application/vnd.mu.action-result.v1+json"
+)
+
+// Registry abstracts the OCI registry operations needed by OCIStore.
+// Both remote.Repository and memory.Store from oras-go satisfy this interface.
+type Registry interface {
+	Push(ctx context.Context, expected ocispec.Descriptor, content io.Reader) error
+	Fetch(ctx context.Context, target ocispec.Descriptor) (io.ReadCloser, error)
+	Exists(ctx context.Context, target ocispec.Descriptor) (bool, error)
+	Delete(ctx context.Context, target ocispec.Descriptor) error
+	Tag(ctx context.Context, desc ocispec.Descriptor, reference string) error
+	Resolve(ctx context.Context, reference string) (ocispec.Descriptor, error)
+}
+
+// OCIStore is a CAS backend that stores blobs and action results in an OCI registry.
+type OCIStore struct {
+	repo Registry
+}
+
+// New creates an OCIStore backed by the given registry.
+func New(repo Registry) *OCIStore {
+	return &OCIStore{repo: repo}
+}
+
+// toOCIDigest converts a cas.Digest to an OCI digest.
+func toOCIDigest(d cas.Digest) godigest.Digest {
+	return godigest.NewDigestFromEncoded(godigest.Algorithm(d.Algorithm), d.Hash)
+}
+
+// fromOCIDigest converts an OCI digest to a cas.Digest.
+func fromOCIDigest(d godigest.Digest) cas.Digest {
+	return cas.Digest{
+		Algorithm: string(d.Algorithm()),
+		Hash:      d.Encoded(),
+	}
+}
+
+// Has reports whether the blob identified by dgst exists in the registry.
+func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
+	desc := ocispec.Descriptor{
+		MediaType: MediaTypeMuBlob,
+		Digest:    toOCIDigest(dgst),
+	}
+	ok, err := s.repo.Exists(ctx, desc)
+	if err != nil {
+		return false, fmt.Errorf("oci: check blob %s: %w", dgst, err)
+	}
+	return ok, nil
+}
+
+// Get fetches the blob identified by dgst from the registry.
+func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
+	desc := ocispec.Descriptor{
+		MediaType: MediaTypeMuBlob,
+		Digest:    toOCIDigest(dgst),
+	}
+	rc, err := s.repo.Fetch(ctx, desc)
+	if err != nil {
+		return nil, fmt.Errorf("oci: fetch blob %s: %w", dgst, err)
+	}
+	return rc, nil
+}
+
+// Put streams data from r, computing a SHA-256 digest, then pushes the blob
+// to the registry. OCI requires a content-length, so the data is buffered to
+// a temporary file first.
+func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
+	// Buffer to temp file to get size (OCI requires content-length).
+	tmp, err := os.CreateTemp("", "mu-oci-blob-*")
+	if err != nil {
+		return cas.Digest{}, fmt.Errorf("oci: create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	h := sha256.New()
+	size, err := io.Copy(io.MultiWriter(tmp, h), r)
+	if err != nil {
+		tmp.Close()
+		return cas.Digest{}, fmt.Errorf("oci: buffer blob: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return cas.Digest{}, fmt.Errorf("oci: close temp file: %w", err)
+	}
+
+	dgst := godigest.NewDigestFromEncoded(godigest.SHA256, hex.EncodeToString(h.Sum(nil)))
+
+	// Re-open for push.
+	f, err := os.Open(tmpName)
+	if err != nil {
+		return cas.Digest{}, fmt.Errorf("oci: reopen temp file: %w", err)
+	}
+	defer f.Close()
+
+	desc := ocispec.Descriptor{
+		MediaType: MediaTypeMuBlob,
+		Digest:    dgst,
+		Size:      size,
+	}
+
+	if err := s.repo.Push(ctx, desc, f); err != nil {
+		// Already-exists is fine for content-addressed dedup.
+		if !isAlreadyExists(err) {
+			return cas.Digest{}, fmt.Errorf("oci: push blob: %w", err)
+		}
+	}
+
+	return fromOCIDigest(dgst), nil
+}
+
+// Delete removes the blob identified by dgst from the registry.
+func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
+	desc := ocispec.Descriptor{
+		MediaType: MediaTypeMuBlob,
+		Digest:    toOCIDigest(dgst),
+	}
+	if err := s.repo.Delete(ctx, desc); err != nil {
+		return fmt.Errorf("oci: delete blob %s: %w", dgst, err)
+	}
+	return nil
+}
+
+// PutActionResult stores an action result as an OCI manifest tagged by the
+// action key hash. Each output artifact becomes a layer descriptor, and the
+// result metadata is stored as the config blob.
+func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, result *cas.ActionResult) error {
+	// Serialise the action result as the config blob.
+	configBytes, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("oci: marshal action result: %w", err)
+	}
+
+	configDigest := godigest.FromBytes(configBytes)
+	configDesc := ocispec.Descriptor{
+		MediaType: MediaTypeMuAction,
+		Digest:    configDigest,
+		Size:      int64(len(configBytes)),
+	}
+
+	// Push config blob.
+	if err := s.repo.Push(ctx, configDesc, bytes.NewReader(configBytes)); err != nil {
+		if !isAlreadyExists(err) {
+			return fmt.Errorf("oci: push action config: %w", err)
+		}
+	}
+
+	// Build layer descriptors from output artifacts.
+	layers := make([]ocispec.Descriptor, 0, len(result.Outputs))
+	for name, dgst := range result.Outputs {
+		layers = append(layers, ocispec.Descriptor{
+			MediaType: MediaTypeMuBlob,
+			Digest:    toOCIDigest(dgst),
+			Annotations: map[string]string{
+				"mu.output.name": name,
+			},
+		})
+	}
+
+	manifest := ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config:    configDesc,
+		Layers:    layers,
+	}
+
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("oci: marshal manifest: %w", err)
+	}
+
+	manifestDigest := godigest.FromBytes(manifestBytes)
+	manifestDesc := ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageManifest,
+		Digest:    manifestDigest,
+		Size:      int64(len(manifestBytes)),
+	}
+
+	// Push the manifest blob.
+	if err := s.repo.Push(ctx, manifestDesc, bytes.NewReader(manifestBytes)); err != nil {
+		if !isAlreadyExists(err) {
+			return fmt.Errorf("oci: push action manifest: %w", err)
+		}
+	}
+
+	// Tag the manifest with the action key for lookup.
+	tag := actionKeyToTag(key)
+	if err := s.repo.Tag(ctx, manifestDesc, tag); err != nil {
+		return fmt.Errorf("oci: tag action manifest: %w", err)
+	}
+
+	return nil
+}
+
+// GetActionResult retrieves an action result by resolving the tag derived from
+// the action key. Returns (nil, nil) on a cache miss.
+func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
+	tag := actionKeyToTag(key)
+
+	// Resolve the tag to get the manifest descriptor.
+	manifestDesc, err := s.repo.Resolve(ctx, tag)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil // cache miss
+		}
+		return nil, fmt.Errorf("oci: resolve action tag %s: %w", tag, err)
+	}
+
+	// Fetch the manifest.
+	manifestRC, err := s.repo.Fetch(ctx, manifestDesc)
+	if err != nil {
+		return nil, fmt.Errorf("oci: fetch action manifest: %w", err)
+	}
+	defer manifestRC.Close()
+
+	var manifest ocispec.Manifest
+	if err := json.NewDecoder(manifestRC).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("oci: decode action manifest: %w", err)
+	}
+
+	// Fetch the config to get the ActionResult.
+	configRC, err := s.repo.Fetch(ctx, manifest.Config)
+	if err != nil {
+		return nil, fmt.Errorf("oci: fetch action config: %w", err)
+	}
+	defer configRC.Close()
+
+	var result cas.ActionResult
+	if err := json.NewDecoder(configRC).Decode(&result); err != nil {
+		return nil, fmt.Errorf("oci: decode action result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// actionKeyToTag returns a deterministic tag for an action key.
+func actionKeyToTag(key cas.ActionKey) string {
+	return "action-" + key.Digest.Algorithm + "-" + key.Digest.Hash
+}
+
+func isAlreadyExists(err error) bool {
+	return errors.Is(err, errdef.ErrAlreadyExists)
+}
+
+func isNotFound(err error) bool {
+	return errors.Is(err, errdef.ErrNotFound)
+}
