@@ -13,6 +13,8 @@ func main() {
 	switch os.Args[1] {
 	case "build":
 		os.Exit(runBuild(os.Args[2:]))
+	case "bootstrap":
+		os.Exit(runBootstrap(os.Args[2:]))
 	case "version":
 		fmt.Println("mu v0.1.0")
 	default:
@@ -25,6 +27,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: mu <command> [arguments]
 
 Commands:
-  build    Build one or more targets
-  version  Print the mu version`)
+  bootstrap  Bootstrap toolchains (override with MU_BOOTSTRAP)
+  build      Build one or more targets
+  version    Print the mu version`)
 }
