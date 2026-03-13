@@ -1,0 +1,6 @@
+{
+  "name" : "jq",
+  "version" : "1.7.1",
+  "bin_dir" : "toolchains/jq/1.7.1/bin",
+  "sha256" : "0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a"
+}
