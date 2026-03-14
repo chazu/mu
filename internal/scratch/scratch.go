@@ -139,13 +139,17 @@ func verify(ctx context.Context, extractDir, name string) error {
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		binPath = filepath.Join(extractDir, name)
 	}
-	cmd := exec.CommandContext(ctx, binPath, "--version")
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s --version failed: %w", binPath, err)
+
+	// Try "version" (Go style) first, then "--version" (GNU style).
+	for _, arg := range []string{"version", "--version"} {
+		cmd := exec.CommandContext(ctx, binPath, arg)
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("%s: neither 'version' nor '--version' succeeded", binPath)
 }
 
 // extract dispatches to the appropriate extractor based on the archive file extension.
