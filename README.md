@@ -8,7 +8,6 @@ The name means "emptiness" in Japanese. The build system has no built-in semanti
 
 ```
                     ┌──────────────┐
-  BUILD.json ──────►│              │
   mu.json ─────────►│  Config      │──── validated config ────► Coordinator
                     │  Loader      │                            │
                     └──────────────┘                            │
@@ -21,13 +20,13 @@ The name means "emptiness" in Japanese. The build system has no built-in semanti
                              ┌────────────────────────────────┼────────────────┐
                              ▼                                ▼                ▼
                    ┌─────────────────┐            ┌───────────────┐   ┌────────────┐
-                   │  Plugin Manager │            │     CAS       │   │  Bootstrap │
-                   │  (stdin/stdout) │            │  (tiered)     │   │  Manager   │
-                   └────────┬────────┘            └───────┬───────┘   └────────────┘
-                            │                             │
-                   ┌────────┼────────┐           ┌────────┼────┐
-                   ▼        ▼        ▼           ▼             ▼
-                 go.bb  rust.bb  any.exe       disk         OCI reg
+                   │  Plugin Manager │            │     CAS       │   │  Scratch   │
+                   │  (stdin/stdout) │            │  (OCI store)  │   │  Builder   │
+                   └────────┬────────┘            └───────────────┘   └────────────┘
+                            │
+                   ┌────────┼────────┐
+                   ▼        ▼        ▼
+                 go.bb  rust.bb  any.exe
 ```
 
 mu coordinates. Plugins decide what to build and how.
@@ -37,13 +36,13 @@ mu coordinates. Plugins decide what to build and how.
 - **Artifacts** — content-addressed blobs stored by SHA-256 hash
 - **Actions** — hermetic transformations: input artifacts → output artifacts
 - **Plugins** — external executables that emit action subgraphs via NDJSON protocol
-- **Toolchains** — bootstrapped as content-addressed artifacts (download, verify, extract)
+- **Toolchains** — built from scratch as content-addressed artifacts (download, verify, extract)
 
 ### Design Principles
 
 - **Plugin protocol over built-in rules.** The LSP model applied to builds. Each toolchain is a plugin that emits action graphs; the build system is just the executor.
 - **Content-addressed everything.** Universal caching across all languages. Toolchain upgrades are hash changes. Remote cache works automatically.
-- **OCI as the cache layer.** Reuses infrastructure every org already operates. Auth, replication, GC, monitoring — all solved.
+- **OCI as the cache layer.** Same OCI layout locally and remotely. Reuses infrastructure every org already operates. Auth, replication, GC, monitoring — all solved.
 - **Minimal and composable.** mu is ~7,500 lines of Go. Plugins can be written in any language.
 
 ## Installation
@@ -64,43 +63,42 @@ Requires Go 1.25+.
 
 ## Quick Start
 
-**1. Create a build file** (`BUILD.json`):
+**1. Create `mu.json`:**
 
 ```json
 {
-  "targets": [
+  "toolchains": [
     {
-      "target": "//hello:greeting",
-      "toolchain": "cowsay",
-      "sources": ["message.txt"],
+      "toolchain": "bb",
+      "from": "scratch",
       "config": {
-        "output": "greeting.txt"
+        "version": "1.12.216",
+        "url": "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-macos-aarch64.tar.gz",
+        "sha256": "91499b3f430038f9b40e433215256a6e5392942780dca9984d493d2bcca7055d"
       }
     }
-  ]
-}
-```
-
-**2. Point to your plugin** (`mu.json`):
-
-```json
-{
+  ],
   "plugins": [
+    {"name": "go", "script": "plugins/go/plugin.bb"}
+  ],
+  "targets": [
     {
-      "name": "cowsay",
-      "command": ["bb", "plugins/cowsay/plugin.bb"]
+      "target": "//cmd/hello",
+      "toolchain": "go",
+      "sources": ["go.mod", "go.sum", "cmd/hello/main.go"],
+      "config": {"output": "hello", "pkg": "./cmd/hello"}
     }
   ]
 }
 ```
 
-**3. Build:**
+**2. Build:**
 
 ```bash
-mu build //hello:greeting
+mu build //cmd/hello
 ```
 
-See [`examples/`](examples/) for working examples including a cowsay transformer and a toolchain bootstrapper.
+See [`examples/`](examples/) for working examples including a Go build, a cowsay transformer, and a scratch toolchain build.
 
 ## Usage
 
@@ -108,27 +106,27 @@ See [`examples/`](examples/) for working examples including a cowsay transformer
 mu <command> [arguments]
 
 Commands:
-  bootstrap  Bootstrap toolchains (override with MU_BOOTSTRAP)
   build      Build one or more targets
+  scratch    Build toolchains from scratch (override with MU_SCRATCH)
   version    Print the mu version
 ```
 
-### `mu bootstrap`
+### `mu scratch`
 
 ```bash
-mu bootstrap
+mu scratch
 
 Flags:
   --no-cache    Skip cache reads, always re-fetch
   --verbose     Show plugin I/O
 ```
 
-Bootstraps all toolchains declared in `mu.json`. Downloads, extracts, verifies, and registers each toolchain as content-addressed artifacts.
+Builds all toolchains declared in `mu.json` from scratch. Downloads, extracts, verifies, and registers each toolchain as content-addressed artifacts.
 
-Set `MU_BOOTSTRAP` to an executable path to use an external bootstrap plugin instead of the built-in logic:
+Set `MU_SCRATCH` to an executable path to use an external scratch builder instead of the built-in logic:
 
 ```bash
-MU_BOOTSTRAP=plugins/bootstrap/plugin.bb mu bootstrap
+MU_SCRATCH=plugins/scratch/plugin.bb mu scratch
 ```
 
 ### `mu build`
@@ -179,11 +177,11 @@ The coordinator resolves file paths to content digests, merges subgraphs from al
 
 ## Caching
 
-All artifacts are stored by their SHA-256 content hash.
+All artifacts are stored by their SHA-256 content hash in OCI layout (same format locally and remotely).
 
-**Local cache:** `~/.mu/cache/blobs/sha256/<prefix>/<hash>`
+**Local cache:** `~/.mu/cache/` (OCI layout directory)
 
-**OCI remote cache:** Push/pull blobs and action results to any OCI-compliant registry. Supports read-repair (promote from remote to local on access) and write-through.
+**OCI remote cache:** Push/pull blobs and action results to any OCI-compliant registry.
 
 An action's cache key is derived from:
 - The command
@@ -192,37 +190,43 @@ An action's cache key is derived from:
 
 If the key matches, the action is skipped and outputs are restored from cache.
 
-## Toolchain Bootstrap
+## Toolchains
 
-mu manages toolchain downloads as part of the build:
+Toolchains are built from scratch — mu downloads, verifies, extracts, and registers them as content-addressed artifacts:
 
 ```json
 {
-  "target": "//tools:jq",
-  "toolchain": "bootstrap",
-  "config": {
-    "version": "1.7.1",
-    "url": "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64",
-    "sha256": "0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a"
-  }
+  "toolchains": [
+    {
+      "toolchain": "go",
+      "from": "scratch",
+      "config": {
+        "version": "1.25.7",
+        "url": "https://go.dev/dl/go1.25.7.linux-amd64.tar.gz",
+        "sha256": "abc123...",
+        "strip_prefix": "go"
+      }
+    }
+  ]
 }
 ```
 
-Downloads are verified against the declared SHA-256 hash. Extracted binaries are registered in a toolchain registry and stored as content-addressed artifacts. Downstream targets reference bootstrapped toolchains automatically.
+Downloads are verified against the declared SHA-256 hash. Extracted binaries are registered in a toolchain registry and stored as content-addressed artifacts. Downstream plugins receive toolchain artifacts automatically in plan requests.
 
 ## Config Formats
 
-mu natively reads JSON (`BUILD.json`, `mu.json`). For other formats (CUE, TOML, YAML), declare an external preprocessor:
+mu natively reads JSON (`mu.json`). For other formats (CUE, TOML, YAML), declare an external preprocessor:
 
 ```json
 {
   "preprocessor": {
+    "extension": "star",
     "command": ["cue", "export", "--out", "json"]
   }
 }
 ```
 
-mu pipes the file through the preprocessor and consumes the JSON output.
+mu discovers `mu.<ext>` files in subdirectories, pipes them through the preprocessor, and consumes the JSON output.
 
 ## Project Structure
 
@@ -230,15 +234,15 @@ mu pipes the file through the preprocessor and consumes the JSON output.
 cmd/mu/              CLI entry point
 internal/
 ├── cas/             Content-addressed store interface
-│   ├── disk/        Local disk backend
-│   └── oci/         OCI registry backend
+│   └── oci/         OCI layout backend (local + remote)
 ├── dag/             DAG construction, topological sort, parallel executor
 ├── plugin/          Plugin lifecycle, NDJSON protocol, process management
 ├── config/          Config loading, validation, preprocessor dispatch
 ├── coordinator/     Build orchestration pipeline
-├── bootstrap/       Toolchain download, verify, extract, register
+├── scratch/         Toolchain download, verify, extract, register
+├── sandbox/         Hermetic execution environments
 └── builtin/         Built-in fetch command with SHA-256 verification
-plugins/             Example Babashka plugins
+plugins/             Babashka plugins (go, scratch)
 examples/            Example projects
 ```
 
@@ -246,14 +250,16 @@ examples/            Example projects
 
 The build coordinator is functional end-to-end:
 
-- [x] Content-addressed store with local disk backend
-- [x] OCI registry cache backend (via oras-go)
+- [x] Content-addressed store with OCI layout (local + remote)
 - [x] DAG construction with topological sort and cycle detection
 - [x] Parallel executor with configurable worker pool
+- [x] Sandbox execution environments (copy sandbox)
 - [x] Plugin lifecycle management (discover, plan)
+- [x] Script-based plugins via bootstrapped bb toolchain
 - [x] NDJSON wire protocol
 - [x] Config loading with external preprocessor support
-- [x] Toolchain bootstrap (download, verify, extract, register)
+- [x] Toolchain scratch builds (download, verify, extract, register)
+- [x] Go toolchain plugin (build, cross-compile, tags, ldflags, race)
 - [x] `mu build` command with cache integration
 - [x] Cross-toolchain artifact composition
 
@@ -264,12 +270,12 @@ The build coordinator is functional end-to-end:
 - [ ] **Service manager** — Docker and host-native runtimes with healthchecks and lifecycle management
 - [ ] **File watching & triggers** — Debounced rebuilds on source changes, service restarts
 - [ ] **`mu dev` command** — Compose services + triggers into a unified dev experience
-- [ ] **Go toolchain plugin** — First-class Go support via GOCACHEPROG bridge to mu's CAS
+- [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS
 - [ ] **Tiered cache composition** — Chain local + OCI backends with configurable policies
 
 ### Medium-term
 
-- [ ] **Hermetic sandboxing** — Enforce declared inputs/outputs via seccomp, landlock, or sandbox-exec (currently honor system)
+- [ ] **OS-level sandboxing** — Linux: user namespaces + overlayfs. macOS: sandbox-exec profiles
 - [ ] **Plugin distribution** — Install/update third-party plugins via OCI artifacts or git
 - [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
 - [ ] **`mu clean` / `mu verify`** — Cache management and integrity checking
@@ -277,7 +283,6 @@ The build coordinator is functional end-to-end:
 ### Long-term
 
 - [ ] **Remote execution** — Distribute actions to worker pools
-- [ ] **Build file discovery** — Walk directory trees for multi-package monorepo support
 - [ ] **Protocol extensions** — Streaming progress, async planning, format negotiation
 
 ## Writing a Plugin
