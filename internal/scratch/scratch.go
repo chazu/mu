@@ -1,6 +1,6 @@
-// Package bootstrap orchestrates toolchain fetching, extraction, verification,
-// and registration for mu builds.
-package bootstrap
+// Package scratch orchestrates toolchain building from the scratch environment,
+// including fetching, extraction, verification, and registration for mu builds.
+package scratch
 
 import (
 	"archive/tar"
@@ -22,30 +22,30 @@ import (
 	"github.com/chau/mu/internal/coordinator"
 )
 
-// Bootstrapper fetches, extracts, verifies, and registers toolchains.
-type Bootstrapper struct {
+// Builder fetches, extracts, verifies, and registers toolchains.
+type Builder struct {
 	Store    cas.Store
 	Registry *coordinator.ToolchainRegistry
 	CacheDir string // directory for downloaded archives and extracted trees
 }
 
-// Bootstrap processes all toolchains in cfg. For each toolchain it checks the
-// CAS for an existing manifest (cache hit → skip). On cache miss it downloads,
+// Build processes all toolchains in cfg. For each toolchain it checks the
+// CAS for an existing manifest (cache hit -> skip). On cache miss it downloads,
 // extracts, verifies, and registers the toolchain.
-func (b *Bootstrapper) Bootstrap(ctx context.Context, cfg *config.ProjectConfig) error {
+func (b *Builder) Build(ctx context.Context, cfg *config.ProjectConfig) error {
 	for _, tc := range cfg.Toolchains {
-		if err := b.bootstrapOne(ctx, tc); err != nil {
-			return fmt.Errorf("bootstrap %s: %w", tc.Name, err)
+		if err := b.buildOne(ctx, tc); err != nil {
+			return fmt.Errorf("scratch build %s: %w", tc.Name, err)
 		}
 	}
 	return nil
 }
 
-func (b *Bootstrapper) bootstrapOne(ctx context.Context, tc config.Toolchain) error {
+func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	name := tc.Name
 	version := tc.Config.Version
 
-	// Check CAS for existing manifest (cache hit → skip).
+	// Check CAS for existing manifest (cache hit -> skip).
 	existing, err := b.Registry.Lookup(ctx, name, version)
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
@@ -99,8 +99,8 @@ func (b *Bootstrapper) bootstrapOne(ctx context.Context, tc config.Toolchain) er
 }
 
 // storeArtifacts walks dir and stores each regular file in CAS, returning a
-// map of relative path → CAS digest string.
-func (b *Bootstrapper) storeArtifacts(ctx context.Context, dir string) (map[string]string, error) {
+// map of relative path -> CAS digest string.
+func (b *Builder) storeArtifacts(ctx context.Context, dir string) (map[string]string, error) {
 	artifacts := make(map[string]string)
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -132,9 +132,13 @@ func (b *Bootstrapper) storeArtifacts(ctx context.Context, dir string) (map[stri
 	return artifacts, err
 }
 
-// verify runs "<extractDir>/bin/<name> --version" and checks for a zero exit code.
+// verify runs "<name> --version" and checks for a zero exit code.
+// It looks for the binary at bin/<name> first, then <name> at the root.
 func verify(ctx context.Context, extractDir, name string) error {
 	binPath := filepath.Join(extractDir, "bin", name)
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		binPath = filepath.Join(extractDir, name)
+	}
 	cmd := exec.CommandContext(ctx, binPath, "--version")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

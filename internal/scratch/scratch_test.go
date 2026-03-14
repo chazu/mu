@@ -1,4 +1,4 @@
-package bootstrap
+package scratch
 
 import (
 	"archive/tar"
@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chau/mu/internal/cas/disk"
+	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/coordinator"
 )
@@ -103,23 +103,23 @@ func fakeVerifyBinary(t *testing.T, extractDir, name string) {
 	}
 }
 
-func newTestBootstrapper(t *testing.T) (*Bootstrapper, string) {
+func newTestBuilder(t *testing.T) (*Builder, string) {
 	t.Helper()
 	dir := t.TempDir()
 	casDir := filepath.Join(dir, "cas")
-	store, err := disk.New(casDir)
+	store, err := oci.NewLocal(casDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	registry := coordinator.NewToolchainRegistry(store)
-	return &Bootstrapper{
+	return &Builder{
 		Store:    store,
 		Registry: registry,
 		CacheDir: filepath.Join(dir, "cache"),
 	}, dir
 }
 
-func TestBootstrap_FetchExtractTarGzWithStripPrefix(t *testing.T) {
+func TestBuild_FetchExtractTarGzWithStripPrefix(t *testing.T) {
 	// Create a tar.gz with a top-level directory to strip.
 	archive := makeTarGz(t, map[string]string{
 		"mygo-1.0/bin/go":       "#!/bin/sh\necho fake 1.0.0\n",
@@ -132,12 +132,12 @@ func TestBootstrap_FetchExtractTarGzWithStripPrefix(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBootstrapper(t)
+	b, dir := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "go",
-			Plugin: "go-plugin",
+			Name: "go",
+			From: "go-plugin",
 			Config: config.ToolchainConfig{
 				Version:     "1.0",
 				URL:         srv.URL + "/go-1.0.tar.gz",
@@ -153,9 +153,9 @@ func TestBootstrap_FetchExtractTarGzWithStripPrefix(t *testing.T) {
 	extractDir := filepath.Join(dir, "cache", "extract", "go-1.0")
 	fakeVerifyBinary(t, extractDir, "go")
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	// Verify manifest was registered.
@@ -177,7 +177,7 @@ func TestBootstrap_FetchExtractTarGzWithStripPrefix(t *testing.T) {
 	}
 }
 
-func TestBootstrap_ZipExtraction(t *testing.T) {
+func TestBuild_ZipExtraction(t *testing.T) {
 	archive := makeZip(t, map[string]string{
 		"bin/mytool":  "#!/bin/sh\necho mytool 2.0\n",
 		"lib/lib.txt": "library",
@@ -189,12 +189,12 @@ func TestBootstrap_ZipExtraction(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBootstrapper(t)
+	b, dir := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "mytool",
-			Plugin: "mytool-plugin",
+			Name: "mytool",
+			From: "mytool-plugin",
 			Config: config.ToolchainConfig{
 				Version: "2.0",
 				URL:     srv.URL + "/mytool-2.0.zip",
@@ -207,9 +207,9 @@ func TestBootstrap_ZipExtraction(t *testing.T) {
 	extractDir := filepath.Join(dir, "cache", "extract", "mytool-2.0")
 	fakeVerifyBinary(t, extractDir, "mytool")
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	manifest, err := b.Registry.Lookup(context.Background(), "mytool", "2.0")
@@ -224,7 +224,7 @@ func TestBootstrap_ZipExtraction(t *testing.T) {
 	}
 }
 
-func TestBootstrap_SHA256VerificationFail(t *testing.T) {
+func TestBuild_SHA256VerificationFail(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{
 		"bin/tool": "content",
 	})
@@ -235,12 +235,12 @@ func TestBootstrap_SHA256VerificationFail(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, _ := newTestBootstrapper(t)
+	b, _ := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "tool",
-			Plugin: "plugin",
+			Name: "tool",
+			From: "plugin",
 			Config: config.ToolchainConfig{
 				Version: "1.0",
 				URL:     srv.URL + "/tool.tar.gz",
@@ -249,7 +249,7 @@ func TestBootstrap_SHA256VerificationFail(t *testing.T) {
 		}},
 	}
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected error for SHA256 mismatch")
 	}
@@ -258,7 +258,7 @@ func TestBootstrap_SHA256VerificationFail(t *testing.T) {
 	}
 }
 
-func TestBootstrap_CacheHitSkipsFetch(t *testing.T) {
+func TestBuild_CacheHitSkipsFetch(t *testing.T) {
 	var fetchCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetchCount.Add(1)
@@ -266,7 +266,7 @@ func TestBootstrap_CacheHitSkipsFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, _ := newTestBootstrapper(t)
+	b, _ := newTestBuilder(t)
 
 	// Pre-register a manifest so it's a cache hit.
 	manifest := &coordinator.ToolchainManifest{
@@ -282,8 +282,8 @@ func TestBootstrap_CacheHitSkipsFetch(t *testing.T) {
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "cached",
-			Plugin: "plugin",
+			Name: "cached",
+			From: "plugin",
 			Config: config.ToolchainConfig{
 				Version: "3.0",
 				URL:     srv.URL + "/cached.tar.gz",
@@ -292,9 +292,9 @@ func TestBootstrap_CacheHitSkipsFetch(t *testing.T) {
 		}},
 	}
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	if c := fetchCount.Load(); c != 0 {
@@ -302,7 +302,7 @@ func TestBootstrap_CacheHitSkipsFetch(t *testing.T) {
 	}
 }
 
-func TestBootstrap_NetworkRetry(t *testing.T) {
+func TestBuild_NetworkRetry(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{
 		"bin/retrytool": "#!/bin/sh\necho retrytool 1.0\n",
 	})
@@ -319,12 +319,12 @@ func TestBootstrap_NetworkRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBootstrapper(t)
+	b, dir := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "retrytool",
-			Plugin: "plugin",
+			Name: "retrytool",
+			From: "plugin",
 			Config: config.ToolchainConfig{
 				Version: "1.0",
 				URL:     srv.URL + "/retrytool.tar.gz",
@@ -336,9 +336,9 @@ func TestBootstrap_NetworkRetry(t *testing.T) {
 	extractDir := filepath.Join(dir, "cache", "extract", "retrytool-1.0")
 	fakeVerifyBinary(t, extractDir, "retrytool")
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	if c := count.Load(); c < 2 {
@@ -346,7 +346,7 @@ func TestBootstrap_NetworkRetry(t *testing.T) {
 	}
 }
 
-func TestBootstrap_VersionChangeTriggersFetch(t *testing.T) {
+func TestBuild_VersionChangeTriggersFetch(t *testing.T) {
 	archiveV1 := makeTarGz(t, map[string]string{
 		"bin/tool": "#!/bin/sh\necho v1\n",
 	})
@@ -355,7 +355,7 @@ func TestBootstrap_VersionChangeTriggersFetch(t *testing.T) {
 		"lib/new.so": "new-in-v2",
 	})
 
-	b, dir := newTestBootstrapper(t)
+	b, dir := newTestBuilder(t)
 
 	// Pre-register v1 manifest.
 	v1Manifest := &coordinator.ToolchainManifest{
@@ -380,10 +380,10 @@ func TestBootstrap_VersionChangeTriggersFetch(t *testing.T) {
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "tool",
-			Plugin: "plugin",
+			Name: "tool",
+			From: "plugin",
 			Config: config.ToolchainConfig{
-				Version: "2.0", // different version → should re-fetch
+				Version: "2.0", // different version -> should re-fetch
 				URL:     srv.URL + "/tool-2.0.tar.gz",
 				SHA256:  hashV2,
 			},
@@ -393,9 +393,9 @@ func TestBootstrap_VersionChangeTriggersFetch(t *testing.T) {
 	extractDir := filepath.Join(dir, "cache", "extract", "tool-2.0")
 	fakeVerifyBinary(t, extractDir, "tool")
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	if c := fetchCount.Load(); c == 0 {
@@ -416,7 +416,7 @@ func TestBootstrap_VersionChangeTriggersFetch(t *testing.T) {
 	_ = archiveV1 // used for symmetry; v1 was pre-registered, not fetched
 }
 
-func TestBootstrap_VerifyFailure(t *testing.T) {
+func TestBuild_VerifyFailure(t *testing.T) {
 	// Archive where the "binary" is not executable / doesn't work.
 	archive := makeTarGz(t, map[string]string{
 		"bin/badtool": "this is not a real binary",
@@ -428,12 +428,12 @@ func TestBootstrap_VerifyFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, _ := newTestBootstrapper(t)
+	b, _ := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "badtool",
-			Plugin: "plugin",
+			Name: "badtool",
+			From: "plugin",
 			Config: config.ToolchainConfig{
 				Version: "1.0",
 				URL:     srv.URL + "/badtool.tar.gz",
@@ -442,8 +442,8 @@ func TestBootstrap_VerifyFailure(t *testing.T) {
 		}},
 	}
 
-	// Don't create a fake binary — let it fail verification.
-	err := b.Bootstrap(context.Background(), cfg)
+	// Don't create a fake binary -- let it fail verification.
+	err := b.Build(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected verification error")
 	}
@@ -452,7 +452,7 @@ func TestBootstrap_VerifyFailure(t *testing.T) {
 	}
 }
 
-func TestBootstrap_ManifestPersistsToCAS(t *testing.T) {
+func TestBuild_ManifestPersistsToCAS(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{
 		"bin/persist": "#!/bin/sh\necho persist 1.0\n",
 		"data.txt":   "some data",
@@ -464,12 +464,12 @@ func TestBootstrap_ManifestPersistsToCAS(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBootstrapper(t)
+	b, dir := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
-			Name:   "persist",
-			Plugin: "plugin",
+			Name: "persist",
+			From: "plugin",
 			Config: config.ToolchainConfig{
 				Version: "1.0",
 				URL:     srv.URL + "/persist.tar.gz",
@@ -481,9 +481,9 @@ func TestBootstrap_ManifestPersistsToCAS(t *testing.T) {
 	extractDir := filepath.Join(dir, "cache", "extract", "persist-1.0")
 	fakeVerifyBinary(t, extractDir, "persist")
 
-	err := b.Bootstrap(context.Background(), cfg)
+	err := b.Build(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	// Create a fresh registry backed by the same CAS to confirm persistence.

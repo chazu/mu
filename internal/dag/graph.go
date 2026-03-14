@@ -17,6 +17,15 @@ type Action struct {
 	Env       map[string]string
 	Network   bool   // allow network access (honor system in v1)
 	WorkDir   string // execution working directory
+
+	// Toolchain is the set of artifacts (relative path → CAS digest) that
+	// constitute the hermetic build environment for this action. When set,
+	// the executor unpacks these into a sandbox before running the command.
+	Toolchain map[string]cas.Digest
+
+	// Sources lists relative file paths (from WorkDir) to copy into the
+	// sandbox's working directory. Used only when Toolchain is set.
+	Sources []string
 }
 
 // Graph is an adjacency-list representation of a build DAG.

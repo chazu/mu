@@ -1,5 +1,15 @@
 {
   "plugins": [
     {"name": "cowsay", "command": ["bb", "../../plugins/cowsay/plugin.bb"]}
+  ],
+  "targets": [
+    {
+      "target": "//hello:greeting",
+      "toolchain": "cowsay",
+      "sources": ["message.txt"],
+      "config": {
+        "output": "greeting.txt"
+      }
+    }
   ]
 }

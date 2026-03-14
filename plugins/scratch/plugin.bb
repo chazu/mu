@@ -3,7 +3,7 @@
 (require '[cheshire.core :as json])
 
 (defn discover-response []
-  {"name"             "bootstrap"
+  {"name"             "scratch"
    "version"          "0.1.0"
    "protocol_version" 1
    "consumes"         []

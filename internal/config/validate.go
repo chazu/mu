@@ -77,8 +77,8 @@ func Validate(cfg *ProjectConfig) error {
 			seenToolchains[tc.Name] = true
 		}
 
-		if tc.Plugin == "" {
-			errs = append(errs, fmt.Sprintf("%s: missing required field \"plugin\"", label))
+		if tc.From == "" {
+			errs = append(errs, fmt.Sprintf("%s: missing required field \"from\"", label))
 		}
 	}
 
@@ -96,8 +96,13 @@ func Validate(cfg *ProjectConfig) error {
 			seenPlugins[p.Name] = true
 		}
 
-		if len(p.Command) == 0 {
-			errs = append(errs, fmt.Sprintf("%s: missing required field \"command\"", label))
+		hasCommand := len(p.Command) > 0
+		hasScript := p.Script != ""
+		if !hasCommand && !hasScript {
+			errs = append(errs, fmt.Sprintf("%s: must set either \"command\" or \"script\"", label))
+		}
+		if hasCommand && hasScript {
+			errs = append(errs, fmt.Sprintf("%s: cannot set both \"command\" and \"script\"", label))
 		}
 	}
 

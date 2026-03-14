@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/chau/mu/internal/cas"
 )
 
-// ToolchainManifest records the artifacts produced by bootstrapping a toolchain.
+// ToolchainManifest records the artifacts produced by building from scratch a toolchain.
 type ToolchainManifest struct {
 	Name      string            `json:"name"`      // e.g. "go"
 	Version   string            `json:"version"`   // e.g. "1.25.7"
@@ -135,6 +137,61 @@ func (r *ToolchainRegistry) Get(name string) *ToolchainManifest {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.manifests[name]
+}
+
+// ExtractBinary extracts a single artifact from CAS to a file on disk and returns
+// the path. The file is written to baseDir/<name>/<artifact> with executable
+// permissions. This is used to get a real filesystem path for tools that need to
+// be invoked directly (e.g. bb for running plugin scripts).
+func (r *ToolchainRegistry) ExtractBinary(ctx context.Context, name, artifact, baseDir string) (string, error) {
+	r.mu.RLock()
+	m, ok := r.manifests[name]
+	r.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("toolchain %q not registered", name)
+	}
+
+	digestStr, ok := m.Artifacts[artifact]
+	if !ok {
+		return "", fmt.Errorf("toolchain %q has no artifact %q", name, artifact)
+	}
+
+	dgst, err := cas.ParseDigest(digestStr)
+	if err != nil {
+		return "", fmt.Errorf("parse digest for %s/%s: %w", name, artifact, err)
+	}
+
+	destDir := filepath.Join(baseDir, name)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", fmt.Errorf("create dir %s: %w", destDir, err)
+	}
+
+	destPath := filepath.Join(destDir, filepath.Base(artifact))
+
+	// Skip if already extracted and correct size.
+	if _, err := os.Stat(destPath); err == nil {
+		return destPath, nil
+	}
+
+	rc, err := r.store.Get(ctx, dgst)
+	if err != nil {
+		return "", fmt.Errorf("get blob %s: %w", dgst, err)
+	}
+	defer rc.Close()
+
+	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+
+	return destPath, nil
 }
 
 // ArtifactsMap returns the artifacts map for the named toolchain, or nil if

@@ -33,10 +33,10 @@ func FindProjectRoot(startDir string) (string, error) {
 }
 
 // Load reads mu.json from projectRoot and then discovers and merges any
-// BUILD files found recursively under projectRoot. When a preprocessor is
-// declared in mu.json, Load looks for BUILD.<ext> files (using the
+// mu.json files found recursively in subdirectories. When a preprocessor is
+// declared in the root mu.json, Load looks for mu.<ext> files (using the
 // preprocessor's extension) and pipes them through the external command.
-// Otherwise it falls back to BUILD.json.
+// Otherwise it falls back to mu.json.
 func Load(projectRoot string) (*ProjectConfig, error) {
 	rootFile := filepath.Join(projectRoot, "mu.json")
 	cfg, err := loadFile(rootFile)
@@ -44,14 +44,14 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		return nil, fmt.Errorf("loading %s: %w", rootFile, err)
 	}
 
-	// Determine which BUILD filename to look for and how to load it.
-	buildFileName := "BUILD.json"
+	// Determine which filename to look for in subdirectories and how to load it.
+	subFileName := "mu.json"
 	usePP := cfg.Preprocessor != nil && cfg.Preprocessor.Extension != "" && len(cfg.Preprocessor.Command) > 0
 	if usePP {
-		buildFileName = "BUILD." + cfg.Preprocessor.Extension
+		subFileName = "mu." + cfg.Preprocessor.Extension
 	}
 
-	// Walk the tree looking for BUILD files and merge each one.
+	// Walk the tree looking for mu.json files in subdirectories and merge each one.
 	// WalkDir (unlike Walk) does not follow symlinks, preventing infinite
 	// loops from cyclic symlinks and config injection from outside the
 	// project root.
@@ -66,7 +66,12 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if d.Name() != buildFileName {
+		if d.Name() != subFileName {
+			return nil
+		}
+
+		// Skip the root mu.json — it was already loaded above.
+		if path == rootFile {
 			return nil
 		}
 
@@ -80,7 +85,7 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 			return fmt.Errorf("loading %s: %w", path, err)
 		}
 
-		// Compute the package path relative to project root. A BUILD file
+		// Compute the package path relative to project root. A mu.json file
 		// sitting at projectRoot/foo/bar/ produces the prefix "//foo/bar".
 		relDir, err := filepath.Rel(projectRoot, filepath.Dir(path))
 		if err != nil {

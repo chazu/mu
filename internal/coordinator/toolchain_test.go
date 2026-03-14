@@ -4,14 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chau/mu/internal/cas/disk"
+	"github.com/chau/mu/internal/cas"
+	"github.com/chau/mu/internal/cas/oci"
 )
 
-func newTestStore(t *testing.T) *disk.DiskStore {
+func newTestStore(t *testing.T) cas.Store {
 	t.Helper()
-	s, err := disk.New(t.TempDir())
+	s, err := oci.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("disk.New: %v", err)
+		t.Fatalf("oci.NewLocal: %v", err)
 	}
 	return s
 }

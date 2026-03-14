@@ -74,7 +74,7 @@ func TestLoad_BasicMuJSON(t *testing.T) {
 	}
 }
 
-func TestLoad_MergeBUILDJSON(t *testing.T) {
+func TestLoad_MergeSubdirMuJSON(t *testing.T) {
 	root := t.TempDir()
 
 	// Root mu.json with one target.
@@ -84,12 +84,12 @@ func TestLoad_MergeBUILDJSON(t *testing.T) {
 		},
 	})
 
-	// BUILD.json in a subdirectory adds another target.
+	// mu.json in a subdirectory adds another target.
 	sub := filepath.Join(root, "pkg", "web")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
 		Targets: []Target{
 			{Name: "server", Toolchain: "go", Sources: []string{"*.go"}},
 		},
@@ -103,7 +103,7 @@ func TestLoad_MergeBUILDJSON(t *testing.T) {
 		t.Fatalf("expected 2 targets, got %d", len(cfg.Targets))
 	}
 
-	// The BUILD.json target should have been prefixed.
+	// The subdirectory mu.json target should have been prefixed.
 	var found bool
 	for _, tgt := range cfg.Targets {
 		if tgt.Name == "//pkg/web/server" {
@@ -119,7 +119,7 @@ func TestLoad_MergeBUILDJSON(t *testing.T) {
 	}
 }
 
-func TestLoad_MergeBUILDJSON_Services(t *testing.T) {
+func TestLoad_MergeSubdirMuJSON_Services(t *testing.T) {
 	root := t.TempDir()
 	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
 
@@ -127,7 +127,7 @@ func TestLoad_MergeBUILDJSON_Services(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
 		Services: []Service{
 			{Name: "db", Runtime: "docker", Config: ServiceConfig{Image: "postgres:16"}},
 		},
@@ -145,7 +145,7 @@ func TestLoad_MergeBUILDJSON_Services(t *testing.T) {
 	}
 }
 
-func TestLoad_MultipleBUILDJSON(t *testing.T) {
+func TestLoad_MultipleSubdirMuJSON(t *testing.T) {
 	root := t.TempDir()
 	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
 
@@ -154,7 +154,7 @@ func TestLoad_MultipleBUILDJSON(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		writeJSON(t, filepath.Join(dir, "BUILD.json"), ProjectConfig{
+		writeJSON(t, filepath.Join(dir, "mu.json"), ProjectConfig{
 			Targets: []Target{
 				{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
 			},
@@ -178,7 +178,7 @@ func TestLoad_AlreadyPrefixedTarget(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
 		Targets: []Target{
 			{Name: "//explicit/name", Toolchain: "go", Sources: []string{"*.go"}},
 		},
@@ -197,18 +197,18 @@ func TestLoad_SkipsSymlinks(t *testing.T) {
 	root := t.TempDir()
 	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
 
-	// Create a real subdirectory with a BUILD.json.
+	// Create a real subdirectory with a mu.json.
 	real := filepath.Join(root, "real")
 	if err := os.MkdirAll(real, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(real, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(real, "mu.json"), ProjectConfig{
 		Targets: []Target{
 			{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
 		},
 	})
 
-	// Create a symlinked directory pointing back to real — should be skipped.
+	// Create a symlinked directory pointing back to real -- should be skipped.
 	symDir := filepath.Join(root, "linked")
 	if err := os.Symlink(real, symDir); err != nil {
 		t.Skipf("symlinks not supported: %v", err)
@@ -228,20 +228,20 @@ func TestLoad_SkipsSymlinkedFile(t *testing.T) {
 	root := t.TempDir()
 	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
 
-	// Create a BUILD.json outside the project tree.
+	// Create a mu.json outside the project tree.
 	outside := t.TempDir()
-	writeJSON(t, filepath.Join(outside, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(outside, "mu.json"), ProjectConfig{
 		Targets: []Target{
 			{Name: "injected", Toolchain: "go", Sources: []string{"*.go"}},
 		},
 	})
 
-	// Symlink to the outside BUILD.json inside the project — should be skipped.
+	// Symlink to the outside mu.json inside the project -- should be skipped.
 	sub := filepath.Join(root, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(outside, "BUILD.json"), filepath.Join(sub, "BUILD.json")); err != nil {
+	if err := os.Symlink(filepath.Join(outside, "mu.json"), filepath.Join(sub, "mu.json")); err != nil {
 		t.Skipf("symlinks not supported: %v", err)
 	}
 

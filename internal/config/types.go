@@ -1,7 +1,6 @@
 package config
 
-// ProjectConfig is the top-level configuration loaded from mu.json and
-// merged with any BUILD.json files discovered in the project tree.
+// ProjectConfig is the top-level configuration loaded from mu.json.
 type ProjectConfig struct {
 	Targets      []Target      `json:"targets,omitempty"`
 	Toolchains   []Toolchain   `json:"toolchains,omitempty"`
@@ -62,10 +61,10 @@ type ThenSpec struct {
 	Restart []string `json:"restart,omitempty"`
 }
 
-// Toolchain describes a build toolchain and its plugin.
+// Toolchain describes a build toolchain and its base environment.
 type Toolchain struct {
 	Name   string          `json:"toolchain"`
-	Plugin string          `json:"plugin"`
+	From   string          `json:"from"`
 	Config ToolchainConfig `json:"config"`
 }
 
@@ -78,9 +77,13 @@ type ToolchainConfig struct {
 }
 
 // PluginDef defines an external plugin and how to invoke it.
+// Either Command or Script must be set, but not both.
+//   - Command: a direct executable command (e.g. ["./my-plugin"])
+//   - Script:  a .bb script path, executed via the bb toolchain
 type PluginDef struct {
 	Name    string   `json:"name"`
-	Command []string `json:"command"`
+	Command []string `json:"command,omitempty"`
+	Script  string   `json:"script,omitempty"`
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON

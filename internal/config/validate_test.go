@@ -147,7 +147,7 @@ func TestValidate_MultipleErrors(t *testing.T) {
 func TestValidate_MissingToolchainName(t *testing.T) {
 	cfg := &ProjectConfig{
 		Toolchains: []Toolchain{
-			{Name: "", Plugin: "go-plugin"},
+			{Name: "", From: "go-plugin"},
 		},
 	}
 	err := Validate(cfg)
@@ -159,17 +159,17 @@ func TestValidate_MissingToolchainName(t *testing.T) {
 	}
 }
 
-func TestValidate_MissingToolchainPlugin(t *testing.T) {
+func TestValidate_MissingToolchainFrom(t *testing.T) {
 	cfg := &ProjectConfig{
 		Toolchains: []Toolchain{
-			{Name: "go", Plugin: ""},
+			{Name: "go", From: ""},
 		},
 	}
 	err := Validate(cfg)
 	if err == nil {
-		t.Fatal("expected error for missing toolchain plugin")
+		t.Fatal("expected error for missing toolchain from")
 	}
-	if !strings.Contains(err.Error(), "missing required field \"plugin\"") {
+	if !strings.Contains(err.Error(), "missing required field \"from\"") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
@@ -177,8 +177,8 @@ func TestValidate_MissingToolchainPlugin(t *testing.T) {
 func TestValidate_DuplicateToolchainNames(t *testing.T) {
 	cfg := &ProjectConfig{
 		Toolchains: []Toolchain{
-			{Name: "go", Plugin: "go-plugin"},
-			{Name: "go", Plugin: "go-plugin2"},
+			{Name: "go", From: "go-plugin"},
+			{Name: "go", From: "go-plugin2"},
 		},
 	}
 	err := Validate(cfg)
@@ -207,18 +207,45 @@ func TestValidate_MissingPluginName(t *testing.T) {
 	}
 }
 
-func TestValidate_MissingPluginCommand(t *testing.T) {
+func TestValidate_MissingPluginCommandAndScript(t *testing.T) {
 	cfg := &ProjectConfig{
 		Plugins: []PluginDef{
-			{Name: "my-plugin", Command: nil},
+			{Name: "my-plugin"},
 		},
 	}
 	err := Validate(cfg)
 	if err == nil {
-		t.Fatal("expected error for missing plugin command")
+		t.Fatal("expected error for missing command and script")
 	}
-	if !strings.Contains(err.Error(), "missing required field \"command\"") {
+	if !strings.Contains(err.Error(), "must set either \"command\" or \"script\"") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestValidate_PluginCommandAndScriptConflict(t *testing.T) {
+	cfg := &ProjectConfig{
+		Plugins: []PluginDef{
+			{Name: "my-plugin", Command: []string{"./a"}, Script: "plugin.bb"},
+		},
+	}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for both command and script")
+	}
+	if !strings.Contains(err.Error(), "cannot set both") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestValidate_PluginScriptOnly(t *testing.T) {
+	cfg := &ProjectConfig{
+		Plugins: []PluginDef{
+			{Name: "my-plugin", Script: "plugins/go/plugin.bb"},
+		},
+	}
+	err := Validate(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -436,7 +463,7 @@ func TestValidate_FullValidConfig(t *testing.T) {
 			{Name: "//app", Toolchain: "go", Sources: []string{"*.go"}},
 		},
 		Toolchains: []Toolchain{
-			{Name: "go", Plugin: "go-plugin"},
+			{Name: "go", From: "go-plugin"},
 		},
 		Services: []Service{
 			{Name: "db", Runtime: "docker"},

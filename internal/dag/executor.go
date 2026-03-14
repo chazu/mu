@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/chau/mu/internal/cas"
+	"github.com/chau/mu/internal/sandbox"
 )
 
 // ActionStatus represents the result of executing a single action.
@@ -160,19 +161,17 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command", a.ID)}
 	}
 
-	cmd := exec.CommandContext(ctx, a.Command[0], a.Command[1:]...)
-	cmd.Dir = a.WorkDir
-	cmd.Env = buildEnv(a.Env)
-	cmd.Stdout = os.Stdout // TODO: capture per-action in later phases
-	cmd.Stderr = os.Stderr
+	var exitCode int
+	var execErr error
 
-	err := cmd.Run()
-	exitCode := -1
-	if cmd.ProcessState != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+	if a.Toolchain != nil {
+		exitCode, execErr = e.executeInSandbox(ctx, a)
+	} else {
+		exitCode, execErr = e.executeBare(ctx, a)
 	}
-	if err != nil {
-		return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q failed: %w", a.ID, err)}
+
+	if execErr != nil {
+		return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
 	}
 
 	// Hash declared outputs and store in CAS.
@@ -197,6 +196,72 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	}
 
 	return ActionStatus{ID: a.ID, ExitCode: exitCode}
+}
+
+// executeBare runs a command directly on the host (no sandbox).
+// Used for actions without a toolchain, preserving backward compatibility.
+func (e *Executor) executeBare(ctx context.Context, a *Action) (int, error) {
+	cmd := exec.CommandContext(ctx, a.Command[0], a.Command[1:]...)
+	cmd.Dir = a.WorkDir
+	cmd.Env = buildEnv(a.Env)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	exitCode := -1
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+	return exitCode, err
+}
+
+// executeInSandbox runs a command in a hermetic sandbox environment.
+// The toolchain artifacts are unpacked into the sandbox, sources are copied in,
+// the command runs inside the sandbox, and outputs are copied back to WorkDir.
+func (e *Executor) executeInSandbox(ctx context.Context, a *Action) (int, error) {
+	sb, err := sandbox.New(e.Store)
+	if err != nil {
+		return -1, fmt.Errorf("create sandbox: %w", err)
+	}
+	defer sb.Cleanup()
+
+	// Unpack toolchain into sandbox rootfs.
+	if err := sb.UnpackToolchain(ctx, a.Toolchain); err != nil {
+		return -1, fmt.Errorf("unpack toolchain: %w", err)
+	}
+
+	// Copy sources into sandbox work directory.
+	if len(a.Sources) > 0 && a.WorkDir != "" {
+		if err := sb.CopySources(a.WorkDir, a.Sources); err != nil {
+			return -1, fmt.Errorf("copy sources: %w", err)
+		}
+	}
+
+	// Execute.
+	exitCode, err := sb.Exec(ctx, a.Command, a.Env, a.Network)
+	if err != nil {
+		return exitCode, err
+	}
+
+	// Copy declared outputs back from sandbox to the original WorkDir.
+	for _, outRel := range a.Outputs {
+		sbOut := sb.OutputPath(outRel)
+		hostOut := filepath.Join(a.WorkDir, outRel)
+		if err := os.MkdirAll(filepath.Dir(hostOut), 0o755); err != nil {
+			return exitCode, fmt.Errorf("create output dir for %s: %w", outRel, err)
+		}
+		src, err := os.Open(sbOut)
+		if err != nil {
+			return exitCode, fmt.Errorf("open sandbox output %s: %w", outRel, err)
+		}
+		if err := writeFile(hostOut, src); err != nil {
+			src.Close()
+			return exitCode, fmt.Errorf("copy output %s: %w", outRel, err)
+		}
+		src.Close()
+	}
+
+	return exitCode, nil
 }
 
 // storeOutput hashes a file and stores it in the CAS.

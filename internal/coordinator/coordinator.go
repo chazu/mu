@@ -3,6 +3,8 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 
@@ -12,10 +14,10 @@ import (
 	"github.com/chau/mu/internal/plugin"
 )
 
-// ToolchainBootstrapper bootstraps toolchains before the planning phase.
-// The bootstrap package provides the concrete implementation.
-type ToolchainBootstrapper interface {
-	Bootstrap(ctx context.Context, cfg *config.ProjectConfig) error
+// ToolchainBuilder builds toolchains from scratch before the planning phase.
+// The scratch package provides the concrete implementation.
+type ToolchainBuilder interface {
+	Build(ctx context.Context, cfg *config.ProjectConfig) error
 }
 
 // Coordinator orchestrates the full mu build flow.
@@ -24,7 +26,7 @@ type Coordinator struct {
 	Config            *config.ProjectConfig
 	Store             cas.Store
 	ToolchainRegistry *ToolchainRegistry
-	Bootstrapper      ToolchainBootstrapper // optional; set to enable toolchain bootstrap
+	Builder           ToolchainBuilder      // optional; set to enable toolchain scratch build
 	Workers           int                   // 0 = runtime.NumCPU()
 }
 
@@ -38,12 +40,35 @@ type BuildResult struct {
 
 // Build orchestrates the full build pipeline for the given target names.
 func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
-	// 1. Start plugins.
+	// 1. Build toolchains from scratch (must happen before plugins, since plugins
+	//    may need a scratch-built runtime like bb).
+	registry := c.ToolchainRegistry
+	if registry == nil {
+		registry = NewToolchainRegistry(c.Store)
+	}
+	if len(c.Config.Toolchains) > 0 && c.Builder != nil {
+		if err := c.Builder.Build(ctx, c.Config); err != nil {
+			return nil, fmt.Errorf("coordinator: scratch build: %w", err)
+		}
+	}
+
+	// 2. Start plugins.
 	mgr := plugin.NewManager(c.ProjectRoot)
+
+	// If any plugin uses "script", resolve the bb binary from the toolchain registry.
+	if needsScriptRuntime(c.Config.Plugins) {
+		bbPath, err := c.resolveScriptRuntime(ctx, registry)
+		if err != nil {
+			return nil, fmt.Errorf("coordinator: %w", err)
+		}
+		mgr.SetScriptRuntime(bbPath)
+	}
+
 	for _, p := range c.Config.Plugins {
 		if err := mgr.Register(plugin.PluginDef{
 			Name:    p.Name,
 			Command: p.Command,
+			Script:  p.Script,
 		}); err != nil {
 			return nil, fmt.Errorf("coordinator: register plugin %q: %w", p.Name, err)
 		}
@@ -52,17 +77,6 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 		return nil, fmt.Errorf("coordinator: starting plugins: %w", err)
 	}
 	defer mgr.Close()
-
-	// 1b. Bootstrap toolchains if any are declared.
-	registry := c.ToolchainRegistry
-	if registry == nil {
-		registry = NewToolchainRegistry(c.Store)
-	}
-	if len(c.Config.Toolchains) > 0 && c.Bootstrapper != nil {
-		if err := c.Bootstrapper.Bootstrap(ctx, c.Config); err != nil {
-			return nil, fmt.Errorf("coordinator: bootstrap: %w", err)
-		}
-	}
 
 	// 2. Resolve target graph (topological order, leaves first).
 	targets, err := c.resolveTargets(targetNames)
@@ -245,4 +259,40 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 		result[i] = index[name]
 	}
 	return result, nil
+}
+
+// needsScriptRuntime returns true if any plugin uses the Script field.
+func needsScriptRuntime(plugins []config.PluginDef) bool {
+	for _, p := range plugins {
+		if p.Script != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveScriptRuntime extracts the bb binary from the toolchain registry
+// and returns its filesystem path. The bb toolchain must be built from scratch first.
+func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *ToolchainRegistry) (string, error) {
+	m := registry.Get("bb")
+	if m == nil {
+		return "", fmt.Errorf("plugin uses \"script\" but no \"bb\" toolchain is defined; add a bb toolchain to your config")
+	}
+
+	// Find the bb binary artifact — look for "bb" or "bin/bb".
+	artifact := "bb"
+	if _, ok := m.Artifacts[artifact]; !ok {
+		artifact = "bin/bb"
+		if _, ok := m.Artifacts[artifact]; !ok {
+			return "", fmt.Errorf("bb toolchain has no \"bb\" or \"bin/bb\" artifact")
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	baseDir := filepath.Join(home, ".mu", "toolchains")
+
+	return registry.ExtractBinary(ctx, "bb", artifact, baseDir)
 }

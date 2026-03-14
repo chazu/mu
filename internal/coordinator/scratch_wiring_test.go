@@ -9,25 +9,25 @@ import (
 	"github.com/chau/mu/internal/config"
 )
 
-// mockBootstrapper records calls and can be configured to return errors.
-type mockBootstrapper struct {
+// mockBuilder records calls and can be configured to return errors.
+type mockBuilder struct {
 	called    bool
 	callCount int
 	cfg       *config.ProjectConfig
-	err       error // if set, Bootstrap returns this error
+	err       error // if set, Build returns this error
 }
 
-func (m *mockBootstrapper) Bootstrap(ctx context.Context, cfg *config.ProjectConfig) error {
+func (m *mockBuilder) Build(ctx context.Context, cfg *config.ProjectConfig) error {
 	m.called = true
 	m.callCount++
 	m.cfg = cfg
 	return m.err
 }
 
-// ---------- Bootstrap wiring tests ----------
+// ---------- Scratch build wiring tests ----------
 
-func TestBuild_ToolchainDeclared_BootstrapCalled(t *testing.T) {
-	mb := &mockBootstrapper{}
+func TestBuild_ToolchainDeclared_ScratchBuildCalled(t *testing.T) {
+	mb := &mockBuilder{}
 	registry := NewToolchainRegistry(newTestStore(t))
 
 	c := &Coordinator{
@@ -42,14 +42,14 @@ func TestBuild_ToolchainDeclared_BootstrapCalled(t *testing.T) {
 			Toolchains: []config.Toolchain{
 				{
 					Name:   "mock",
-					Plugin: "mock",
+					From:   "mock",
 					Config: config.ToolchainConfig{Version: "1.0"},
 				},
 			},
 		},
 		Store:             newTestStore(t),
 		ToolchainRegistry: registry,
-		Bootstrapper:      mb,
+		Builder:           mb,
 		Workers:           1,
 	}
 
@@ -58,15 +58,15 @@ func TestBuild_ToolchainDeclared_BootstrapCalled(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	if !mb.called {
-		t.Error("expected Bootstrapper.Bootstrap to be called when toolchains declared")
+		t.Error("expected Builder.Build to be called when toolchains declared")
 	}
 	if result.Failed != 0 {
 		t.Errorf("Failed = %d, want 0", result.Failed)
 	}
 }
 
-func TestBuild_NoToolchains_BootstrapSkipped(t *testing.T) {
-	mb := &mockBootstrapper{}
+func TestBuild_NoToolchains_ScratchBuildSkipped(t *testing.T) {
+	mb := &mockBuilder{}
 
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),
@@ -79,9 +79,9 @@ func TestBuild_NoToolchains_BootstrapSkipped(t *testing.T) {
 			},
 			// No Toolchains declared.
 		},
-		Store:        newTestStore(t),
-		Bootstrapper: mb,
-		Workers:      1,
+		Store:   newTestStore(t),
+		Builder: mb,
+		Workers: 1,
 	}
 
 	_, err := c.Build(context.Background(), []string{"//app"})
@@ -89,12 +89,12 @@ func TestBuild_NoToolchains_BootstrapSkipped(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	if mb.called {
-		t.Error("Bootstrapper.Bootstrap should NOT be called when no toolchains declared")
+		t.Error("Builder.Build should NOT be called when no toolchains declared")
 	}
 }
 
-func TestBuild_BootstrapFailure_BuildFails(t *testing.T) {
-	mb := &mockBootstrapper{
+func TestBuild_ScratchBuildFailure_BuildFails(t *testing.T) {
+	mb := &mockBuilder{
 		err: errors.New("sha256 mismatch: expected abc, got def"),
 	}
 
@@ -110,22 +110,22 @@ func TestBuild_BootstrapFailure_BuildFails(t *testing.T) {
 			Toolchains: []config.Toolchain{
 				{
 					Name:   "mock",
-					Plugin: "mock",
+					From:   "mock",
 					Config: config.ToolchainConfig{Version: "1.0"},
 				},
 			},
 		},
-		Store:        newTestStore(t),
-		Bootstrapper: mb,
-		Workers:      1,
+		Store:   newTestStore(t),
+		Builder: mb,
+		Workers: 1,
 	}
 
 	_, err := c.Build(context.Background(), []string{"//app"})
 	if err == nil {
-		t.Fatal("expected build to fail when bootstrap fails")
+		t.Fatal("expected build to fail when scratch build fails")
 	}
-	if !strings.Contains(err.Error(), "bootstrap") {
-		t.Errorf("error should mention 'bootstrap', got: %v", err)
+	if !strings.Contains(err.Error(), "scratch build") {
+		t.Errorf("error should mention 'scratch build', got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "sha256 mismatch") {
 		t.Errorf("error should propagate root cause, got: %v", err)
@@ -150,8 +150,8 @@ func TestBuild_CacheHit_ArtifactsInjected(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Bootstrap is a no-op (cache hit scenario — bootstrapper wouldn't fetch).
-	mb := &mockBootstrapper{}
+	// Builder is a no-op (cache hit scenario -- builder wouldn't fetch).
+	mb := &mockBuilder{}
 
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),
@@ -166,14 +166,14 @@ func TestBuild_CacheHit_ArtifactsInjected(t *testing.T) {
 			Toolchains: []config.Toolchain{
 				{
 					Name:   "mock",
-					Plugin: "mock",
+					From:   "mock",
 					Config: config.ToolchainConfig{Version: "1.0"},
 				},
 			},
 		},
 		Store:             store,
 		ToolchainRegistry: registry,
-		Bootstrapper:      mb,
+		Builder:           mb,
 		Workers:           1,
 	}
 
@@ -189,15 +189,15 @@ func TestBuild_CacheHit_ArtifactsInjected(t *testing.T) {
 	}
 }
 
-func TestBuild_FullBootstrap_ArtifactsReachPlan(t *testing.T) {
+func TestBuild_FullScratchBuild_ArtifactsReachPlan(t *testing.T) {
 	store := newTestStore(t)
 	registry := NewToolchainRegistry(store)
 	ctx := context.Background()
 
-	// A bootstrapper that registers a manifest (simulating full bootstrap flow).
-	mb := &mockBootstrapper{}
+	// A builder that registers a manifest (simulating full scratch build flow).
+	mb := &mockBuilder{}
 
-	// We manually pre-register to simulate what the bootstrapper would do.
+	// We manually pre-register to simulate what the builder would do.
 	manifest := &ToolchainManifest{
 		Name:    "mock",
 		Version: "1.0",
@@ -222,14 +222,14 @@ func TestBuild_FullBootstrap_ArtifactsReachPlan(t *testing.T) {
 			Toolchains: []config.Toolchain{
 				{
 					Name:   "mock",
-					Plugin: "mock",
+					From:   "mock",
 					Config: config.ToolchainConfig{Version: "1.0"},
 				},
 			},
 		},
 		Store:             store,
 		ToolchainRegistry: registry,
-		Bootstrapper:      mb,
+		Builder:           mb,
 		Workers:           1,
 	}
 
@@ -246,8 +246,8 @@ func TestBuild_FullBootstrap_ArtifactsReachPlan(t *testing.T) {
 	}
 }
 
-func TestBuild_NilBootstrapper_NoToolchains_Succeeds(t *testing.T) {
-	// When Bootstrapper is nil and no toolchains are declared, build should work fine.
+func TestBuild_NilBuilder_NoToolchains_Succeeds(t *testing.T) {
+	// When Builder is nil and no toolchains are declared, build should work fine.
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),
 		Config: &config.ProjectConfig{

@@ -27,8 +27,8 @@ func TestPreprocess_Success(t *testing.T) {
 	script := filepath.Join(dir, "pp.sh")
 	writeScript(t, script, `cat "$1"`)
 
-	// Write a BUILD.star file that is actually JSON.
-	buildFile := filepath.Join(dir, "BUILD.star")
+	// Write a mu.star file that is actually JSON.
+	buildFile := filepath.Join(dir, "mu.star")
 	writeJSON(t, buildFile, ProjectConfig{
 		Targets: []Target{
 			{Name: "//app", Toolchain: "go", Sources: []string{"*.go"}},
@@ -123,7 +123,7 @@ func TestPreprocess_EmptyCommand(t *testing.T) {
 }
 
 // TestLoad_WithPreprocessor verifies the full integration: mu.json declares a
-// preprocessor, and Load finds BUILD.<ext> files instead of BUILD.json.
+// preprocessor, and Load finds mu.<ext> files instead of mu.json.
 func TestLoad_WithPreprocessor(t *testing.T) {
 	root := t.TempDir()
 
@@ -139,24 +139,24 @@ func TestLoad_WithPreprocessor(t *testing.T) {
 		},
 	})
 
-	// A BUILD.star in a subdirectory (should be found).
+	// A mu.star in a subdirectory (should be found).
 	sub := filepath.Join(root, "pkg", "lib")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "BUILD.star"), ProjectConfig{
+	writeJSON(t, filepath.Join(sub, "mu.star"), ProjectConfig{
 		Targets: []Target{
 			{Name: "mylib", Toolchain: "go", Sources: []string{"*.go"}},
 		},
 	})
 
-	// A BUILD.json in a different subdirectory (should be ignored when
-	// preprocessor is active).
+	// A mu.json in a different subdirectory (should be ignored when
+	// preprocessor is active — only mu.<ext> files are discovered).
 	other := filepath.Join(root, "pkg", "other")
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(other, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(other, "mu.json"), ProjectConfig{
 		Targets: []Target{
 			{Name: "ignored", Toolchain: "go", Sources: []string{"*.go"}},
 		},
@@ -168,7 +168,7 @@ func TestLoad_WithPreprocessor(t *testing.T) {
 	}
 
 	if len(cfg.Targets) != 1 {
-		t.Fatalf("expected 1 target (from BUILD.star), got %d", len(cfg.Targets))
+		t.Fatalf("expected 1 target (from mu.star), got %d", len(cfg.Targets))
 	}
 	if cfg.Targets[0].Name != "//pkg/lib/mylib" {
 		t.Fatalf("expected //pkg/lib/mylib, got %s", cfg.Targets[0].Name)
@@ -176,7 +176,7 @@ func TestLoad_WithPreprocessor(t *testing.T) {
 }
 
 // TestLoad_NoPreprocessor_FallsThrough ensures that without a preprocessor,
-// Load still finds BUILD.json as before.
+// Load still finds mu.json in subdirectories.
 func TestLoad_NoPreprocessor_FallsThrough(t *testing.T) {
 	root := t.TempDir()
 
@@ -186,7 +186,7 @@ func TestLoad_NoPreprocessor_FallsThrough(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "BUILD.json"), ProjectConfig{
+	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
 		Targets: []Target{
 			{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
 		},
@@ -219,7 +219,7 @@ func TestLoad_PreprocessorError(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sub, "BUILD.star"), []byte("dummy"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sub, "mu.star"), []byte("dummy"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

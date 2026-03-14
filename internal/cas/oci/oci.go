@@ -1,9 +1,11 @@
-// Package oci implements a content-addressable store backed by an OCI registry.
+// Package oci implements a content-addressable store backed by OCI.
 //
+// The same OCIStore type works with both local OCI layout directories (via
+// NewLocal) and remote OCI registries (via New with a remote.Repository).
 // Blobs map directly to OCI blobs. Action results are stored as OCI manifests
 // tagged by the action key hash, with each output as a layer descriptor and the
-// result metadata as the config blob. This means standard OCI tools (crane,
-// skopeo, etc.) can inspect the cache.
+// result metadata as the config blob. Standard OCI tools (crane, skopeo, oras)
+// can inspect the cache in either form.
 package oci
 
 import (
@@ -21,6 +23,7 @@ import (
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	ocilayout "oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
 )
 
@@ -29,8 +32,9 @@ const (
 	MediaTypeMuAction = "application/vnd.mu.action-result.v1+json"
 )
 
-// Registry abstracts the OCI registry operations needed by OCIStore.
-// Both remote.Repository and memory.Store from oras-go satisfy this interface.
+// Registry abstracts the OCI operations needed by OCIStore.
+// oras-go's oci.Store (local layout), remote.Repository, and memory.Store all
+// satisfy this interface.
 type Registry interface {
 	Push(ctx context.Context, expected ocispec.Descriptor, content io.Reader) error
 	Fetch(ctx context.Context, target ocispec.Descriptor) (io.ReadCloser, error)
@@ -48,6 +52,16 @@ type OCIStore struct {
 // New creates an OCIStore backed by the given registry.
 func New(repo Registry) *OCIStore {
 	return &OCIStore{repo: repo}
+}
+
+// NewLocal creates an OCIStore backed by a local OCI layout directory.
+// The directory is created if it does not exist.
+func NewLocal(path string) (*OCIStore, error) {
+	store, err := ocilayout.New(path)
+	if err != nil {
+		return nil, fmt.Errorf("oci: open local store %s: %w", path, err)
+	}
+	return &OCIStore{repo: store}, nil
 }
 
 // toOCIDigest converts a cas.Digest to an OCI digest.

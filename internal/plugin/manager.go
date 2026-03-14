@@ -10,13 +10,15 @@ import (
 type PluginDef struct {
 	Name    string   `json:"name"`    // logical name, matches target toolchain field
 	Command []string `json:"command"` // command to spawn, relative to project root
+	Script  string   `json:"script"`  // bb script path (resolved via ScriptRuntime)
 }
 
 // Manager manages the lifecycle of plugin processes and routes requests.
 type Manager struct {
-	projectRoot string
-	plugins     map[string]*pluginEntry // name → entry
-	mu          sync.RWMutex
+	projectRoot   string
+	scriptRuntime string                  // path to bb binary for script-based plugins (optional)
+	plugins       map[string]*pluginEntry // name → entry
+	mu            sync.RWMutex
 }
 
 type pluginEntry struct {
@@ -32,6 +34,12 @@ func NewManager(projectRoot string) *Manager {
 		projectRoot: projectRoot,
 		plugins:     make(map[string]*pluginEntry),
 	}
+}
+
+// SetScriptRuntime sets the path to the bb binary for script-based plugins.
+// Must be called before Start.
+func (m *Manager) SetScriptRuntime(path string) {
+	m.scriptRuntime = path
 }
 
 // Register adds a plugin definition. Call before Start.
@@ -53,7 +61,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	for name, entry := range m.plugins {
-		proc, err := StartProcess(name, entry.def.Command, m.projectRoot)
+		command, err := m.resolveCommand(entry.def)
+		if err != nil {
+			m.closeAllLocked()
+			return fmt.Errorf("plugin %q: %w", name, err)
+		}
+
+		proc, err := StartProcess(name, command, m.projectRoot)
 		if err != nil {
 			// Shut down any already-started plugins.
 			m.closeAllLocked()
@@ -69,6 +83,18 @@ func (m *Manager) Start(ctx context.Context) error {
 		entry.discover = resp
 	}
 	return nil
+}
+
+// resolveCommand returns the command to spawn for a plugin definition.
+// For script-based plugins, the script runtime (bb) is prepended.
+func (m *Manager) resolveCommand(def PluginDef) ([]string, error) {
+	if def.Script != "" {
+		if m.scriptRuntime == "" {
+			return nil, fmt.Errorf("script %q requires a bb toolchain but no script runtime is available", def.Script)
+		}
+		return []string{m.scriptRuntime, def.Script}, nil
+	}
+	return def.Command, nil
 }
 
 // Plan sends a plan request to the plugin registered for the given toolchain.

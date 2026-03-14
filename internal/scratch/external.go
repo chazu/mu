@@ -1,4 +1,4 @@
-package bootstrap
+package scratch
 
 import (
 	"context"
@@ -11,21 +11,21 @@ import (
 	"github.com/chau/mu/internal/plugin"
 )
 
-// External runs an external bootstrap plugin specified by execPath.
+// External runs an external scratch build plugin specified by execPath.
 // It spawns the plugin process, validates it via discover, then sends a plan
 // request for each toolchain in cfg. The resulting actions are collected but
 // not yet executed (the caller is responsible for DAG execution).
 func External(ctx context.Context, execPath string, projectRoot string, cfg *config.ProjectConfig, store cas.Store) error {
-	proc, err := plugin.StartProcess("bootstrap-external", []string{execPath}, projectRoot)
+	proc, err := plugin.StartProcess("scratch-external", []string{execPath}, projectRoot)
 	if err != nil {
-		return fmt.Errorf("start external bootstrap: %w", err)
+		return fmt.Errorf("start external scratch build: %w", err)
 	}
 	defer proc.Close()
 
 	// Validate the plugin via discover.
 	disc, err := proc.Discover(ctx)
 	if err != nil {
-		return fmt.Errorf("external bootstrap discover: %w", err)
+		return fmt.Errorf("external scratch discover: %w", err)
 	}
 	_ = disc // discovery validated protocol version
 
@@ -33,7 +33,7 @@ func External(ctx context.Context, execPath string, projectRoot string, cfg *con
 	for _, tc := range cfg.Toolchains {
 		target := plugin.TargetInfo{
 			Name:      "//toolchains:" + tc.Name,
-			Toolchain: "bootstrap",
+			Toolchain: "scratch",
 			Config: map[string]any{
 				"version":      tc.Config.Version,
 				"url":          tc.Config.URL,
@@ -44,13 +44,13 @@ func External(ctx context.Context, execPath string, projectRoot string, cfg *con
 
 		resp, err := proc.Plan(ctx, target, nil, nil)
 		if err != nil {
-			return fmt.Errorf("external bootstrap plan %s: %w", tc.Name, err)
+			return fmt.Errorf("external scratch plan %s: %w", tc.Name, err)
 		}
 
 		// Execute each action from the plan response.
 		for _, action := range resp.Actions {
-			if err := executeBootstrapAction(ctx, action, projectRoot); err != nil {
-				return fmt.Errorf("external bootstrap action %s for %s: %w", action.ID, tc.Name, err)
+			if err := executeScratchAction(ctx, action, projectRoot); err != nil {
+				return fmt.Errorf("external scratch action %s for %s: %w", action.ID, tc.Name, err)
 			}
 		}
 	}
@@ -58,8 +58,8 @@ func External(ctx context.Context, execPath string, projectRoot string, cfg *con
 	return nil
 }
 
-// executeBootstrapAction runs a single action from an external bootstrap plugin.
-func executeBootstrapAction(ctx context.Context, action plugin.ActionSpec, projectRoot string) error {
+// executeScratchAction runs a single action from an external scratch build plugin.
+func executeScratchAction(ctx context.Context, action plugin.ActionSpec, projectRoot string) error {
 	if len(action.Command) == 0 {
 		return fmt.Errorf("action %s: empty command", action.ID)
 	}

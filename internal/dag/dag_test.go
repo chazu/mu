@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/cas/disk"
+	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/dag"
 )
 
@@ -290,9 +290,9 @@ func TestActionKeyInputOrder(t *testing.T) {
 
 func newStore(t *testing.T) cas.Store {
 	t.Helper()
-	s, err := disk.New(filepath.Join(t.TempDir(), "cas"))
+	s, err := oci.NewLocal(filepath.Join(t.TempDir(), "cas"))
 	if err != nil {
-		t.Fatalf("disk.New: %v", err)
+		t.Fatalf("oci.NewLocal: %v", err)
 	}
 	return s
 }

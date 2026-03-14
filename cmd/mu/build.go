@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chau/mu/internal/scratch"
 	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/cas/disk"
+	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/coordinator"
 )
@@ -64,7 +65,7 @@ func runBuild(args []string) int {
 			return 2
 		}
 		cachePath := filepath.Join(home, ".mu", "cache")
-		ds, err := disk.New(cachePath)
+		ds, err := oci.NewLocal(cachePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mu build: creating cache store: %v\n", err)
 			return 2
@@ -76,11 +77,23 @@ func runBuild(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	registry := coordinator.NewToolchainRegistry(store)
+	home, _ := os.UserHomeDir()
+
 	c := &coordinator.Coordinator{
-		ProjectRoot: projectRoot,
-		Config:      cfg,
-		Store:       store,
-		Workers:     *jobs,
+		ProjectRoot:       projectRoot,
+		Config:            cfg,
+		Store:             store,
+		ToolchainRegistry: registry,
+		Workers:           *jobs,
+	}
+
+	if len(cfg.Toolchains) > 0 && store != nil {
+		c.Builder = &scratch.Builder{
+			Store:    store,
+			Registry: registry,
+			CacheDir: filepath.Join(home, ".mu", "cache"),
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "mu build %s\n", strings.Join(targets, " "))
