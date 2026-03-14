@@ -1,0 +1,24 @@
+[tools]
+go = "1.25.7"
+
+[tasks.build]
+description = "Build the mu binary"
+run = "go build -o mu ./cmd/mu"
+
+[tasks.codesign]
+description = "Codesign the mu binary"
+depends = ["build"]
+run = "codesign -s - -f mu"
+
+[tasks.install]
+description = "Build, codesign, and install mu to ~/go/bin/"
+depends = ["codesign"]
+run = "mkdir -p ~/go/bin && cp mu ~/go/bin/mu"
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./..."
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -f mu"
