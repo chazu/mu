@@ -131,7 +131,9 @@ func loadFile(path string) (*ProjectConfig, error) {
 	return &cfg, nil
 }
 
-// merge appends targets from src into dst.
+// merge appends targets, toolchains, and plugins from src into dst.
 func merge(dst, src *ProjectConfig) {
 	dst.Targets = append(dst.Targets, src.Targets...)
+	dst.Toolchains = append(dst.Toolchains, src.Toolchains...)
+	dst.Plugins = append(dst.Plugins, src.Plugins...)
 }
