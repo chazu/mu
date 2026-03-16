@@ -22,6 +22,7 @@ func runBuild(args []string) int {
 	fs.SetOutput(os.Stderr)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
+	configFile := fs.String("config", "", "path to mu.json (default: discover by walking up)")
 	_ = fs.Bool("verbose", false, "show plugin I/O")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -33,16 +34,27 @@ func runBuild(args []string) int {
 		return 2
 	}
 
-	// Find project root.
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-		return 2
-	}
-	projectRoot, err := config.FindProjectRoot(cwd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-		return 2
+	// Find project root and load config.
+	var projectRoot string
+	if *configFile != "" {
+		// Explicit config: project root is the directory containing the config file.
+		absConfig, err := filepath.Abs(*configFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
+			return 2
+		}
+		projectRoot = filepath.Dir(absConfig)
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
+			return 2
+		}
+		projectRoot, err = config.FindProjectRoot(cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
+			return 2
+		}
 	}
 
 	// Load and validate config.
