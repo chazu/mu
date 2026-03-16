@@ -131,9 +131,7 @@ func loadFile(path string) (*ProjectConfig, error) {
 	return &cfg, nil
 }
 
-// merge appends targets, services, and triggers from src into dst.
+// merge appends targets from src into dst.
 func merge(dst, src *ProjectConfig) {
 	dst.Targets = append(dst.Targets, src.Targets...)
-	dst.Services = append(dst.Services, src.Services...)
-	dst.Triggers = append(dst.Triggers, src.Triggers...)
 }

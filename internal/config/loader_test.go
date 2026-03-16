@@ -119,32 +119,6 @@ func TestLoad_MergeSubdirMuJSON(t *testing.T) {
 	}
 }
 
-func TestLoad_MergeSubdirMuJSON_Services(t *testing.T) {
-	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
-
-	sub := filepath.Join(root, "infra")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
-		Services: []Service{
-			{Name: "db", Runtime: "docker", Config: ServiceConfig{Image: "postgres:16"}},
-		},
-	})
-
-	cfg, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(cfg.Services) != 1 {
-		t.Fatalf("expected 1 service, got %d", len(cfg.Services))
-	}
-	if cfg.Services[0].Name != "db" {
-		t.Fatalf("expected service name db, got %s", cfg.Services[0].Name)
-	}
-}
-
 func TestLoad_MultipleSubdirMuJSON(t *testing.T) {
 	root := t.TempDir()
 	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})

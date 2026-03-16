@@ -32,37 +32,6 @@ func Validate(cfg *ProjectConfig) error {
 		}
 	}
 
-	seenServices := make(map[string]bool)
-	for i, s := range cfg.Services {
-		label := fmt.Sprintf("services[%d]", i)
-
-		if s.Name == "" {
-			errs = append(errs, fmt.Sprintf("%s: missing required field \"service\"", label))
-		} else {
-			if seenServices[s.Name] {
-				errs = append(errs, fmt.Sprintf("%s: duplicate service name %q", label, s.Name))
-			}
-			seenServices[s.Name] = true
-		}
-
-		if s.Runtime != "docker" && s.Runtime != "host" {
-			errs = append(errs, fmt.Sprintf("%s: runtime must be \"docker\" or \"host\", got %q", label, s.Runtime))
-		}
-	}
-
-	// Validate service dependencies reference existing services.
-	for i, s := range cfg.Services {
-		if s.Name == "" {
-			continue
-		}
-		label := fmt.Sprintf("services[%d]", i)
-		for dep := range s.DependsOn {
-			if !seenServices[dep] {
-				errs = append(errs, fmt.Sprintf("%s: depends_on references unknown service %q", label, dep))
-			}
-		}
-	}
-
 	// Validate toolchains.
 	seenToolchains := make(map[string]bool)
 	for i, tc := range cfg.Toolchains {
@@ -103,25 +72,6 @@ func Validate(cfg *ProjectConfig) error {
 		}
 		if hasCommand && hasScript {
 			errs = append(errs, fmt.Sprintf("%s: cannot set both \"command\" and \"script\"", label))
-		}
-	}
-
-	// Validate triggers.
-	seenTriggers := make(map[string]bool)
-	for i, tr := range cfg.Triggers {
-		label := fmt.Sprintf("triggers[%d]", i)
-
-		if tr.Name == "" {
-			errs = append(errs, fmt.Sprintf("%s: missing required field \"trigger\"", label))
-		} else {
-			if seenTriggers[tr.Name] {
-				errs = append(errs, fmt.Sprintf("%s: duplicate trigger name %q", label, tr.Name))
-			}
-			seenTriggers[tr.Name] = true
-		}
-
-		if len(tr.Watch) == 0 {
-			errs = append(errs, fmt.Sprintf("%s: missing required field \"watch\"", label))
 		}
 	}
 

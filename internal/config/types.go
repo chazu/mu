@@ -4,8 +4,6 @@ package config
 type ProjectConfig struct {
 	Targets      []Target      `json:"targets,omitempty"`
 	Toolchains   []Toolchain   `json:"toolchains,omitempty"`
-	Services     []Service     `json:"services,omitempty"`
-	Triggers     []Trigger     `json:"triggers,omitempty"`
 	Cache        *CacheConfig  `json:"cache,omitempty"`
 	Plugins      []PluginDef   `json:"plugins,omitempty"`
 	Preprocessor *Preprocessor `json:"preprocessor,omitempty"`
@@ -18,47 +16,6 @@ type Target struct {
 	Sources   []string       `json:"sources"`
 	Deps      []string       `json:"deps,omitempty"`
 	Config    map[string]any `json:"config,omitempty"`
-}
-
-// Service describes an infrastructure service (e.g. a Docker container).
-type Service struct {
-	Name      string            `json:"service"`
-	Runtime   string            `json:"runtime"`
-	DependsOn map[string]string `json:"depends_on,omitempty"`
-	Config    ServiceConfig     `json:"config"`
-}
-
-// ServiceConfig holds runtime-specific configuration for a Service.
-type ServiceConfig struct {
-	Image       string            `json:"image,omitempty"`
-	Command     []string          `json:"command,omitempty"`
-	Ports       []string          `json:"ports,omitempty"`
-	Volumes     []string          `json:"volumes,omitempty"`
-	Environment map[string]string `json:"environment,omitempty"`
-	Healthcheck *Healthcheck      `json:"healthcheck,omitempty"`
-}
-
-// Healthcheck describes how to determine if a service is healthy.
-type Healthcheck struct {
-	Type     string `json:"type"`              // "http", "tcp", "command"
-	Endpoint string `json:"endpoint,omitempty"` // for http/tcp
-	Command  string `json:"command,omitempty"`  // for command type
-	Interval string `json:"interval,omitempty"`
-	Retries  int    `json:"retries,omitempty"`
-}
-
-// Trigger watches files and runs commands or restarts services on change.
-type Trigger struct {
-	Name     string   `json:"trigger"`
-	Watch    []string `json:"watch"`
-	Run      string   `json:"run,omitempty"`
-	Then     ThenSpec `json:"then,omitempty"`
-	Debounce string   `json:"debounce,omitempty"`
-}
-
-// ThenSpec describes follow-up actions for a Trigger.
-type ThenSpec struct {
-	Restart []string `json:"restart,omitempty"`
 }
 
 // Toolchain describes a build toolchain and its base environment.

@@ -267,18 +267,15 @@ The build coordinator is functional end-to-end:
 
 ### Near-term
 
-- [ ] **Service manager** — Docker and host-native runtimes with healthchecks and lifecycle management
-- [ ] **File watching & triggers** — Debounced rebuilds on source changes, service restarts
-- [ ] **`mu dev` command** — Compose services + triggers into a unified dev experience
 - [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS
 - [ ] **Tiered cache composition** — Chain local + OCI backends with configurable policies
+- [ ] **`mu clean` / `mu verify`** — Cache management and integrity checking
 
 ### Medium-term
 
 - [ ] **OS-level sandboxing** — Linux: user namespaces + overlayfs. macOS: sandbox-exec profiles
 - [ ] **Plugin distribution** — Install/update third-party plugins via OCI artifacts or git
 - [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
-- [ ] **`mu clean` / `mu verify`** — Cache management and integrity checking
 
 ### Long-term
 
