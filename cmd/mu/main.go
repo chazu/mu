@@ -19,6 +19,8 @@ func main() {
 		os.Exit(runCache(os.Args[2:]))
 	case "target":
 		os.Exit(runTarget(os.Args[2:]))
+	case "plugin":
+		os.Exit(runPlugin(os.Args[2:]))
 	case "version":
 		fmt.Println("mu v0.1.0")
 	default:
@@ -35,5 +37,6 @@ Commands:
   scratch    Build toolchains from scratch (override with MU_SCRATCH)
   cache      Inspect the local CAS cache
   target     List and inspect targets
+  plugin     List and inspect plugins
   version    Print the mu version`)
 }
