@@ -34,13 +34,16 @@ type ToolchainConfig struct {
 }
 
 // PluginDef defines an external plugin and how to invoke it.
-// Either Command or Script must be set, but not both.
-//   - Command: a direct executable command (e.g. ["./my-plugin"])
-//   - Script:  a .bb script path, executed via the bb toolchain
+// Resolution order:
+//   - Script: a .bb script path (local, vendored in repo). Hashed and stored in CAS.
+//   - URL+SHA256: a remote .bb script. Fetched, verified, stored in CAS.
+//   - Command: a direct executable (escape hatch, not stored in CAS).
 type PluginDef struct {
 	Name    string   `json:"name"`
 	Command []string `json:"command,omitempty"`
 	Script  string   `json:"script,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	SHA256  string   `json:"sha256,omitempty"`
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON

@@ -67,11 +67,25 @@ func Validate(cfg *ProjectConfig) error {
 
 		hasCommand := len(p.Command) > 0
 		hasScript := p.Script != ""
-		if !hasCommand && !hasScript {
-			errs = append(errs, fmt.Sprintf("%s: must set either \"command\" or \"script\"", label))
+		hasURL := p.URL != ""
+		sources := 0
+		if hasCommand {
+			sources++
 		}
-		if hasCommand && hasScript {
-			errs = append(errs, fmt.Sprintf("%s: cannot set both \"command\" and \"script\"", label))
+		if hasScript {
+			sources++
+		}
+		if hasURL {
+			sources++
+		}
+		if sources == 0 {
+			errs = append(errs, fmt.Sprintf("%s: must set one of \"command\", \"script\", or \"url\"", label))
+		}
+		if sources > 1 {
+			errs = append(errs, fmt.Sprintf("%s: only one of \"command\", \"script\", or \"url\" may be set", label))
+		}
+		if hasURL && p.SHA256 == "" {
+			errs = append(errs, fmt.Sprintf("%s: \"url\" requires \"sha256\"", label))
 		}
 	}
 

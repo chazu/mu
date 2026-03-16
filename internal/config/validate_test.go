@@ -169,7 +169,7 @@ func TestValidate_MissingPluginName(t *testing.T) {
 	}
 }
 
-func TestValidate_MissingPluginCommandAndScript(t *testing.T) {
+func TestValidate_MissingPluginSource(t *testing.T) {
 	cfg := &ProjectConfig{
 		Plugins: []PluginDef{
 			{Name: "my-plugin"},
@@ -177,14 +177,14 @@ func TestValidate_MissingPluginCommandAndScript(t *testing.T) {
 	}
 	err := Validate(cfg)
 	if err == nil {
-		t.Fatal("expected error for missing command and script")
+		t.Fatal("expected error for missing source")
 	}
-	if !strings.Contains(err.Error(), "must set either \"command\" or \"script\"") {
+	if !strings.Contains(err.Error(), "must set one of") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
 
-func TestValidate_PluginCommandAndScriptConflict(t *testing.T) {
+func TestValidate_PluginMultipleSources(t *testing.T) {
 	cfg := &ProjectConfig{
 		Plugins: []PluginDef{
 			{Name: "my-plugin", Command: []string{"./a"}, Script: "plugin.bb"},
@@ -192,10 +192,36 @@ func TestValidate_PluginCommandAndScriptConflict(t *testing.T) {
 	}
 	err := Validate(cfg)
 	if err == nil {
-		t.Fatal("expected error for both command and script")
+		t.Fatal("expected error for multiple sources")
 	}
-	if !strings.Contains(err.Error(), "cannot set both") {
+	if !strings.Contains(err.Error(), "only one of") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestValidate_PluginURLRequiresSHA256(t *testing.T) {
+	cfg := &ProjectConfig{
+		Plugins: []PluginDef{
+			{Name: "my-plugin", URL: "https://example.com/plugin.bb"},
+		},
+	}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for URL without SHA256")
+	}
+	if !strings.Contains(err.Error(), "requires \"sha256\"") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestValidate_PluginURLWithSHA256(t *testing.T) {
+	cfg := &ProjectConfig{
+		Plugins: []PluginDef{
+			{Name: "my-plugin", URL: "https://example.com/plugin.bb", SHA256: "abc123"},
+		},
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -52,7 +52,19 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 		}
 	}
 
-	// 2. Start plugins.
+	// 2. Resolve plugins → CAS (hash local scripts or fetch remote ones).
+	home, _ := os.UserHomeDir()
+	resolver := &PluginResolver{
+		Store:       c.Store,
+		ProjectRoot: c.ProjectRoot,
+		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+	}
+	resolvedPlugins, err := resolver.Resolve(ctx, c.Config.Plugins)
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
+
+	// 3. Start plugins.
 	mgr := plugin.NewManager(c.ProjectRoot)
 
 	// If any plugin uses "script", resolve the bb binary from the toolchain registry.
@@ -64,13 +76,9 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 		mgr.SetScriptRuntime(bbPath)
 	}
 
-	for _, p := range c.Config.Plugins {
-		if err := mgr.Register(plugin.PluginDef{
-			Name:    p.Name,
-			Command: p.Command,
-			Script:  p.Script,
-		}); err != nil {
-			return nil, fmt.Errorf("coordinator: register plugin %q: %w", p.Name, err)
+	for _, rp := range resolvedPlugins {
+		if err := mgr.Register(rp.Def); err != nil {
+			return nil, fmt.Errorf("coordinator: register plugin %q: %w", rp.Def.Name, err)
 		}
 	}
 	if err := mgr.Start(ctx); err != nil {
