@@ -1,26 +1,8 @@
 {
-  "plugins": [
-    {
-      "name": "scratch",
-      "command": ["bb", "../../plugins/scratch/plugin.bb"]
-    }
-  ],
   "toolchains": [
     {
       "toolchain": "jq",
       "from": "scratch",
-      "config": {
-        "version": "1.7.1",
-        "url": "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64",
-        "sha256": "0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a"
-      }
-    }
-  ],
-  "targets": [
-    {
-      "target": "//tools:jq",
-      "toolchain": "scratch",
-      "sources": [],
       "config": {
         "version": "1.7.1",
         "url": "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64",

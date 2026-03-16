@@ -163,8 +163,51 @@ func extract(archivePath, destDir, stripPrefix string) error {
 	case strings.HasSuffix(lower, ".zip"):
 		return extractZip(archivePath, destDir, stripPrefix)
 	default:
-		return fmt.Errorf("unsupported archive format: %s", filepath.Base(archivePath))
+		// Not an archive — treat as a raw binary. Copy to bin/<name>.
+		return extractRawBinary(archivePath, destDir)
 	}
+}
+
+// extractRawBinary copies a single binary file to <destDir>/bin/<name> and makes
+// it executable. The binary name is derived from the download filename, stripping
+// common platform suffixes.
+func extractRawBinary(srcPath, destDir string) error {
+	binDir := filepath.Join(destDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	// Derive binary name: strip platform suffixes from the download name.
+	// e.g. "jq-1.7.1" from archive path "jq-1.7.1" → use the toolchain name
+	// which is in the parent dir name like "jq-1.7.1".
+	// Since we don't have the toolchain name here, use the destDir basename.
+	dirBase := filepath.Base(destDir) // e.g. "jq-1.7.1"
+	// Strip version: everything before the first dash followed by a digit.
+	name := dirBase
+	for i := 0; i < len(dirBase)-1; i++ {
+		if dirBase[i] == '-' && dirBase[i+1] >= '0' && dirBase[i+1] <= '9' {
+			name = dirBase[:i]
+			break
+		}
+	}
+
+	destPath := filepath.Join(binDir, name)
+
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // extractTarGz extracts a .tar.gz archive with optional strip-prefix.
