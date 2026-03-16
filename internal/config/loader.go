@@ -108,6 +108,31 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 			}
 		}
 
+		// Rebase plugin paths relative to the subdirectory.
+		subDir := filepath.Dir(path)
+		for i := range partial.Plugins {
+			p := &partial.Plugins[i]
+			if p.Script != "" && !filepath.IsAbs(p.Script) {
+				abs := filepath.Join(subDir, p.Script)
+				rel, err := filepath.Rel(projectRoot, abs)
+				if err == nil {
+					p.Script = rel
+				}
+			}
+			// Only rebase command args that look like relative paths
+			// (contain a path separator). Bare command names like "bb"
+			// should not be rebased.
+			for j := range p.Command {
+				arg := p.Command[j]
+				if !filepath.IsAbs(arg) && strings.ContainsAny(arg, "/\\") {
+					abs := filepath.Join(subDir, arg)
+					if rel, err := filepath.Rel(projectRoot, abs); err == nil {
+						p.Command[j] = rel
+					}
+				}
+			}
+		}
+
 		merge(cfg, partial)
 		return nil
 	})
@@ -132,8 +157,30 @@ func loadFile(path string) (*ProjectConfig, error) {
 }
 
 // merge appends targets, toolchains, and plugins from src into dst.
+// Toolchains and plugins with names that already exist in dst are skipped
+// (the parent/root definition wins).
 func merge(dst, src *ProjectConfig) {
 	dst.Targets = append(dst.Targets, src.Targets...)
-	dst.Toolchains = append(dst.Toolchains, src.Toolchains...)
-	dst.Plugins = append(dst.Plugins, src.Plugins...)
+
+	existingTC := make(map[string]bool, len(dst.Toolchains))
+	for _, tc := range dst.Toolchains {
+		existingTC[tc.Name] = true
+	}
+	for _, tc := range src.Toolchains {
+		if !existingTC[tc.Name] {
+			dst.Toolchains = append(dst.Toolchains, tc)
+			existingTC[tc.Name] = true
+		}
+	}
+
+	existingPl := make(map[string]bool, len(dst.Plugins))
+	for _, p := range dst.Plugins {
+		existingPl[p.Name] = true
+	}
+	for _, p := range src.Plugins {
+		if !existingPl[p.Name] {
+			dst.Plugins = append(dst.Plugins, p)
+			existingPl[p.Name] = true
+		}
+	}
 }
