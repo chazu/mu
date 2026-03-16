@@ -96,7 +96,9 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		// Normalise the root case: "//."->"//".
 		prefix = strings.TrimSuffix(prefix, "/.")
 
-		// Prefix target names so they are absolute within the project.
+		// Prefix target names and rebase source paths so they are
+		// absolute within the project.
+		subDir := filepath.Dir(path)
 		for i := range partial.Targets {
 			t := &partial.Targets[i]
 			if !strings.HasPrefix(t.Name, "//") {
@@ -106,10 +108,18 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 					t.Name = prefix + "/" + t.Name
 				}
 			}
+			// Rebase source file paths relative to the subdirectory.
+			for j := range t.Sources {
+				if !filepath.IsAbs(t.Sources[j]) {
+					abs := filepath.Join(subDir, t.Sources[j])
+					if rel, err := filepath.Rel(projectRoot, abs); err == nil {
+						t.Sources[j] = rel
+					}
+				}
+			}
 		}
 
 		// Rebase plugin paths relative to the subdirectory.
-		subDir := filepath.Dir(path)
 		for i := range partial.Plugins {
 			p := &partial.Plugins[i]
 			if p.Script != "" && !filepath.IsAbs(p.Script) {
