@@ -55,6 +55,7 @@ type ActionSpec struct {
 	DependsOn []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
 	Env       map[string]string `json:"env,omitempty"`
 	Network   bool              `json:"network,omitempty"`
+	WorkDir   string            `json:"work_dir,omitempty"`   // relative to project root (default: project root)
 }
 
 // NewDiscoverRequest returns a Request for the "discover" method.

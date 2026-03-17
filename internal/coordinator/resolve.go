@@ -62,6 +62,11 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			}
 		}
 
+		workDir := projectRoot
+		if spec.WorkDir != "" {
+			workDir = filepath.Join(projectRoot, spec.WorkDir)
+		}
+
 		actions = append(actions, &dag.Action{
 			ID:        spec.ID,
 			Command:   spec.Command,
@@ -70,7 +75,7 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			DependsOn: spec.DependsOn,
 			Env:       env,
 			Network:   spec.Network,
-			WorkDir:   projectRoot,
+			WorkDir:   workDir,
 		})
 	}
 

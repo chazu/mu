@@ -82,10 +82,19 @@
       true                            (conj (str "-o=" output))
       true                            (conj pkg))))
 
-(defn has-go-mod?
-  "Check if go.mod is among the sources or infer it should exist."
+(defn find-go-mod
+  "Find the go.mod source path. Returns nil if not found."
   [sources]
-  (some #(= % "go.mod") sources))
+  (first (filter #(str/ends-with? % "go.mod") sources)))
+
+(defn go-mod-dir
+  "Extract the directory containing go.mod from its path.
+   Returns nil if go.mod is at the root (no directory prefix)."
+  [go-mod-path]
+  (when go-mod-path
+    (let [dir (str/replace go-mod-path #"/go\.mod$" "")]
+      (when (and (not= dir go-mod-path) (not= dir ""))
+        dir))))
 
 (defn handle-plan [req]
   (let [target   (get req "target")
@@ -98,38 +107,51 @@
         env      (build-env config)
         cmd      (build-command config output pkg)
 
+        ;; Detect go.mod and its directory for work_dir.
+        go-mod   (find-go-mod sources)
+        mod-dir  (go-mod-dir go-mod)
+        has-mod  (some? go-mod)
+
         ;; Build input map: all declared sources
         inputs   (into {} (map (fn [s] [s s]) sources))
 
-        ;; Always include go.mod and go.sum if they exist in sources
-        ;; (the user should list them, but we make sure they're keyed correctly)
-        has-mod  (has-go-mod? sources)
+        ;; Find go.mod and go.sum keys (may have directory prefix)
+        go-mod-key (first (filter #(str/ends-with? % "go.mod") (keys inputs)))
+        go-sum-key (first (filter #(str/ends-with? % "go.sum") (keys inputs)))
+        mod-inputs (cond-> {}
+                     go-mod-key (assoc go-mod-key (get inputs go-mod-key))
+                     go-sum-key (assoc go-sum-key (get inputs go-sum-key)))
+
+        ;; Output path: if work_dir is set, output is relative to it
+        output-path (if mod-dir (str mod-dir "/" output) output)
 
         ;; Actions list — conditionally include mod-download
         actions
         (cond-> []
           ;; If go.mod is in sources, add a mod-download action first
           has-mod
-          (conj {"id"         "mod-download"
-                 "command"    ["go" "mod" "download"]
-                 "inputs"     (select-keys inputs ["go.mod" "go.sum"])
-                 "outputs"    []
-                 "depends_on" []
-                 "env"        (assoc env "GOFLAGS" "-modcacherw")
-                 "network"    true})
+          (conj (cond-> {"id"         "mod-download"
+                         "command"    ["go" "mod" "download"]
+                         "inputs"     mod-inputs
+                         "outputs"    []
+                         "depends_on" []
+                         "env"        (assoc env "GOFLAGS" "-modcacherw")
+                         "network"    true}
+                  mod-dir (assoc "work_dir" mod-dir)))
 
           ;; Always add the build action
           true
-          (conj {"id"         "build"
-                 "command"    cmd
-                 "inputs"     inputs
-                 "outputs"    [output]
-                 "depends_on" (if has-mod ["mod-download"] [])
-                 "env"        env
-                 "network"    false}))]
+          (conj (cond-> {"id"         "build"
+                         "command"    cmd
+                         "inputs"     inputs
+                         "outputs"    [output-path]
+                         "depends_on" (if has-mod ["mod-download"] [])
+                         "env"        env
+                         "network"    false}
+                  mod-dir (assoc "work_dir" mod-dir))))]
 
     {"actions"          actions
-     "declared_outputs" {"executable" output}}))
+     "declared_outputs" {"executable" output-path}}))
 
 (defn handle-request [req]
   (case (get req "method")
