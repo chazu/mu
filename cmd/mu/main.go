@@ -21,6 +21,8 @@ func main() {
 		os.Exit(runTarget(os.Args[2:]))
 	case "plugin":
 		os.Exit(runPlugin(os.Args[2:]))
+	case "verify":
+		os.Exit(runVerify(os.Args[2:]))
 	case "version":
 		fmt.Println("mu v0.1.0")
 	default:
@@ -38,5 +40,6 @@ Commands:
   cache      Inspect the local CAS cache
   target     List and inspect targets
   plugin     List and inspect plugins
+  verify     Re-hash CAS blobs and report corruption
   version    Print the mu version`)
 }
