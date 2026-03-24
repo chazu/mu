@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -188,6 +189,140 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 		return nil, err
 	}
 	return c.Execute(ctx, plan)
+}
+
+// ObserveResult holds the observation result for a single target.
+type ObserveResult struct {
+	Target string `json:"target"`
+	State  string `json:"state"` // "converged", "drifted", "unknown"
+	Diff   string `json:"diff,omitempty"`
+}
+
+// Observe checks the current state of the given targets by sending observe
+// requests to their plugins. Shell targets return {State: "unknown"} unless
+// they have an observe_command configured.
+func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]ObserveResult, error) {
+	// 1. Build toolchains from scratch.
+	registry := c.ToolchainRegistry
+	if registry == nil {
+		registry = NewToolchainRegistry(c.Store)
+	}
+	if len(c.Config.Toolchains) > 0 && c.Builder != nil {
+		if err := c.Builder.Build(ctx, c.Config); err != nil {
+			return nil, fmt.Errorf("coordinator: scratch build: %w", err)
+		}
+	}
+
+	// 2. Resolve targets.
+	targets, err := c.resolveTargets(targetNames)
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
+
+	// Collect which toolchains we need (skip shell targets).
+	neededToolchains := make(map[string]bool)
+	for _, t := range targets {
+		if t.Toolchain != "shell" {
+			neededToolchains[t.Toolchain] = true
+		}
+	}
+
+	// 3. Only start plugins for needed toolchains.
+	mgr := plugin.NewManager(c.ProjectRoot)
+
+	if len(neededToolchains) > 0 {
+		if needsScriptRuntime(c.Config.Plugins) {
+			bbPath, err := c.resolveScriptRuntime(ctx, registry)
+			if err != nil {
+				return nil, fmt.Errorf("coordinator: %w", err)
+			}
+			mgr.SetScriptRuntime(bbPath)
+		}
+
+		home, _ := os.UserHomeDir()
+		resolver := &PluginResolver{
+			Store:       c.Store,
+			ProjectRoot: c.ProjectRoot,
+			CacheDir:    filepath.Join(home, ".mu", "plugins"),
+		}
+		resolvedPlugins, err := resolver.Resolve(ctx, c.Config.Plugins)
+		if err != nil {
+			return nil, fmt.Errorf("coordinator: %w", err)
+		}
+
+		for _, rp := range resolvedPlugins {
+			if neededToolchains[rp.Def.Name] {
+				if err := mgr.Register(rp.Def); err != nil {
+					return nil, fmt.Errorf("coordinator: register plugin %q: %w", rp.Def.Name, err)
+				}
+			}
+		}
+		if err := mgr.Start(ctx); err != nil {
+			return nil, fmt.Errorf("coordinator: starting plugins: %w", err)
+		}
+		defer mgr.Close()
+	}
+
+	// 4. Send observe request for each target.
+	var results []ObserveResult
+	for _, t := range targets {
+		if t.Toolchain == "shell" {
+			// Shell targets: check for observe_command in config.
+			if t.Config != nil {
+				if obsCmd, ok := t.Config["observe_command"]; ok {
+					if cmdSlice, ok := obsCmd.([]any); ok && len(cmdSlice) > 0 {
+						// Run the observe command and check exit code.
+						result := observeViaCommand(ctx, t, cmdSlice, c.ProjectRoot)
+						results = append(results, result)
+						continue
+					}
+				}
+			}
+			results = append(results, ObserveResult{Target: t.Name, State: "unknown"})
+			continue
+		}
+
+		ti := plugin.TargetInfo{
+			Name:      t.Name,
+			Toolchain: t.Toolchain,
+			Sources:   t.Sources,
+			Config:    t.Config,
+		}
+
+		resp, err := mgr.Observe(ctx, t.Toolchain, ti, registry.ArtifactsMap(t.Toolchain))
+		if err != nil {
+			return nil, fmt.Errorf("coordinator: observing target %q: %w", t.Name, err)
+		}
+
+		results = append(results, ObserveResult{
+			Target: t.Name,
+			State:  resp.State,
+			Diff:   resp.Diff,
+		})
+	}
+
+	return results, nil
+}
+
+// observeViaCommand runs an observe_command for a shell target and returns the result.
+func observeViaCommand(ctx context.Context, t config.Target, cmdSlice []any, projectRoot string) ObserveResult {
+	args := make([]string, 0, len(cmdSlice))
+	for _, item := range cmdSlice {
+		if s, ok := item.(string); ok {
+			args = append(args, s)
+		}
+	}
+	if len(args) == 0 {
+		return ObserveResult{Target: t.Name, State: "unknown"}
+	}
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = projectRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ObserveResult{Target: t.Name, State: "drifted", Diff: string(output)}
+	}
+	return ObserveResult{Target: t.Name, State: "converged"}
 }
 
 // prefixActions rewrites action IDs and DependsOn references with a target
