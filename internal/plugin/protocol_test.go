@@ -32,6 +32,67 @@ func TestActionSpecImpureJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHasCapability_WithCapabilities(t *testing.T) {
+	resp := &plugin.DiscoverResponse{
+		Capabilities: []string{"discover", "plan", "observe"},
+	}
+	if !resp.HasCapability("observe") {
+		t.Error("expected observe capability")
+	}
+	if resp.HasCapability("nonexistent") {
+		t.Error("unexpected nonexistent capability")
+	}
+}
+
+func TestHasCapability_EmptyDefaultsToDiscoverPlan(t *testing.T) {
+	resp := &plugin.DiscoverResponse{} // old plugin, no capabilities field
+	if !resp.HasCapability("discover") {
+		t.Error("expected discover as default capability")
+	}
+	if !resp.HasCapability("plan") {
+		t.Error("expected plan as default capability")
+	}
+	if resp.HasCapability("observe") {
+		t.Error("observe should not be a default capability")
+	}
+}
+
+func TestObserveResponseJSONRoundTrip(t *testing.T) {
+	resp := plugin.ObserveResponse{
+		State: "drifted",
+		Diff:  "- replicas: 3\n+ replicas: 2",
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got plugin.ObserveResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.State != "drifted" {
+		t.Errorf("State = %q, want drifted", got.State)
+	}
+	if got.Diff == "" {
+		t.Error("expected non-empty Diff")
+	}
+}
+
+func TestNewObserveRequest(t *testing.T) {
+	target := plugin.TargetInfo{Name: "//k8s/api", Toolchain: "k8s"}
+	req := plugin.NewObserveRequest(target, map[string]string{"bin/kubectl": "sha256:abc"})
+
+	if req.Method != "observe" {
+		t.Errorf("Method = %q, want observe", req.Method)
+	}
+	if req.Target.Name != "//k8s/api" {
+		t.Errorf("Target.Name = %q, want //k8s/api", req.Target.Name)
+	}
+}
+
 func TestActionSpecImpureOmitEmpty(t *testing.T) {
 	spec := plugin.ActionSpec{
 		ID:      "build",

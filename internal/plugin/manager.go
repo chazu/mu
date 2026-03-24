@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // PluginDef defines a plugin as declared in mu.json.
@@ -54,33 +56,50 @@ func (m *Manager) Register(def PluginDef) error {
 	return nil
 }
 
-// Start spawns all registered plugins and sends discover requests.
+// Start spawns all registered plugins concurrently and sends discover requests.
 // Returns an error if any plugin fails to start or has incompatible protocol.
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Resolve commands first (no I/O, fast).
+	type resolved struct {
+		name    string
+		entry   *pluginEntry
+		command []string
+	}
+	var toStart []resolved
 	for name, entry := range m.plugins {
 		command, err := m.resolveCommand(entry.def)
 		if err != nil {
-			m.closeAllLocked()
 			return fmt.Errorf("plugin %q: %w", name, err)
 		}
+		toStart = append(toStart, resolved{name: name, entry: entry, command: command})
+	}
 
-		proc, err := StartProcess(name, command, m.projectRoot)
-		if err != nil {
-			// Shut down any already-started plugins.
-			m.closeAllLocked()
-			return err
-		}
-		entry.process = proc
+	// Start all plugins in parallel.
+	g, gctx := errgroup.WithContext(ctx)
+	for _, r := range toStart {
+		r := r // capture loop var
+		g.Go(func() error {
+			proc, err := StartProcess(r.name, r.command, m.projectRoot)
+			if err != nil {
+				return err
+			}
+			r.entry.process = proc
 
-		resp, err := proc.Discover(ctx)
-		if err != nil {
-			m.closeAllLocked()
-			return err
-		}
-		entry.discover = resp
+			resp, err := proc.Discover(gctx)
+			if err != nil {
+				return err
+			}
+			r.entry.discover = resp
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		m.closeAllLocked()
+		return err
 	}
 	return nil
 }
@@ -111,6 +130,28 @@ func (m *Manager) Plan(ctx context.Context, toolchain string, target TargetInfo,
 	}
 
 	return entry.process.Plan(ctx, target, deps, toolchainArtifacts)
+}
+
+// Observe sends an observe request to the plugin registered for the given toolchain.
+// If the plugin does not declare "observe" in its capabilities, returns {State: "unknown"}.
+func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetInfo, toolchainArtifacts map[string]string) (*ObserveResponse, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	entry, ok := m.plugins[toolchain]
+	if !ok {
+		return nil, fmt.Errorf("no plugin registered for toolchain %q", toolchain)
+	}
+	if entry.process == nil {
+		return nil, fmt.Errorf("plugin %q: not started", toolchain)
+	}
+
+	// Check capabilities before sending observe.
+	if entry.discover != nil && !entry.discover.HasCapability("observe") {
+		return &ObserveResponse{State: "unknown"}, nil
+	}
+
+	return entry.process.Observe(ctx, target, toolchainArtifacts)
 }
 
 // DiscoverInfo returns a copy of the discover response for a plugin, or nil if not found.

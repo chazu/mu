@@ -8,7 +8,7 @@ const ProtocolVersion = 1
 // Request is the unified envelope sent to plugins via NDJSON.
 // Plugins dispatch on the Method field.
 type Request struct {
-	Method             string            `json:"method"`                        // "discover" or "plan"
+	Method             string            `json:"method"`                        // "discover", "plan", or "observe"
 	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan"
 	Deps               []DepInfo         `json:"deps,omitempty"`               // set for "plan"
 	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan"
@@ -22,6 +22,38 @@ type DiscoverResponse struct {
 	Consumes        []string       `json:"consumes"`              // artifact types this plugin can consume
 	Produces        []string       `json:"produces"`              // artifact types this plugin can produce
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
+	Capabilities    []string       `json:"capabilities,omitempty"` // supported methods, e.g. ["discover","plan","observe"]
+}
+
+// HasCapability reports whether the plugin declared support for the given method.
+// If Capabilities is empty (old plugins), defaults to supporting "discover" and "plan".
+func (d *DiscoverResponse) HasCapability(method string) bool {
+	if len(d.Capabilities) == 0 {
+		return method == "discover" || method == "plan"
+	}
+	for _, c := range d.Capabilities {
+		if c == method {
+			return true
+		}
+	}
+	return false
+}
+
+// ObserveResponse is returned by plugins for method "observe".
+type ObserveResponse struct {
+	State   string         `json:"state"`             // "converged", "drifted", or "unknown"
+	Current map[string]any `json:"current,omitempty"` // plugin-specific current state
+	Diff    string         `json:"diff,omitempty"`    // human-readable diff
+	Error   string         `json:"error,omitempty"`
+}
+
+// NewObserveRequest returns a Request for the "observe" method.
+func NewObserveRequest(target TargetInfo, toolchainArtifacts map[string]string) Request {
+	return Request{
+		Method:             "observe",
+		Target:             &target,
+		ToolchainArtifacts: toolchainArtifacts,
+	}
 }
 
 // PlanResponse is returned by plugins for method "plan".

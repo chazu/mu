@@ -176,6 +176,29 @@ func (p *Process) Plan(ctx context.Context, target TargetInfo, deps []DepInfo, t
 	return &resp, nil
 }
 
+// DefaultObserveTimeout is the default timeout for observe requests.
+const DefaultObserveTimeout = 5 * time.Minute
+
+// Observe sends an observe request and returns the response.
+// If the plugin returns an error (e.g., "unknown method"), this is returned
+// as a normal error — the Manager handles fallback to {State: "unknown"}.
+func (p *Process) Observe(ctx context.Context, target TargetInfo, toolchainArtifacts map[string]string) (*ObserveResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultObserveTimeout)
+	defer cancel()
+
+	var resp ObserveResponse
+	req := NewObserveRequest(target, toolchainArtifacts)
+	if err := p.send(ctx, req, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Error != "" {
+		return nil, fmt.Errorf("plugin %q: observe error: %s", p.name, resp.Error)
+	}
+
+	return &resp, nil
+}
+
 // Close gracefully shuts down the plugin process.
 // Closes stdin and waits for the process to exit.
 func (p *Process) Close() error {
