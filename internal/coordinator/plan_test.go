@@ -139,6 +139,74 @@ func TestBuild_GraphPopulatedInResult(t *testing.T) {
 	}
 }
 
+func TestPlan_ShellTarget_NoPluginsNeeded(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{
+				{
+					Name:      "//deploy",
+					Toolchain: "shell",
+					Config: map[string]any{
+						"command": []any{"echo", "deployed"},
+						"network": true,
+					},
+				},
+			},
+			// No plugins registered — shell targets bypass plugin system.
+		},
+		Store:   newTestStore(t),
+		Workers: 1,
+	}
+
+	plan, err := c.Plan(context.Background(), []string{"//deploy"})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Graph.Len() != 1 {
+		t.Errorf("Graph has %d actions, want 1", plan.Graph.Len())
+	}
+
+	actions := plan.Graph.Actions()
+	a := actions[0]
+	if a.Command[0] != "echo" {
+		t.Errorf("Command[0] = %q, want \"echo\"", a.Command[0])
+	}
+	if !a.Impure {
+		t.Error("shell action should be impure by default")
+	}
+	if !a.Network {
+		t.Error("shell action should have network=true as configured")
+	}
+}
+
+func TestBuild_ShellTarget_Executes(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{
+				{
+					Name:      "//hello",
+					Toolchain: "shell",
+					Config: map[string]any{
+						"command": []any{"echo", "hello from shell"},
+					},
+				},
+			},
+		},
+		Store:   newTestStore(t),
+		Workers: 1,
+	}
+
+	result, err := c.Build(context.Background(), []string{"//hello"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if result.Completed != 1 {
+		t.Errorf("Completed = %d, want 1", result.Completed)
+	}
+}
+
 func TestPlanThenExecute(t *testing.T) {
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),

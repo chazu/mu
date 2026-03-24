@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 
+	"github.com/chau/mu/internal/builtin"
 	"github.com/chau/mu/internal/cas"
 	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/dag"
@@ -108,34 +109,46 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	graph := dag.NewGraph()
 
 	for _, t := range targets {
-		ti := plugin.TargetInfo{
-			Name:      t.Name,
-			Toolchain: t.Toolchain,
-			Sources:   t.Sources,
-			Config:    t.Config,
-		}
+		var planActions []plugin.ActionSpec
 
-		// For v1 dep artifacts are empty; full wiring comes later.
-		var deps []plugin.DepInfo
-		for _, depName := range t.Deps {
-			deps = append(deps, plugin.DepInfo{
-				Target:    depName,
-				Artifacts: nil,
-			})
-		}
+		if t.Toolchain == "shell" {
+			// Shell targets use the built-in handler — no external plugin needed.
+			actions, _, err := builtin.ShellPlan(t)
+			if err != nil {
+				return nil, fmt.Errorf("coordinator: %w", err)
+			}
+			planActions = actions
+		} else {
+			ti := plugin.TargetInfo{
+				Name:      t.Name,
+				Toolchain: t.Toolchain,
+				Sources:   t.Sources,
+				Config:    t.Config,
+			}
 
-		plan, err := mgr.Plan(ctx, t.Toolchain, ti, deps, registry.ArtifactsMap(t.Toolchain))
-		if err != nil {
-			return nil, fmt.Errorf("coordinator: planning target %q: %w", t.Name, err)
-		}
-		if plan.Error != "" {
-			return nil, fmt.Errorf("coordinator: plugin error for target %q: %s", t.Name, plan.Error)
+			// For v1 dep artifacts are empty; full wiring comes later.
+			var deps []plugin.DepInfo
+			for _, depName := range t.Deps {
+				deps = append(deps, plugin.DepInfo{
+					Target:    depName,
+					Artifacts: nil,
+				})
+			}
+
+			plan, err := mgr.Plan(ctx, t.Toolchain, ti, deps, registry.ArtifactsMap(t.Toolchain))
+			if err != nil {
+				return nil, fmt.Errorf("coordinator: planning target %q: %w", t.Name, err)
+			}
+			if plan.Error != "" {
+				return nil, fmt.Errorf("coordinator: plugin error for target %q: %s", t.Name, plan.Error)
+			}
+			planActions = plan.Actions
 		}
 
 		// Prefix action IDs with target name to avoid cross-target collisions.
-		prefixActions(t.Name, plan.Actions)
+		prefixActions(t.Name, planActions)
 
-		resolved, err := Resolve(plan.Actions, c.ProjectRoot)
+		resolved, err := Resolve(planActions, c.ProjectRoot)
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}
