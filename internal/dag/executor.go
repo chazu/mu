@@ -20,6 +20,7 @@ type ActionStatus struct {
 	Cached   bool
 	ExitCode int
 	Err      error
+	Outputs  map[string]cas.Digest // output name -> content digest
 }
 
 // ExecuteResult holds the outcome of a full DAG execution.
@@ -141,18 +142,20 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 }
 
 // executeAction runs a single action: check cache, execute if miss, store results.
+// Impure actions skip cache lookup and storage entirely.
 func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
-	key := ComputeActionKey(a)
-
-	// Check cache.
-	if e.Store != nil {
-		cached, err := e.Store.GetActionResult(ctx, key)
-		if err == nil && cached != nil {
-			// Cache hit — restore outputs from CAS.
-			if err := e.restoreOutputs(ctx, a, cached); err == nil {
-				return ActionStatus{ID: a.ID, Cached: true, ExitCode: cached.ExitCode}
+	// Cache check — only for pure actions.
+	if !a.Impure {
+		key := ComputeActionKey(a)
+		if e.Store != nil {
+			cached, err := e.Store.GetActionResult(ctx, key)
+			if err == nil && cached != nil {
+				// Cache hit — restore outputs from CAS.
+				if err := e.restoreOutputs(ctx, a, cached); err == nil {
+					return ActionStatus{ID: a.ID, Cached: true, ExitCode: cached.ExitCode, Outputs: cached.Outputs}
+				}
+				// On restore failure, fall through to re-execute.
 			}
-			// On restore failure, fall through to re-execute.
 		}
 	}
 
@@ -174,13 +177,13 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
 	}
 
-	// Hash declared outputs and store in CAS.
+	// Hash declared outputs and store in CAS — only for pure actions.
 	actionResult := &cas.ActionResult{
 		Outputs:  make(map[string]cas.Digest),
 		ExitCode: exitCode,
 	}
 
-	if e.Store != nil {
+	if e.Store != nil && !a.Impure {
 		for _, outPath := range a.Outputs {
 			dgst, err := e.storeOutput(ctx, outPath)
 			if err != nil {
@@ -189,13 +192,14 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 			actionResult.Outputs[outPath] = dgst
 		}
 
+		key := ComputeActionKey(a)
 		if err := e.Store.PutActionResult(ctx, key, actionResult); err != nil {
 			// Cache write failure is not fatal — warn but don't fail the action.
 			fmt.Fprintf(os.Stderr, "mu: warning: cache write for action %q: %v\n", a.ID, err)
 		}
 	}
 
-	return ActionStatus{ID: a.ID, ExitCode: exitCode}
+	return ActionStatus{ID: a.ID, ExitCode: exitCode, Outputs: actionResult.Outputs}
 }
 
 // executeBare runs a command directly on the host (no sandbox).
@@ -312,11 +316,13 @@ func writeFile(path string, r io.Reader) error {
 }
 
 // buildEnv converts an env map to the os/exec []string format.
-// Returns nil (inherit nothing) if the map is empty — actions get minimal env.
+// A nil map means "inherit parent environment" (backward compat).
+// An explicit empty map means "clean environment with no variables".
 func buildEnv(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
+	if env == nil {
+		return nil // nil env = inherit parent (backward compat)
 	}
+	// Explicit env map (even if empty) = use only declared vars
 	result := make([]string, 0, len(env))
 	for k, v := range env {
 		result = append(result, k+"="+v)

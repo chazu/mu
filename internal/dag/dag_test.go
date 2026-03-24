@@ -284,6 +284,48 @@ func TestActionKeyInputOrder(t *testing.T) {
 	}
 }
 
+func TestActionKeyWorkDirDiffers(t *testing.T) {
+	a1 := &dag.Action{
+		ID:      "build",
+		Command: []string{"make"},
+		WorkDir: "/project/subdir-a",
+	}
+	a2 := &dag.Action{
+		ID:      "build",
+		Command: []string{"make"},
+		WorkDir: "/project/subdir-b",
+	}
+	k1 := dag.ComputeActionKey(a1)
+	k2 := dag.ComputeActionKey(a2)
+	if k1 == k2 {
+		t.Error("different WorkDirs produced the same key")
+	}
+}
+
+func TestActionKeyWorkDirEmptyBackwardCompat(t *testing.T) {
+	// An action with empty WorkDir should produce the same key as before
+	// (i.e., WorkDir is not included in the hash when empty).
+	a := &dag.Action{
+		ID:      "build",
+		Command: []string{"go", "build", "."},
+		Env:     map[string]string{"GOOS": "linux"},
+		Inputs:  map[string]cas.Digest{"main.go": cas.NewSHA256("aaa")},
+		WorkDir: "",
+	}
+	k1 := dag.ComputeActionKey(a)
+	// Compute again to verify determinism with empty WorkDir.
+	k2 := dag.ComputeActionKey(a)
+	if k1 != k2 {
+		t.Errorf("empty WorkDir: keys differ across calls: %v vs %v", k1, k2)
+	}
+	// A non-empty WorkDir should produce a different key.
+	a.WorkDir = "/some/dir"
+	k3 := dag.ComputeActionKey(a)
+	if k1 == k3 {
+		t.Error("empty vs non-empty WorkDir produced the same key")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Executor tests
 // ---------------------------------------------------------------------------

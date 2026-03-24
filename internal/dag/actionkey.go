@@ -49,5 +49,10 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	// Network flag.
 	fmt.Fprintf(h, "network:%t\n", a.Network)
 
+	// Include work_dir in the key.
+	if a.WorkDir != "" {
+		fmt.Fprintf(h, "work_dir:%s\n", a.WorkDir)
+	}
+
 	return cas.ActionKey{Digest: cas.NewSHA256(hex.EncodeToString(h.Sum(nil)))}
 }

@@ -32,14 +32,25 @@ type Coordinator struct {
 
 // BuildResult summarises the outcome of a build.
 type BuildResult struct {
-	Completed int
-	Cached    int
-	Failed    int
-	Cancelled int
+	Completed  int
+	Cached     int
+	Failed     int
+	Cancelled  int
+	Graph      *dag.Graph          // the planned action DAG (always populated)
+	ExecResult *dag.ExecuteResult  // per-action detail from execution
 }
 
-// Build orchestrates the full build pipeline for the given target names.
-func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
+// PlanResult holds the planned action graph. Plugins are shut down before
+// Plan() returns — they are only needed during planning, not execution.
+type PlanResult struct {
+	Graph *dag.Graph
+}
+
+// Plan runs the planning pipeline: build toolchains, resolve plugins, start
+// plugins, resolve the target graph, and ask each plugin to plan its targets.
+// Plugins are shut down before returning. The resulting Graph is ready for
+// execution or inspection (--plan mode).
+func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResult, error) {
 	// 1. Build toolchains from scratch (must happen before plugins, since plugins
 	//    may need a scratch-built runtime like bb).
 	registry := c.ToolchainRegistry
@@ -84,15 +95,16 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 	if err := mgr.Start(ctx); err != nil {
 		return nil, fmt.Errorf("coordinator: starting plugins: %w", err)
 	}
+	// Plugins are only needed for planning. Shut them down before returning.
 	defer mgr.Close()
 
-	// 2. Resolve target graph (topological order, leaves first).
+	// 4. Resolve target graph (topological order, leaves first).
 	targets, err := c.resolveTargets(targetNames)
 	if err != nil {
 		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
-	// 3-4. Plan each target via its toolchain plugin and resolve actions.
+	// 5. Plan each target via its toolchain plugin and resolve actions.
 	graph := dag.NewGraph()
 
 	for _, t := range targets {
@@ -135,18 +147,34 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 		}
 	}
 
-	// 5. Execute the global DAG.
+	return &PlanResult{Graph: graph}, nil
+}
+
+// Execute runs a previously planned DAG.
+func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResult, error) {
 	workers := c.Workers
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
 	executor := &dag.Executor{Store: c.Store, Workers: workers}
-	execResult, err := executor.Execute(ctx, graph)
+	execResult, err := executor.Execute(ctx, plan.Graph)
 	if err != nil {
 		return nil, fmt.Errorf("coordinator: execution: %w", err)
 	}
 
-	return buildResultFrom(execResult), nil
+	br := buildResultFrom(execResult)
+	br.Graph = plan.Graph
+	br.ExecResult = execResult
+	return br, nil
+}
+
+// Build orchestrates the full build pipeline: Plan() + Execute().
+func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
+	plan, err := c.Plan(ctx, targetNames)
+	if err != nil {
+		return nil, err
+	}
+	return c.Execute(ctx, plan)
 }
 
 // prefixActions rewrites action IDs and DependsOn references with a target

@@ -65,6 +65,11 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 		workDir := projectRoot
 		if spec.WorkDir != "" {
 			workDir = filepath.Join(projectRoot, spec.WorkDir)
+			cleanRoot := filepath.Clean(projectRoot)
+			cleanWork := filepath.Clean(workDir)
+			if !strings.HasPrefix(cleanWork, cleanRoot+string(filepath.Separator)) && cleanWork != cleanRoot {
+				return nil, fmt.Errorf("work_dir %q escapes project root", spec.WorkDir)
+			}
 		}
 
 		actions = append(actions, &dag.Action{
@@ -76,6 +81,7 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			Env:       env,
 			Network:   spec.Network,
 			WorkDir:   workDir,
+			Impure:    spec.Impure,
 		})
 	}
 

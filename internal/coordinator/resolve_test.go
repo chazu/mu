@@ -190,6 +190,78 @@ func TestResolvePathTraversal(t *testing.T) {
 	}
 }
 
+func TestResolveWorkDirTraversal(t *testing.T) {
+	dir := t.TempDir()
+
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "build",
+			Command: []string{"make"},
+			WorkDir: "../../etc",
+		},
+	}
+
+	_, err := Resolve(specs, dir)
+	if err == nil {
+		t.Fatal("expected error for work_dir traversal, got nil")
+	}
+	if !contains(err.Error(), "escapes project root") {
+		t.Errorf("expected 'escapes project root' error, got: %s", err.Error())
+	}
+}
+
+func TestResolveWorkDirValid(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create the subdirectory so the test is realistic.
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "build",
+			Command: []string{"make"},
+			WorkDir: "subdir",
+		},
+	}
+
+	actions, err := Resolve(specs, dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("got %d actions, want 1", len(actions))
+	}
+	if actions[0].WorkDir != filepath.Join(dir, "subdir") {
+		t.Errorf("WorkDir = %q, want %q", actions[0].WorkDir, filepath.Join(dir, "subdir"))
+	}
+}
+
+func TestResolveWorkDirEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "build",
+			Command: []string{"make"},
+			WorkDir: "",
+		},
+	}
+
+	actions, err := Resolve(specs, dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("got %d actions, want 1", len(actions))
+	}
+	if actions[0].WorkDir != dir {
+		t.Errorf("WorkDir = %q, want %q", actions[0].WorkDir, dir)
+	}
+}
+
 func TestResolveEmptySpecs(t *testing.T) {
 	actions, err := Resolve(nil, t.TempDir())
 	if err != nil {

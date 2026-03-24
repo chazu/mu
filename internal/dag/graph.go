@@ -17,6 +17,7 @@ type Action struct {
 	Env       map[string]string
 	Network   bool   // allow network access (honor system in v1)
 	WorkDir   string // execution working directory
+	Impure    bool   // skip CAS cache when true
 
 	// Toolchain is the set of artifacts (relative path → CAS digest) that
 	// constitute the hermetic build environment for this action. When set,

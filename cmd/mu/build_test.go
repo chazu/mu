@@ -52,6 +52,22 @@ func TestNoTargetsReturnsError(t *testing.T) {
 	}
 }
 
+func TestEmitManifestAndPlanMutuallyExclusive(t *testing.T) {
+	// When both --emit-manifest and --plan are set, runBuild should return exit code 2.
+	code := runBuild([]string{"--emit-manifest", "--plan", "//target"})
+	if code != 2 {
+		t.Errorf("runBuild(--emit-manifest --plan) = %d, want 2", code)
+	}
+}
+
+func TestEmitManifestAndDryRunMutuallyExclusive(t *testing.T) {
+	// --dry-run is an alias for --plan, so this should also be rejected.
+	code := runBuild([]string{"--emit-manifest", "--dry-run", "//target"})
+	if code != 2 {
+		t.Errorf("runBuild(--emit-manifest --dry-run) = %d, want 2", code)
+	}
+}
+
 func TestFlagDefaults(t *testing.T) {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	jobs := fs.Int("jobs", 0, "max parallel actions")
