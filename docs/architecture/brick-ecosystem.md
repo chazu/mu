@@ -108,19 +108,41 @@ bricks: "": {
 
 ### BRICK + ACUTE + IDEA
 
-BRICK, ACUTE, and IDEA are three complementary frameworks:
+Three complementary frameworks, each answering a different question:
 
-- **BRICK** classifies *what things are* — the static taxonomy of blocks
-- **IDEA** classifies *what knowledge is* — Intention, Definition, Execution,
-  Application layers
-- **ACUTE** describes *how knowledge flows* — Accumulate, Configure, Unify,
-  Transform, Execute pipeline
+**BRICK** classifies *what things are* — the static taxonomy of blocks.
 
-Together they form a complete model: BRICK says "this is a k8s component
-implementing the app interface." IDEA says "its desired state is in the
-Definition layer, its actual state is in the Application layer." ACUTE says
-"we accumulate actual state, unify it with desired state, and execute
-convergence actions."
+| Register | Question | mu+pudl implementation |
+|----------|----------|----------------------|
+| Building block | What is this thing? | `config.Target` in mu, CUE definition in pudl |
+| Role | What does it do? | `kind` field: relationship, interface, component, kit |
+| Implementation | How is it realized? | Plugin (go, k8s, terraform, shell, file, docker, zig) |
+| Configuration | How is it parameterized? | `config` map validated against plugin `config_schema` |
+| Kit | What collection? | mu.json file, pudl workspace, `composes` field on kit targets |
+
+**IDEA** classifies *what knowledge is* — four layers of understanding.
+
+| Layer | What it holds | pudl implementation |
+|-------|--------------|-------------------|
+| **Intention** | What should be true. CUE schemas, constraints, governance policies. | `~/.pudl/schema/` — git-tracked CUE repository with `_pudl` metadata for inference, validation, and identity tracking |
+| **Definition** | What you declared. Concrete desired-state values. | `~/.pudl/schema/definitions/*.cue` — named CUE instances that unify against Intention schemas (e.g., `api_deployment: k8s.#Deployment & {replicas: 3}`) |
+| **Execution** | What tools computed. Results of convergence actions. | mu manifests ingested via `pudl import manifest.json --origin mu`, typed as `pudl/mu.#Manifest` with action outcomes, output digests, and BRICK metadata |
+| **Application** | What actually exists. Observed live state. | Raw data imported via `pudl import` (JSON/YAML/CSV/NDJSON), auto-inferred against schemas, stored in SQLite catalog with resource identity and versioning |
+
+**ACUTE** describes *how knowledge flows* — the pipeline that connects layers.
+
+| Phase | What happens | Tool |
+|-------|-------------|------|
+| **Accumulate** | Import actual state from live systems | `pudl import --path /etc/nginx/nginx.conf` or `mu observe --json \| pudl import` |
+| **Configure** | Normalize imported state, resolve naming differences | `pudl` schema inference (heuristic scoring + CUE unification) |
+| **Unify** | Merge desired (Definition) with actual (Application), surface drift | `pudl drift check --all` (deep diff, field-level differences) |
+| **Transform** | Export drifted resources as convergence targets | `pudl export-actions --all > converge.json` (schema ref → toolchain mapping) |
+| **Execute** | Run convergence actions, report results | `mu build --emit-manifest --config converge.json` (DAG execution, manifest output) |
+
+Together: BRICK says "this is a k8s component implementing the app interface."
+IDEA says "its desired state is in the Definition layer, its actual state is
+in the Application layer." ACUTE says "we accumulate actual state, unify it
+with desired state, and execute convergence actions." The loop repeats.
 
 mu and pudl are the tools that make this model executable.
 
@@ -163,38 +185,132 @@ through Unix conventions: stdin/stdout, exit codes, and file I/O.
 
 ### pudl — The Knowledge Layer
 
-pudl owns the **IDEA ontology**: Intention, Definition, Execution, Application.
+pudl is a personal data lake that owns the IDEA ontology. It is a Go binary
+with a SQLite catalog, git-tracked CUE schema repository, and streaming
+import pipeline.
 
-| Layer | What it holds | Where it lives |
-|-------|--------------|----------------|
-| **Intention** | CUE schemas, governance policies, constraints | `*.cue` files defining resource types |
-| **Definition** | Declared desired state for each resource | `*.cue` files referencing Intention schemas |
-| **Execution** | Outputs of convergence actions (what mu did) | Manifest JSON ingested from mu |
-| **Application** | Observed actual state of the world | Imported from live systems by pudl |
+**Storage layout (`~/.pudl/`):**
+```
+~/.pudl/
+├── config.yaml                    # Configuration (incl. toolchain_mappings)
+├── data/
+│   ├── raw/YYYY/MM/DD/            # Date-partitioned raw imports
+│   ├── metadata/                  # JSON metadata sidecars
+│   ├── sqlite/catalog.db          # SQLite catalog (identity, versioning)
+│   └── .drift/                    # Drift reports per definition
+├── schema/                        # Git-tracked CUE repository
+│   ├── .git/
+│   ├── cue.mod/module.cue
+│   ├── pudl/                      # Built-in schemas
+│   │   ├── core/core.cue          # Catchall #Item, #Collection
+│   │   ├── fs/fs.cue              # #File, #Dir, #Layout
+│   │   ├── mu/mu.cue              # #Manifest, #ObserveResult, #PlanOutput
+│   │   ├── brick/brick.cue        # #Target, #Interface, #Kit
+│   │   ├── infra/                 # Infrastructure resource types
+│   │   ├── artifact/              # #ImageRef, #ArtifactRef
+│   │   └── ...                    # version, catalog, component, registry
+│   └── definitions/               # Named desired-state instances
+└── vaults/                        # Age-encrypted secrets
+```
 
-pudl's job:
-1. Define desired state in CUE (schemas + values)
-2. Import actual state from live systems (`pudl import`)
-3. Unify desired and actual state in a CUE lattice
-4. Detect drift (desired vs actual divergence)
-5. Export convergence targets as mu.json (`pudl export-actions`)
-6. Ingest execution results from mu manifests (`pudl ingest`)
+**What pudl does:**
+
+| Capability | Command | Implementation |
+|-----------|---------|---------------|
+| Import any data | `pudl import <file>` | Streaming CDC parser, auto-format detection (JSON/YAML/CSV/NDJSON), content-hash dedup |
+| Infer schemas | (automatic on import) | Heuristic scoring + CUE unification, cascade fallback to catchall |
+| Track identity | (automatic on import) | Resource ID from schema `identity_fields`, version counter per resource |
+| Define desired state | CUE files in `definitions/` | Named instances unifying against schemas (e.g., `api: k8s.#Deployment & {replicas: 3}`) |
+| Detect drift | `pudl drift check` | Deep diff: declared keys vs latest imported state, field-level add/remove/change |
+| Export to mu | `pudl export-actions` | Schema ref → toolchain mapping (configurable), desired state as `config` |
+| Manage schemas | `pudl schema add/show/edit` | Git-backed with `status/commit/log` |
+| Validate | `pudl validate`, `pudl verify` | CUE constraint checking, fixed-point verification |
+| Store secrets | `pudl vault get/set` | Age-encrypted key-value store |
+| Import mu results | `pudl import manifest.json --origin mu` | Auto-matched to `pudl/mu.#Manifest` schema |
+
+**Built-in CUE schemas for mu integration:**
+
+- `pudl/mu.#Manifest` — types `mu build --emit-manifest` output. Identity
+  by timestamp, tracks summary and actions over time.
+- `pudl/mu.#ObserveResult` — types `mu observe --json` output. Identity
+  by target, tracks state and diff over time.
+- `pudl/mu.#PlanOutput` — types `mu build --plan --json` output.
+- `pudl/brick.#Target` — BRICK-classified mu target with kind, implements,
+  composes fields. Enables definitions to carry BRICK metadata through
+  the export → build → manifest → import round-trip.
+- `pudl/brick.#Interface` — contract that components implement.
+- `pudl/brick.#Kit` — composition of targets deployed together.
+
+**Toolchain mapping (schema ref → mu toolchain):**
+
+pudl maps CUE schema reference prefixes to mu toolchain names when
+exporting convergence targets. Default mappings:
+
+| Schema prefix | mu toolchain | Plugin |
+|--------------|-------------|--------|
+| `ec2.*`, `s3.*`, `iam.*`, `aws.*` | `aws` | (planned) |
+| `k8s.*`, `kubernetes.*` | `k8s` | `plugins/k8s/plugin.bb` |
+| `terraform.*`, `tf.*` | `terraform` | `plugins/terraform/plugin.bb` |
+| `file.*`, `config.*` | `file` | `plugins/file/plugin.bb` |
+| `docker.*`, `container.*` | `docker` | `plugins/docker/plugin.bb` |
+| `shell.*`, `exec.*` | `shell` | Go built-in |
+| `zig.*` | `zig` | `plugins/zig/plugin.bb` |
+
+Custom mappings can be added in `~/.pudl/config.yaml`:
+```yaml
+toolchain_mappings:
+  - prefix: "mycloud"
+    toolchain: "mycloud-plugin"
+```
+
+User mappings take precedence over defaults.
 
 pudl never executes actions. It never SSH's into a server, runs kubectl, or
 calls cloud APIs. It only reads and compares.
 
 ### mu — The Execution Layer
 
-mu owns the **action DAG**: content-addressed, parallel, plugin-driven.
+mu is a Go binary that owns the action DAG: content-addressed, parallel,
+plugin-driven.
 
-mu's job:
-1. Load targets from mu.json (hand-written or pudl-generated)
-2. Ask plugins to plan convergence actions for each target
-3. Build a dependency-ordered DAG of actions
-4. Execute actions in parallel with a worker pool
-5. Cache pure action results in the CAS (skip impure convergence actions)
-6. Report what was done as a structured manifest
-7. Optionally observe current state via plugins (drift detection shortcut)
+**What mu does:**
+
+| Capability | Command | Implementation |
+|-----------|---------|---------------|
+| Plan actions | `mu build --plan` | Coordinator.Plan(): toolchain build, plugin start, target resolve, plugin plan, DAG construction |
+| Execute DAG | `mu build` | Coordinator.Execute(): parallel worker pool, CAS cache check/store |
+| Validate configs | (automatic during plan) | Target config validated against plugin `config_schema` (type, required, enum) |
+| Report results | `mu build --emit-manifest` | Versioned JSON manifest with per-action detail, BRICK metadata on targets |
+| Observe drift | `mu observe` | Plugin observe method, capability negotiation, shell `observe_command` |
+| Verify cache | `mu verify` | Re-hash all CAS blobs, detect corruption, `--fix` to delete |
+| Shell escape | `toolchain: "shell"` | Go built-in, no bb required, `command` must be `[]string` |
+
+**Key architectural features:**
+
+- **Plan/Execute split** — `Coordinator.Plan()` builds the DAG and shuts down
+  plugins before returning. `Coordinator.Execute()` runs the DAG. `Build()`
+  is a convenience method that calls both. `--plan` mode calls only `Plan()`.
+
+- **Impure actions** — actions with `impure: true` skip CAS cache lookup and
+  storage entirely. Convergence actions (k8s apply, terraform apply) are
+  inherently impure. Build actions (go build, zig build) are pure and cached.
+
+- **Config validation** — after discover and before planning, mu validates
+  each target's `config` against the plugin's declared `config_schema`.
+  Catches missing required fields, type mismatches, and invalid enum values
+  with clear error messages.
+
+- **BRICK metadata passthrough** — targets carry optional `kind` and
+  `implements` fields (set by pudl, ignored by mu during planning). These
+  flow through to the manifest's `targets` section for round-tripping back
+  to pudl.
+
+- **Parallel plugin startup** — all plugin processes spawn and run discover
+  concurrently via `errgroup.Group`, reducing startup from O(N * JVM_cold_start)
+  to O(max(JVM_cold_start)).
+
+- **Selective plugin startup for observe** — only starts plugins for
+  toolchains referenced by the requested targets.
 
 mu never defines desired state. It never stores CUE schemas or compares
 states. It receives desired state as target configs and makes it real.
@@ -357,8 +473,11 @@ Or use mu as a shortcut for observation:
 ```bash
 # mu asks plugins to check current state directly
 mu observe --json --config converge.json //k8s/api-deployment //infra/vpc \
-  | pudl ingest --layer application
+  | pudl import --origin mu
 ```
+
+pudl's `pudl/mu.#ObserveResult` schema auto-matches the observe output,
+storing it as Application-layer data with identity tracking per target.
 
 ### Phase 2: Configure
 
@@ -411,7 +530,8 @@ mu build --emit-manifest --config /tmp/converge.json //... \
   > /tmp/manifest.json 2>build.log
 
 # Feed results back to pudl (closes the loop)
-pudl ingest --layer execution < /tmp/manifest.json
+# pudl auto-matches against pudl/mu.#Manifest schema
+pudl import /tmp/manifest.json --origin mu
 ```
 
 ### The Loop Continues
@@ -552,7 +672,7 @@ mu build --json //target
 mu observe //k8s/api //infra/vpc
 
 # Machine-readable output for pudl
-mu observe --json //k8s/api //infra/vpc | pudl ingest
+mu observe --json //k8s/api //infra/vpc | pudl import --origin mu
 
 # Exit codes for scripting
 mu observe //target && echo "converged" || echo "drifted"
@@ -585,12 +705,12 @@ mu build --plan --json --config /tmp/converge.json //...
 mu build --emit-manifest --config /tmp/converge.json //... \
   > /tmp/manifest.json
 
-# 4. Ingest: feed results back to pudl
-pudl ingest --layer execution < /tmp/manifest.json
+# 4. Ingest: feed results back to pudl (auto-matches pudl/mu.#Manifest)
+pudl import /tmp/manifest.json --origin mu
 
 # 5. Verify: re-observe to confirm convergence
 mu observe --json --config /tmp/converge.json //... \
-  | pudl ingest --layer application
+  | pudl import --origin mu
 
 # 6. Check: assert no remaining drift
 pudl drift check --all --strict
