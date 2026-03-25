@@ -41,9 +41,9 @@ func ValidateTargetConfig(target config.Target, schema map[string]any) error {
 
 		val, present := cfg[field]
 
-		// Check required: fields without "default" must be present.
+		// Check required: field must be present only if schema declares "required": true.
 		if !present {
-			if _, hasDefault := fieldSchema["default"]; !hasDefault {
+			if req, _ := fieldSchema["required"].(bool); req {
 				errs = append(errs, fmt.Sprintf("target %q: missing required config field %q", target.Name, field))
 			}
 			continue
