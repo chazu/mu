@@ -41,6 +41,7 @@ type ToolchainConfig struct {
 // Resolution order:
 //   - Script: a .bb script path (local, vendored in repo). Hashed and stored in CAS.
 //   - URL+SHA256: a remote .bb script. Fetched, verified, stored in CAS.
+//   - Digest: a CAS digest referencing a previously stored plugin script.
 //   - Command: a direct executable (escape hatch, not stored in CAS).
 type PluginDef struct {
 	Name    string   `json:"name"`
@@ -48,6 +49,7 @@ type PluginDef struct {
 	Script  string   `json:"script,omitempty"`
 	URL     string   `json:"url,omitempty"`
 	SHA256  string   `json:"sha256,omitempty"`
+	Digest  string   `json:"digest,omitempty"`
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON

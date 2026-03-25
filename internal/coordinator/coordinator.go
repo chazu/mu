@@ -461,10 +461,12 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 	return result, nil
 }
 
-// needsScriptRuntime returns true if any plugin uses the Script field.
+// needsScriptRuntime returns true if any plugin uses a script-based resolution
+// (local script path, remote URL, or CAS digest). All of these produce .bb
+// scripts that require the bb runtime.
 func needsScriptRuntime(plugins []config.PluginDef) bool {
 	for _, p := range plugins {
-		if p.Script != "" {
+		if p.Script != "" || p.URL != "" || p.Digest != "" {
 			return true
 		}
 	}

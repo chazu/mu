@@ -51,6 +51,8 @@ func (r *PluginResolver) resolveOne(ctx context.Context, p config.PluginDef) (*R
 		return r.resolveRemote(ctx, p)
 	case p.Script != "":
 		return r.resolveLocal(ctx, p)
+	case p.Digest != "":
+		return r.resolveDigest(ctx, p)
 	case len(p.Command) > 0:
 		return &ResolvedPlugin{
 			Def: plugin.PluginDef{
@@ -59,8 +61,37 @@ func (r *PluginResolver) resolveOne(ctx context.Context, p config.PluginDef) (*R
 			},
 		}, nil
 	default:
-		return nil, fmt.Errorf("no command, script, or url specified")
+		return nil, fmt.Errorf("no command, script, url, or digest specified")
 	}
+}
+
+// resolveDigest extracts a plugin script directly from CAS by its digest.
+func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
+	dgst, err := cas.ParseDigest(p.Digest)
+	if err != nil {
+		return nil, fmt.Errorf("parse digest %q: %w", p.Digest, err)
+	}
+
+	has, err := r.Store.Has(ctx, dgst)
+	if err != nil {
+		return nil, fmt.Errorf("check CAS for digest %s: %w", dgst, err)
+	}
+	if !has {
+		return nil, fmt.Errorf("plugin digest %s not found in CAS", dgst)
+	}
+
+	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ResolvedPlugin{
+		Def: plugin.PluginDef{
+			Name:   p.Name,
+			Script: cachedPath,
+		},
+		Digest: dgst,
+	}, nil
 }
 
 // resolveLocal reads a local script file, stores it in CAS, and returns a

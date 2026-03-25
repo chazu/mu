@@ -82,18 +82,27 @@ func runPluginList(args []string) int {
 func pluginListConfig(cfg *config.ProjectConfig, jsonOut bool) int {
 	type pluginInfo struct {
 		Name    string `json:"name"`
-		Type    string `json:"type"` // "command" or "script"
+		Type    string `json:"type"` // "command", "script", "digest", or "url"
 		Command string `json:"command,omitempty"`
 		Script  string `json:"script,omitempty"`
+		Digest  string `json:"digest,omitempty"`
+		URL     string `json:"url,omitempty"`
 	}
 
 	var items []pluginInfo
 	for _, p := range cfg.Plugins {
 		item := pluginInfo{Name: p.Name}
-		if p.Script != "" {
+		switch {
+		case p.Script != "":
 			item.Type = "script"
 			item.Script = p.Script
-		} else {
+		case p.Digest != "":
+			item.Type = "digest"
+			item.Digest = p.Digest
+		case p.URL != "":
+			item.Type = "url"
+			item.URL = p.URL
+		default:
 			item.Type = "command"
 			if len(p.Command) > 0 {
 				item.Command = p.Command[0]
@@ -109,13 +118,19 @@ func pluginListConfig(cfg *config.ProjectConfig, jsonOut bool) int {
 		return 0
 	}
 
-	fmt.Printf("%-20s %-10s %s\n", "PLUGIN", "TYPE", "PATH")
+	fmt.Printf("%-20s %-10s %s\n", "PLUGIN", "TYPE", "REF")
 	for _, item := range items {
-		path := item.Script
-		if path == "" {
-			path = item.Command
+		ref := item.Script
+		if ref == "" {
+			ref = item.Digest
 		}
-		fmt.Printf("%-20s %-10s %s\n", item.Name, item.Type, path)
+		if ref == "" {
+			ref = item.URL
+		}
+		if ref == "" {
+			ref = item.Command
+		}
+		fmt.Printf("%-20s %-10s %s\n", item.Name, item.Type, ref)
 	}
 	return 0
 }
