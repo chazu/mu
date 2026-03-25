@@ -5,10 +5,126 @@
 
 ## What Is BRICK
 
-BRICK is an infrastructure management model inspired by the ACUTE pipeline
-and IDEA ontology from the defn-dev project. It describes a self-refining
-feedback loop where desired state is declared, actual state is observed, drift
-is detected, and convergence actions are executed — continuously.
+BRICK stands for **Building block, Role, Implementation, Configuration, Kit**.
+It is a classification system for composable infrastructure artifacts,
+originating from the defn project's directory classification system (AIDR
+00019). Every artifact in a BRICK ecosystem is a Block — a composable unit
+classified by what it does and how it relates to other blocks.
+
+### The Five Registers
+
+Every platform artifact has five registers that BRICK makes explicit:
+
+| Register | Question it answers | Example |
+|----------|-------------------|---------|
+| **Building block** | What is this thing? | A directory, a target, a module, a resource |
+| **Role** | What does it do? | Defines contracts (interface), produces artifacts (component), composes others (kit), validates structure (relationship) |
+| **Implementation** | How is it realized? | A Babashka plugin, a Go binary, a CUE schema, a Terraform module |
+| **Configuration** | How is it parameterized? | The `config` map on a target, CUE values, tfvars files |
+| **Kit** | What collection does it belong to? | A mu.json file, a CUE package, a monorepo workspace |
+
+### The Four Kinds
+
+In the defn project, BRICK classifies every directory with a BUILD.bazel
+into one of four kinds:
+
+| Kind | Role | defn example | mu+pudl equivalent |
+|------|------|-------------|-------------------|
+| **Relationship** | Defines how blocks connect and validate | `manifest/` (structure validation) | mu.json `deps` field, target dependency graph |
+| **Interface** | Defines contracts, types, schemas, templates | `interface/app/` (Bazel macros, CUE schemas) | Plugin protocol (discover/plan/observe), CUE schemas in pudl |
+| **Component** | Concrete instance that produces artifacts | `app/argocd/` (ArgoCD deployment) | A target in mu.json (`//k8s/api`, `//infra/vpc`) |
+| **Kit** | Composes other blocks into a cohesive unit | Root directory (composes all top-level blocks) | A complete mu.json file, a pudl workspace |
+
+### How mu+pudl Map to BRICK
+
+```
+BRICK Register    pudl                          mu
+──────────────    ────                          ──
+Building block    CUE definition                Target in mu.json
+Role              CUE schema type               Toolchain name (k8s, terraform, file, shell)
+Implementation    (delegates to mu)             Plugin (plugins/k8s/plugin.bb)
+Configuration     CUE values, constraints       config: {} map on each target
+Kit               CUE package / workspace       mu.json file + plugins directory
+```
+
+The key insight: pudl owns the **Building block** and **Configuration**
+registers (desired state in CUE), while mu owns the **Implementation**
+register (plugins that know how to converge). The **Role** register is shared
+— pudl maps CUE schema types to mu toolchain names. The **Kit** register
+spans both tools — a complete deployment is a pudl workspace that generates
+mu.json files.
+
+### BRICK in the defn Project
+
+The defn project implements BRICK as a CUE-based classification system:
+
+```cue
+// schema/brick.cue
+#BrickKind: "relationship" | "interface" | "component" | "kit"
+
+#Brick: {
+    path:        string
+    kind:        #BrickKind
+    desc?:       string
+    composes?:   [...string]     // only kit bricks
+    implements?: string          // only component bricks
+}
+```
+
+Components declare which interface they implement:
+```cue
+// catalog/brick-app--argocd.cue
+bricks: "app/argocd": {
+    path:       "app/argocd"
+    kind:       "component"
+    desc:       "ArgoCD GitOps controller"
+    implements: "interface/app"
+}
+```
+
+Interfaces define contracts that components fulfill. Some interfaces are
+"Midas" interfaces — they can stamp out new components from templates:
+```cue
+// catalog/brick-interface--app.cue
+bricks: "interface/app": {
+    path:        "interface/app"
+    kind:        "interface"
+    desc:        "app definition contract and Bazel macros"
+    midas:       true
+    stamping:    "macro"
+    catalog_key: "apps"
+}
+```
+
+Kits compose blocks into cohesive units. The root kit composes everything:
+```cue
+bricks: "": {
+    path: ""
+    kind: "kit"
+    desc: "monorepo root composing all top-level blocks"
+    composes: ["app", "aws", "go", "image", "k3d", "k8s", ...]
+}
+```
+
+### BRICK + ACUTE + IDEA
+
+BRICK, ACUTE, and IDEA are three complementary frameworks:
+
+- **BRICK** classifies *what things are* — the static taxonomy of blocks
+- **IDEA** classifies *what knowledge is* — Intention, Definition, Execution,
+  Application layers
+- **ACUTE** describes *how knowledge flows* — Accumulate, Configure, Unify,
+  Transform, Execute pipeline
+
+Together they form a complete model: BRICK says "this is a k8s component
+implementing the app interface." IDEA says "its desired state is in the
+Definition layer, its actual state is in the Application layer." ACUTE says
+"we accumulate actual state, unify it with desired state, and execute
+convergence actions."
+
+mu and pudl are the tools that make this model executable.
+
+## How mu+pudl Implement the Model
 
 mu and pudl implement BRICK as two independent tools that communicate through
 JSON files. Neither depends on the other at the code level. They compose
