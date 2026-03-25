@@ -151,15 +151,15 @@ Plugins are external executables that tell mu what to build and how. mu itself h
 
 ### Defining Plugins
 
-Plugins are declared in `mu.json`'s `plugins` array. There are four ways to reference a plugin:
+Plugins can be written in any language — anything that reads NDJSON on stdin and writes responses to stdout. They are declared in `mu.json`'s `plugins` array. There are four ways to reference a plugin:
 
-**Local script** — a `.bb` (Babashka) script vendored in the repo:
+**Local file** — a plugin file vendored in the repo, hashed and stored in CAS:
 
 ```json
 {"name": "go", "script": "plugins/go/plugin.bb"}
 ```
 
-**Remote script** — fetched by URL with SHA-256 verification:
+**Remote file** — fetched by URL with SHA-256 verification, stored in CAS:
 
 ```json
 {"name": "go", "url": "https://example.com/go-plugin.bb", "sha256": "abc123..."}
@@ -171,13 +171,20 @@ Plugins are declared in `mu.json`'s `plugins` array. There are four ways to refe
 {"name": "go", "digest": "sha256:818f0c36b02f946611b674eac0f658de2184e759a2c389f4a6f13d0caa8652ab"}
 ```
 
-**Command** — run an arbitrary executable (escape hatch, not stored in CAS):
+**Command** — run an arbitrary executable directly (not stored in CAS):
 
 ```json
-{"name": "go", "command": ["bb", "plugins/go/plugin.bb"]}
+{"name": "go", "command": ["./my-plugin"]}
 ```
 
-For script, URL, and digest plugins, mu needs a `bb` toolchain to execute the `.bb` script. Declare one in your `toolchains` array.
+For the first three modes, mu extracts the plugin to `~/.mu/plugins/<name>/` and executes it. `.bb` files are automatically run via the bb (Babashka) runtime; all other files are executed directly as binaries or scripts. Override this with the `runtime` field:
+
+```json
+{"name": "go", "script": "plugins/go/plugin.py", "runtime": "none"}
+{"name": "go", "script": "plugins/go/plugin.bb", "runtime": "bb"}
+```
+
+Valid values: `"auto"` (default — infer from extension), `"bb"`, `"none"`.
 
 ### Building and Distributing Plugins
 

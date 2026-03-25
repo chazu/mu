@@ -50,6 +50,7 @@ type PluginDef struct {
 	URL     string   `json:"url,omitempty"`
 	SHA256  string   `json:"sha256,omitempty"`
 	Digest  string   `json:"digest,omitempty"`
+	Runtime string   `json:"runtime,omitempty"` // "auto" (default), "bb", or "none"
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON

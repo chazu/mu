@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/chau/mu/internal/builtin"
 	"github.com/chau/mu/internal/cas"
@@ -461,13 +462,35 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 	return result, nil
 }
 
-// needsScriptRuntime returns true if any plugin uses a script-based resolution
-// (local script path, remote URL, or CAS digest). All of these produce .bb
-// scripts that require the bb runtime.
+// needsScriptRuntime returns true if any plugin will need the bb runtime.
+// This is determined by the Runtime config field and file extension:
+//   - runtime:"bb" → always needs it
+//   - runtime:"none" → never needs it
+//   - runtime:"" or "auto" → needs it if the source ends in .bb
+//
+// For digest-only plugins with no extension hint, we assume bb for
+// backward compatibility unless runtime is explicitly "none".
 func needsScriptRuntime(plugins []config.PluginDef) bool {
 	for _, p := range plugins {
-		if p.Script != "" || p.URL != "" || p.Digest != "" {
+		if len(p.Command) > 0 {
+			continue // command plugins never need bb
+		}
+		switch p.Runtime {
+		case "bb":
 			return true
+		case "none":
+			continue
+		default: // "" or "auto"
+			if p.Script != "" && strings.HasSuffix(p.Script, ".bb") {
+				return true
+			}
+			if p.URL != "" && strings.HasSuffix(p.URL, ".bb") {
+				return true
+			}
+			// Digest-only with no extension hint: assume bb for backward compat.
+			if p.Digest != "" {
+				return true
+			}
 		}
 	}
 	return false

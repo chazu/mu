@@ -279,12 +279,12 @@ func pluginListConfig(cfg *config.ProjectConfig, jsonOut bool) int {
 }
 
 func pluginListDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
-	// We need the bb runtime if any plugin uses script.
 	mgr := plugin.NewManager(projectRoot)
 
-	// Resolve bb if needed.
+	// Resolve bb if any plugin needs it (based on .bb extension or explicit runtime).
 	for _, p := range cfg.Plugins {
-		if p.Script != "" {
+		needsBB := p.Runtime == "bb" || (p.Runtime == "" && p.Script != "" && strings.HasSuffix(p.Script, ".bb"))
+		if needsBB {
 			bbPath := resolveBbPath()
 			if bbPath == "" {
 				fmt.Fprintln(os.Stderr, "mu plugin list: --discover requires bb toolchain; run mu build first to bootstrap it")
@@ -296,11 +296,19 @@ func pluginListDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut b
 	}
 
 	for _, p := range cfg.Plugins {
-		if err := mgr.Register(plugin.PluginDef{
-			Name:    p.Name,
-			Command: p.Command,
-			Script:  p.Script,
-		}); err != nil {
+		needsBB := p.Script != "" && strings.HasSuffix(p.Script, ".bb")
+		if p.Runtime == "bb" {
+			needsBB = true
+		} else if p.Runtime == "none" {
+			needsBB = false
+		}
+		def := plugin.PluginDef{
+			Name:         p.Name,
+			Command:      p.Command,
+			Script:       p.Script,
+			NeedsRuntime: needsBB,
+		}
+		if err := mgr.Register(def); err != nil {
 			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
 			return 1
 		}

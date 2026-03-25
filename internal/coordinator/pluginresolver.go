@@ -15,21 +15,21 @@ import (
 )
 
 // ResolvedPlugin holds a plugin definition with its CAS digest and resolved
-// filesystem path (for script-based plugins).
+// filesystem path (for CAS-stored plugins).
 type ResolvedPlugin struct {
 	Def    plugin.PluginDef
-	Digest cas.Digest // content hash of the plugin script (zero for command plugins)
+	Digest cas.Digest // content hash of the plugin (zero for command plugins)
 }
 
-// PluginResolver stores plugin scripts in CAS and resolves them to filesystem
+// PluginResolver stores plugin files in CAS and resolves them to filesystem
 // paths for execution.
 type PluginResolver struct {
 	Store       cas.Store
 	ProjectRoot string
-	CacheDir    string // base dir for extracted plugin scripts (e.g. ~/.mu/plugins)
+	CacheDir    string // base dir for extracted plugins (e.g. ~/.mu/plugins)
 }
 
-// Resolve processes all plugin definitions, storing scripts in CAS and
+// Resolve processes all plugin definitions, storing files in CAS and
 // returning resolved plugin defs with filesystem paths.
 func (r *PluginResolver) Resolve(ctx context.Context, plugins []config.PluginDef) ([]ResolvedPlugin, error) {
 	resolved := make([]ResolvedPlugin, 0, len(plugins))
@@ -65,7 +65,7 @@ func (r *PluginResolver) resolveOne(ctx context.Context, p config.PluginDef) (*R
 	}
 }
 
-// resolveDigest extracts a plugin script directly from CAS by its digest.
+// resolveDigest extracts a plugin directly from CAS by its digest.
 func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
 	dgst, err := cas.ParseDigest(p.Digest)
 	if err != nil {
@@ -80,21 +80,23 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 		return nil, fmt.Errorf("plugin digest %s not found in CAS", dgst)
 	}
 
-	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst)
+	// No source hint available for digest-only plugins.
+	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst, "")
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:   p.Name,
-			Script: cachedPath,
+			Name:         p.Name,
+			Script:       cachedPath,
+			NeedsRuntime: pluginNeedsRuntime(p.Runtime, cachedPath),
 		},
 		Digest: dgst,
 	}, nil
 }
 
-// resolveLocal reads a local script file, stores it in CAS, and returns a
+// resolveLocal reads a local plugin file, stores it in CAS, and returns a
 // resolved plugin pointing to the cached copy.
 func (r *PluginResolver) resolveLocal(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
 	scriptPath := p.Script
@@ -114,22 +116,23 @@ func (r *PluginResolver) resolveLocal(ctx context.Context, p config.PluginDef) (
 		return nil, fmt.Errorf("store script: %w", err)
 	}
 
-	// Extract to a stable path for execution.
-	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst)
+	// Extract to a stable path for execution, preserving the original extension.
+	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst, p.Script)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:   p.Name,
-			Script: cachedPath,
+			Name:         p.Name,
+			Script:       cachedPath,
+			NeedsRuntime: pluginNeedsRuntime(p.Runtime, cachedPath),
 		},
 		Digest: dgst,
 	}, nil
 }
 
-// resolveRemote fetches a remote script by URL, verifies sha256, stores in CAS.
+// resolveRemote fetches a remote plugin by URL, verifies sha256, stores in CAS.
 func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
 	// Check if we already have it in CAS by the declared sha256.
 	expectedDigest := cas.NewSHA256(p.SHA256)
@@ -166,33 +169,40 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 		}
 	}
 
-	cachedPath, err := r.extractFromCAS(ctx, p.Name, expectedDigest)
+	cachedPath, err := r.extractFromCAS(ctx, p.Name, expectedDigest, p.URL)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:   p.Name,
-			Script: cachedPath,
+			Name:         p.Name,
+			Script:       cachedPath,
+			NeedsRuntime: pluginNeedsRuntime(p.Runtime, cachedPath),
 		},
 		Digest: expectedDigest,
 	}, nil
 }
 
-// extractFromCAS writes a plugin script from CAS to a stable filesystem path.
-func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst cas.Digest) (string, error) {
+// extractFromCAS writes a plugin from CAS to a stable filesystem path.
+// srcHint is the original file path or URL, used to preserve the file extension.
+// If empty, the file is extracted with no extension (bare executable).
+// Files are always extracted with executable permissions (0o755).
+func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst cas.Digest, srcHint string) (string, error) {
 	dir := filepath.Join(r.CacheDir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
+
+	// Preserve the original file extension from the source hint.
+	ext := filepath.Ext(srcHint)
 
 	// Use the digest hash as filename to auto-invalidate on content change.
 	short := dgst.Hash
 	if len(short) > 12 {
 		short = short[:12]
 	}
-	destPath := filepath.Join(dir, "plugin-"+short+".bb")
+	destPath := filepath.Join(dir, "plugin-"+short+ext)
 
 	// Skip if already extracted.
 	if _, err := os.Stat(destPath); err == nil {
@@ -200,9 +210,9 @@ func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst c
 	}
 
 	// Clean old versions.
-	entries, _ := filepath.Glob(filepath.Join(dir, "plugin-*.bb"))
+	entries, _ := filepath.Glob(filepath.Join(dir, "plugin-*"))
 	for _, old := range entries {
-		if !strings.HasSuffix(old, short+".bb") {
+		if old != destPath {
 			os.Remove(old)
 		}
 	}
@@ -213,7 +223,7 @@ func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst c
 	}
 	defer rc.Close()
 
-	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return "", err
 	}
@@ -226,4 +236,20 @@ func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst c
 	}
 
 	return destPath, nil
+}
+
+// pluginNeedsRuntime determines whether a CAS-extracted plugin needs the bb
+// runtime to execute. The config Runtime field takes precedence:
+//   - "bb": always needs runtime
+//   - "none": never needs runtime (direct execution)
+//   - "" or "auto": infer from file extension (.bb → needs runtime)
+func pluginNeedsRuntime(runtime string, path string) bool {
+	switch runtime {
+	case "bb":
+		return true
+	case "none":
+		return false
+	default: // "" or "auto"
+		return strings.HasSuffix(path, ".bb")
+	}
 }

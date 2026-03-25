@@ -10,9 +10,10 @@ import (
 
 // PluginDef defines a plugin as declared in mu.json.
 type PluginDef struct {
-	Name    string   `json:"name"`    // logical name, matches target toolchain field
-	Command []string `json:"command"` // command to spawn, relative to project root
-	Script  string   `json:"script"`  // bb script path (resolved via ScriptRuntime)
+	Name         string   `json:"name"`          // logical name, matches target toolchain field
+	Command      []string `json:"command"`        // command to spawn, relative to project root
+	Script       string   `json:"script"`         // CAS-extracted file path (any executable)
+	NeedsRuntime bool     `json:"needs_runtime"`  // true = prepend ScriptRuntime (bb) to execute
 }
 
 // Manager manages the lifecycle of plugin processes and routes requests.
@@ -105,13 +106,18 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 // resolveCommand returns the command to spawn for a plugin definition.
-// For script-based plugins, the script runtime (bb) is prepended.
+// For CAS-extracted plugins that need a runtime (e.g. .bb scripts), the
+// script runtime is prepended. Other CAS-extracted plugins (compiled
+// binaries, shell scripts) are executed directly.
 func (m *Manager) resolveCommand(def PluginDef) ([]string, error) {
 	if def.Script != "" {
-		if m.scriptRuntime == "" {
-			return nil, fmt.Errorf("script %q requires a bb toolchain but no script runtime is available", def.Script)
+		if def.NeedsRuntime {
+			if m.scriptRuntime == "" {
+				return nil, fmt.Errorf("script %q requires a bb toolchain but no script runtime is available", def.Script)
+			}
+			return []string{m.scriptRuntime, def.Script}, nil
 		}
-		return []string{m.scriptRuntime, def.Script}, nil
+		return []string{def.Script}, nil
 	}
 	return def.Command, nil
 }
