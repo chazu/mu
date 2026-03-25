@@ -106,7 +106,20 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
-	// 5. Plan each target via its toolchain plugin and resolve actions.
+	// 5. Validate target configs against plugin schemas.
+	for _, t := range targets {
+		if t.Toolchain == "shell" {
+			continue
+		}
+		info := mgr.DiscoverInfo(t.Toolchain)
+		if info != nil && info.ConfigSchema != nil {
+			if err := ValidateTargetConfig(t, info.ConfigSchema); err != nil {
+				return nil, fmt.Errorf("coordinator: %w", err)
+			}
+		}
+	}
+
+	// 6. Plan each target via its toolchain plugin and resolve actions.
 	graph := dag.NewGraph()
 
 	for _, t := range targets {
