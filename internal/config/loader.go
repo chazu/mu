@@ -63,6 +63,11 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
+		// Skip hidden directories (e.g. .git, .claude) to avoid picking up
+		// configs from worktrees, caches, and other tool-managed copies.
+		if d.IsDir() && d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir
+		}
 		if d.IsDir() {
 			return nil
 		}
