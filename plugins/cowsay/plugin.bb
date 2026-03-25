@@ -21,7 +21,7 @@
        "inputs"     {"source" input}
        "outputs"    [output]
        "depends_on" []
-       "env"        {}
+       "env"        {"PATH" (System/getenv "PATH")}
        "network"    false}]
      "declared_outputs"
      {"text_output" output}}))
