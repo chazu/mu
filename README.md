@@ -108,6 +108,11 @@ mu <command> [arguments]
 Commands:
   build      Build one or more targets
   scratch    Build toolchains from scratch (override with MU_SCRATCH)
+  cache      Inspect CAS cache contents
+  target     List and inspect targets
+  plugin     List, inspect, and add plugins
+  observe    Check if targets are up-to-date (drift detection)
+  verify     Validate CAS blob integrity
   version    Print the mu version
 ```
 
@@ -140,15 +145,93 @@ Flags:
   --verbose     Show plugin I/O
 ```
 
-## Plugin Protocol
+## Plugins
 
-Plugins are external executables that communicate over NDJSON (newline-delimited JSON) on stdin/stdout. Any language works — Babashka, Go, Python, Rust, a shell script.
+Plugins are external executables that tell mu what to build and how. mu itself has no built-in knowledge of any language or tool — plugins provide all of it.
+
+### Defining Plugins
+
+Plugins are declared in `mu.json`'s `plugins` array. There are four ways to reference a plugin:
+
+**Local script** — a `.bb` (Babashka) script vendored in the repo:
+
+```json
+{"name": "go", "script": "plugins/go/plugin.bb"}
+```
+
+**Remote script** — fetched by URL with SHA-256 verification:
+
+```json
+{"name": "go", "url": "https://example.com/go-plugin.bb", "sha256": "abc123..."}
+```
+
+**CAS digest** — reference a plugin already stored in the content-addressed cache:
+
+```json
+{"name": "go", "digest": "sha256:818f0c36b02f946611b674eac0f658de2184e759a2c389f4a6f13d0caa8652ab"}
+```
+
+**Command** — run an arbitrary executable (escape hatch, not stored in CAS):
+
+```json
+{"name": "go", "command": ["bb", "plugins/go/plugin.bb"]}
+```
+
+For script, URL, and digest plugins, mu needs a `bb` toolchain to execute the `.bb` script. Declare one in your `toolchains` array.
+
+### Building and Distributing Plugins
+
+mu includes build targets for all bundled plugins. Each `//plugins/<name>` target hashes the plugin script and stores it in CAS:
+
+```bash
+# Build all plugins into CAS
+mu build //plugins
+
+# Build a single plugin
+mu build //plugins/go
+```
+
+List all plugins available in the cache with their digests:
+
+```bash
+mu plugin list --cached
+```
+
+```
+PLUGIN               CACHED  DIGEST
+go                   yes     sha256:818f0c36...
+cowsay               yes     sha256:b3df9813...
+docker               yes     sha256:1fd5b618...
+```
+
+Add a cached plugin to your project's `mu.json` by name:
+
+```bash
+mu plugin add go
+```
+
+This builds `//plugins/go`, extracts the output digest, and writes a `digest`-based entry into `mu.json`. If an entry with the same name already exists, it is replaced.
+
+### Inspecting Plugins
+
+```bash
+# List plugins defined in mu.json
+mu plugin list
+
+# Start plugins and show their capabilities (requires built toolchains)
+mu plugin list --discover
+
+# JSON output
+mu plugin list --cached --json
+```
+
+### Plugin Protocol
+
+Plugins communicate over NDJSON (newline-delimited JSON) on stdin/stdout. Any language works — Babashka, Go, Python, Rust, a shell script.
 
 A plugin implements two methods:
 
-### `discover`
-
-Returns plugin metadata: name, version, protocol version, and what artifact types it consumes and produces.
+**`discover`** — returns plugin metadata:
 
 ```json
 ← {"method": "discover"}
@@ -156,9 +239,7 @@ Returns plugin metadata: name, version, protocol version, and what artifact type
    "consumes": ["go_source"], "produces": ["executable", "go_library"]}
 ```
 
-### `plan`
-
-Given a target and its dependency artifacts, returns an action subgraph.
+**`plan`** — given a target, returns an action subgraph:
 
 ```json
 ← {"method": "plan", "target": {"name": "//cmd/server", "toolchain": "go",
@@ -170,10 +251,41 @@ Given a target and its dependency artifacts, returns an action subgraph.
 
 The coordinator resolves file paths to content digests, merges subgraphs from all targets into a unified DAG, checks the cache, and executes uncached actions in parallel.
 
-### Timeouts
+**Timeouts:** `discover` 10 seconds, `plan` 5 minutes.
 
-- `discover`: 10 seconds
-- `plan`: 5 minutes
+### Writing a Plugin
+
+A minimal plugin in Bash:
+
+```bash
+#!/usr/bin/env bash
+while IFS= read -r line; do
+  method=$(echo "$line" | jq -r '.method')
+  case "$method" in
+    discover)
+      echo '{"name":"my-plugin","version":"0.1.0","protocol_version":1,"consumes":[],"produces":["text_output"]}'
+      ;;
+    plan)
+      echo '{"actions":[{"id":"run","command":["echo","hello"],"inputs":{},"outputs":["out.txt"],"env":{}}],"declared_outputs":{"text_output":"out.txt"}}'
+      ;;
+  esac
+done
+```
+
+Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract.
+
+### Bundled Plugins
+
+| Plugin | Toolchain | Description |
+|--------|-----------|-------------|
+| `go` | Go | Builds Go binaries (cross-compile, tags, ldflags, race) |
+| `cowsay` | Text | Demo text transformation |
+| `docker` | Docker | Docker image builder |
+| `file` | File | File operations |
+| `k8s` | Kubernetes | Kubernetes resource management |
+| `zig` | Zig | Zig language toolchain |
+| `terraform` | Terraform | Infrastructure provisioning |
+| `scratch` | Bootstrap | Toolchain bootstrapping from scratch |
 
 ## Caching
 
@@ -242,7 +354,7 @@ internal/
 ├── scratch/         Toolchain download, verify, extract, register
 ├── sandbox/         Hermetic execution environments
 └── builtin/         Built-in fetch command with SHA-256 verification
-plugins/             Babashka plugins (go, scratch)
+plugins/             Babashka plugins (go, cowsay, docker, file, k8s, zig, terraform, scratch)
 examples/            Example projects
 ```
 
@@ -262,6 +374,7 @@ The build coordinator is functional end-to-end:
 - [x] Go toolchain plugin (build, cross-compile, tags, ldflags, race)
 - [x] `mu build` command with cache integration
 - [x] Cross-toolchain artifact composition
+- [x] Plugin distribution via CAS digests (`mu plugin add`, `mu plugin list --cached`)
 
 ## Roadmap
 
@@ -274,34 +387,12 @@ The build coordinator is functional end-to-end:
 ### Medium-term
 
 - [ ] **OS-level sandboxing** — Linux: user namespaces + overlayfs. macOS: sandbox-exec profiles
-- [ ] **Plugin distribution** — Install/update third-party plugins via OCI artifacts or git
 - [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
 
 ### Long-term
 
 - [ ] **Remote execution** — Distribute actions to worker pools
 - [ ] **Protocol extensions** — Streaming progress, async planning, format negotiation
-
-## Writing a Plugin
-
-A minimal plugin in Bash:
-
-```bash
-#!/usr/bin/env bash
-while IFS= read -r line; do
-  method=$(echo "$line" | jq -r '.method')
-  case "$method" in
-    discover)
-      echo '{"name":"my-plugin","version":"0.1.0","protocol_version":1,"consumes":[],"produces":["text_output"]}'
-      ;;
-    plan)
-      echo '{"actions":[{"id":"run","command":["echo","hello"],"inputs":{},"outputs":["out.txt"],"env":{}}],"declared_outputs":{"text_output":"out.txt"}}'
-      ;;
-  esac
-done
-```
-
-Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract.
 
 ## License
 
