@@ -11,11 +11,15 @@ type ProjectConfig struct {
 
 // Target describes a build target.
 type Target struct {
-	Name      string         `json:"target"`
-	Toolchain string         `json:"toolchain"`
-	Sources   []string       `json:"sources"`
-	Deps      []string       `json:"deps,omitempty"`
-	Config    map[string]any `json:"config,omitempty"`
+	Name       string         `json:"target"`
+	Toolchain  string         `json:"toolchain"`
+	Sources    []string       `json:"sources"`
+	Deps       []string       `json:"deps,omitempty"`
+	Config     map[string]any `json:"config,omitempty"`
+	// BRICK classification (optional, set by pudl export-actions).
+	// mu does not validate these — pudl enforces BRICK constraints via CUE.
+	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"
+	Implements string `json:"implements,omitempty"` // interface this component satisfies
 }
 
 // Toolchain describes a build toolchain and its base environment.

@@ -40,12 +40,14 @@ type BuildResult struct {
 	Cancelled  int
 	Graph      *dag.Graph          // the planned action DAG (always populated)
 	ExecResult *dag.ExecuteResult  // per-action detail from execution
+	Targets    []config.Target     // the targets that were built
 }
 
 // PlanResult holds the planned action graph. Plugins are shut down before
 // Plan() returns — they are only needed during planning, not execution.
 type PlanResult struct {
-	Graph *dag.Graph
+	Graph   *dag.Graph
+	Targets []config.Target // the resolved targets (for manifest metadata)
 }
 
 // Plan runs the planning pipeline: build toolchains, resolve plugins, start
@@ -174,7 +176,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		}
 	}
 
-	return &PlanResult{Graph: graph}, nil
+	return &PlanResult{Graph: graph, Targets: targets}, nil
 }
 
 // Execute runs a previously planned DAG.
@@ -192,6 +194,7 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	br := buildResultFrom(execResult)
 	br.Graph = plan.Graph
 	br.ExecResult = execResult
+	br.Targets = plan.Targets
 	return br, nil
 }
 

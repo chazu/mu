@@ -153,7 +153,7 @@ func runBuild(args []string) int {
 	}
 
 	if *emitManifest {
-		manifest := coordinator.NewManifest(result, result.ExecResult, elapsed)
+		manifest := coordinator.NewManifest(result, result.ExecResult, result.Targets, elapsed)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if encErr := enc.Encode(manifest); encErr != nil {

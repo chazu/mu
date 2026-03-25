@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/chau/mu/internal/cas"
+	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/dag"
 )
 
@@ -33,8 +34,12 @@ func TestNewManifestValidJSON(t *testing.T) {
 		ExecResult: execResult,
 	}
 
+	targets := []config.Target{
+		{Name: "//app", Toolchain: "go", Kind: "component", Implements: "interface/app"},
+	}
+
 	elapsed := 2500 * time.Millisecond
-	manifest := NewManifest(result, execResult, elapsed)
+	manifest := NewManifest(result, execResult, targets, elapsed)
 
 	// Verify basic fields.
 	if manifest.Version != 1 {
@@ -134,12 +139,60 @@ func TestNewManifestEmptyBuild(t *testing.T) {
 	result := &BuildResult{ExecResult: execResult}
 	elapsed := 100 * time.Millisecond
 
-	manifest := NewManifest(result, execResult, elapsed)
+	manifest := NewManifest(result, execResult, nil, elapsed)
 
 	if len(manifest.Actions) != 0 {
 		t.Errorf("expected 0 actions, got %d", len(manifest.Actions))
 	}
 	if manifest.Summary.Completed != 0 || manifest.Summary.Failed != 0 {
 		t.Errorf("expected zero summary, got %+v", manifest.Summary)
+	}
+}
+
+func TestNewManifestBRICKMetadata(t *testing.T) {
+	execResult := &dag.ExecuteResult{
+		Completed: []dag.ActionStatus{
+			{ID: "//app:build", ExitCode: 0},
+		},
+	}
+	result := &BuildResult{Completed: 1, ExecResult: execResult}
+	targets := []config.Target{
+		{Name: "//app", Toolchain: "k8s", Kind: "component", Implements: "interface/app"},
+		{Name: "//infra", Toolchain: "terraform", Kind: "component"},
+	}
+
+	manifest := NewManifest(result, execResult, targets, time.Second)
+
+	if len(manifest.Targets) != 2 {
+		t.Fatalf("Targets count = %d, want 2", len(manifest.Targets))
+	}
+
+	app := manifest.Targets[0]
+	if app.Kind != "component" {
+		t.Errorf("app.Kind = %q, want component", app.Kind)
+	}
+	if app.Implements != "interface/app" {
+		t.Errorf("app.Implements = %q, want interface/app", app.Implements)
+	}
+
+	infra := manifest.Targets[1]
+	if infra.Implements != "" {
+		t.Errorf("infra.Implements = %q, want empty", infra.Implements)
+	}
+
+	// Verify BRICK fields round-trip through JSON.
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var rt Manifest
+	if err := json.Unmarshal(data, &rt); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if rt.Targets[0].Kind != "component" {
+		t.Errorf("round-trip Kind = %q, want component", rt.Targets[0].Kind)
+	}
+	if rt.Targets[0].Implements != "interface/app" {
+		t.Errorf("round-trip Implements = %q, want interface/app", rt.Targets[0].Implements)
 	}
 }
