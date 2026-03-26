@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -135,6 +136,10 @@ func runPluginList(args []string) int {
 		return 2
 	}
 
+	if *cached && *discover {
+		return pluginListCachedDiscover(cfg, projectRoot, *jsonOut)
+	}
+
 	if *cached {
 		return pluginListCached(cfg, projectRoot, *jsonOut)
 	}
@@ -218,6 +223,203 @@ func pluginListCached(cfg *config.ProjectConfig, projectRoot string, jsonOut boo
 			cachedStr = "yes"
 		}
 		fmt.Printf("%-20s %-7s %s\n", item.Name, cachedStr, item.Digest)
+	}
+	return 0
+}
+
+// pluginListCachedDiscover builds all //plugins/* targets, extracts them from
+// CAS, starts each as a plugin process, runs discover, and shows combined info.
+func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
+	if err := config.Validate(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
+		return 2
+	}
+
+	// Find all //plugins/<name> targets (skip //plugins itself).
+	var targets []string
+	for _, t := range cfg.Targets {
+		if strings.HasPrefix(t.Name, "//plugins/") && !strings.Contains(t.Name[len("//plugins/"):], "/") {
+			targets = append(targets, t.Name)
+		}
+	}
+
+	if len(targets) == 0 {
+		fmt.Println("No //plugins/* targets found.")
+		return 0
+	}
+
+	// Build to get digests.
+	result, err := buildTargets(projectRoot, cfg, targets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
+		return 1
+	}
+
+	// Extract each plugin from CAS and collect info.
+	home, _ := os.UserHomeDir()
+	cacheDir := filepath.Join(home, ".mu", "plugins")
+	cachePath := filepath.Join(home, ".mu", "cache")
+
+	store, err := oci.NewLocal(cachePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
+		return 1
+	}
+
+	type pluginToDiscover struct {
+		name   string
+		digest cas.Digest
+		cached bool
+		path   string
+	}
+
+	var plugins []pluginToDiscover
+	needsBB := false
+
+	for _, target := range targets {
+		name := strings.TrimPrefix(target, "//plugins/")
+		dgst, err := extractPluginDigest(result, target)
+		if err != nil {
+			continue
+		}
+		wasCached := false
+		for _, s := range result.ExecResult.Completed {
+			if strings.HasPrefix(s.ID, target+":") && s.Cached {
+				wasCached = true
+				break
+			}
+		}
+
+		// Find the original source extension from the target config.
+		ext := ".bb" // default
+		for _, t := range cfg.Targets {
+			if t.Name == target && len(t.Sources) > 0 {
+				ext = filepath.Ext(t.Sources[0])
+				break
+			}
+		}
+
+		// Extract from CAS.
+		dir := filepath.Join(cacheDir, name)
+		os.MkdirAll(dir, 0o755)
+		short := dgst.Hash
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		destPath := filepath.Join(dir, "plugin-"+short+ext)
+
+		if _, statErr := os.Stat(destPath); statErr != nil {
+			rc, getErr := store.Get(context.Background(), dgst)
+			if getErr != nil {
+				continue
+			}
+			f, createErr := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+			if createErr != nil {
+				rc.Close()
+				continue
+			}
+			io.Copy(f, rc)
+			f.Close()
+			rc.Close()
+		}
+
+		if strings.HasSuffix(destPath, ".bb") {
+			needsBB = true
+		}
+
+		plugins = append(plugins, pluginToDiscover{
+			name:   name,
+			digest: dgst,
+			cached: wasCached,
+			path:   destPath,
+		})
+	}
+
+	// Start plugins and run discover.
+	mgr := plugin.NewManager(projectRoot)
+
+	if needsBB {
+		bbPath := resolveBbPath()
+		if bbPath == "" {
+			fmt.Fprintln(os.Stderr, "mu plugin list: --discover requires bb toolchain; run mu build first to bootstrap it")
+			return 1
+		}
+		mgr.SetScriptRuntime(bbPath)
+	}
+
+	for _, p := range plugins {
+		isBB := strings.HasSuffix(p.path, ".bb")
+		if err := mgr.Register(plugin.PluginDef{
+			Name:         p.name,
+			Script:       p.path,
+			NeedsRuntime: isBB,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
+			return 1
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := mgr.Start(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "mu plugin list: starting plugins: %v\n", err)
+		return 1
+	}
+	defer mgr.Close()
+
+	type cachedDiscoverInfo struct {
+		Name     string   `json:"name"`
+		Version  string   `json:"version"`
+		Digest   string   `json:"digest"`
+		Cached   bool     `json:"cached"`
+		Consumes []string `json:"consumes"`
+		Produces []string `json:"produces"`
+	}
+
+	var items []cachedDiscoverInfo
+	for _, p := range plugins {
+		item := cachedDiscoverInfo{
+			Name:   p.name,
+			Digest: p.digest.String(),
+			Cached: p.cached,
+		}
+		info := mgr.DiscoverInfo(p.name)
+		if info != nil {
+			item.Version = info.Version
+			item.Consumes = info.Consumes
+			item.Produces = info.Produces
+		}
+		items = append(items, item)
+	}
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(items)
+		return 0
+	}
+
+	fmt.Printf("%-15s %-8s %-7s %-25s %-25s %s\n", "PLUGIN", "VERSION", "CACHED", "CONSUMES", "PRODUCES", "DIGEST")
+	for _, item := range items {
+		consumes := "-"
+		if len(item.Consumes) > 0 {
+			consumes = fmt.Sprintf("%v", item.Consumes)
+		}
+		produces := "-"
+		if len(item.Produces) > 0 {
+			produces = fmt.Sprintf("%v", item.Produces)
+		}
+		cachedStr := "no"
+		if item.Cached {
+			cachedStr = "yes"
+		}
+		// Truncate digest for display.
+		digest := item.Digest
+		if len(digest) > 19 {
+			digest = digest[:19] + "..."
+		}
+		fmt.Printf("%-15s %-8s %-7s %-25s %-25s %s\n", item.Name, item.Version, cachedStr, consumes, produces, digest)
 	}
 	return 0
 }
