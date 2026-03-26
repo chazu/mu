@@ -145,6 +145,21 @@ Flags:
   --verbose     Show plugin I/O
 ```
 
+## Targets
+
+Targets are declared in `mu.json` and describe what to build:
+
+```json
+{
+  "target": "//cmd/server",
+  "toolchain": "go",
+  "sources": ["go.mod", "go.sum", "cmd/server/*.go"],
+  "config": {"output": "server", "pkg": "./cmd/server"}
+}
+```
+
+Source paths support glob patterns (`*`, `?`, `[...]`). Globs are expanded at config load time relative to the project root, so `cmd/server/*.go` matches all `.go` files in that directory. Literal (non-glob) paths pass through as-is. Recursive `**` patterns are not currently supported.
+
 ## Plugins
 
 Plugins are external executables that tell mu what to build and how. mu itself has no built-in knowledge of any language or tool — plugins provide all of it.

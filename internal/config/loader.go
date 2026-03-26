@@ -155,7 +155,56 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		return nil, err
 	}
 
+	// Expand glob patterns in target sources (e.g. "*.go", "src/**/*.rs").
+	if err := expandSourceGlobs(cfg, projectRoot); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// isGlob reports whether s contains glob meta-characters.
+func isGlob(s string) bool {
+	return strings.ContainsAny(s, "*?[")
+}
+
+// expandSourceGlobs expands glob patterns in target source lists. Patterns
+// are matched relative to the project root. Non-glob entries pass through
+// unchanged. A glob that matches no files is kept as-is (the downstream
+// resolve step will report the missing file).
+func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
+	for i := range cfg.Targets {
+		t := &cfg.Targets[i]
+		var expanded []string
+		for _, src := range t.Sources {
+			if !isGlob(src) {
+				expanded = append(expanded, src)
+				continue
+			}
+			pattern := filepath.Join(projectRoot, src)
+			matches, err := filepath.Glob(pattern)
+			if err != nil {
+				return fmt.Errorf("target %q: invalid glob %q: %w", t.Name, src, err)
+			}
+			if len(matches) == 0 {
+				// No matches — keep the literal pattern so the resolve
+				// step can report a clear error about the missing file.
+				expanded = append(expanded, src)
+				continue
+			}
+			// Convert back to project-relative paths.
+			// filepath.Glob returns results in lexical order.
+			for _, m := range matches {
+				rel, err := filepath.Rel(projectRoot, m)
+				if err != nil {
+					rel = m
+				}
+				expanded = append(expanded, rel)
+			}
+		}
+		t.Sources = expanded
+	}
+	return nil
 }
 
 // loadFile reads and unmarshals a single JSON config file.
