@@ -21,7 +21,8 @@
     }
   ],
   "plugins": [
-    {"name": "go", "script": "plugins/go/plugin.bb"}
+    {"name": "go", "script": "plugins/go/plugin.bb"},
+    {"name": "lint", "script": "plugins/lint/plugin.bb"}
   ],
   "targets": [
     {
@@ -141,6 +142,16 @@
       }
     },
     {
+      "target": "//plugins/lint",
+      "toolchain": "shell",
+      "sources": ["plugins/lint/plugin.bb"],
+      "config": {
+        "command": ["cp", "plugins/lint/plugin.bb", "lint-plugin.bb"],
+        "outputs": ["lint-plugin.bb"],
+        "impure": false
+      }
+    },
+    {
       "target": "//plugins",
       "toolchain": "shell",
       "sources": [],
@@ -152,8 +163,37 @@
         "//plugins/k8s",
         "//plugins/zig",
         "//plugins/terraform",
-        "//plugins/scratch"
+        "//plugins/scratch",
+        "//plugins/lint"
       ],
+      "config": {
+        "command": ["true"],
+        "impure": false
+      }
+    },
+    {
+      "target": "//lint/go-vet",
+      "toolchain": "lint",
+      "sources": ["cmd/mu/*.go", "internal/**/*.go"],
+      "config": {
+        "command": ["go", "vet", "./..."]
+      }
+    },
+    {
+      "target": "//lint/gofmt",
+      "toolchain": "lint",
+      "sources": ["cmd/mu/*.go", "internal/**/*.go"],
+      "config": {
+        "command": ["gofmt", "-l", "."],
+        "fix_command": ["gofmt", "-w", "."]
+      }
+    },
+    {
+      "target": "//lint",
+      "toolchain": "shell",
+      "kind": "kit",
+      "sources": [],
+      "deps": ["//lint/go-vet", "//lint/gofmt"],
       "config": {
         "command": ["true"],
         "impure": false
