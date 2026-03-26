@@ -295,6 +295,13 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 					}
 				}
 			}
+			// Kit targets (shell with deps, no observe_command): derive state
+			// from dependency results. Converged if all deps converged, drifted
+			// if any dep drifted, unknown only if no deps had results.
+			if len(t.Deps) > 0 {
+				results = append(results, deriveKitState(t.Name, t.Deps, results))
+				continue
+			}
 			results = append(results, ObserveResult{Target: t.Name, State: "unknown"})
 			continue
 		}
@@ -340,6 +347,40 @@ func observeViaCommand(ctx context.Context, t config.Target, cmdSlice []any, pro
 		return ObserveResult{Target: t.Name, State: "drifted", Diff: string(output)}
 	}
 	return ObserveResult{Target: t.Name, State: "converged"}
+}
+
+// deriveKitState computes a kit target's observe state from its dependencies.
+// The kit is converged only if all deps with results are converged.
+// If any dep is drifted, the kit is drifted with a summary diff.
+func deriveKitState(name string, deps []string, results []ObserveResult) ObserveResult {
+	depStates := make(map[string]string, len(deps))
+	for _, r := range results {
+		depStates[r.Target] = r.State
+	}
+
+	hasDrifted := false
+	hasConverged := false
+	var driftedDeps []string
+
+	for _, dep := range deps {
+		switch depStates[dep] {
+		case "drifted":
+			hasDrifted = true
+			driftedDeps = append(driftedDeps, dep)
+		case "converged":
+			hasConverged = true
+		}
+	}
+
+	switch {
+	case hasDrifted:
+		diff := fmt.Sprintf("drifted deps: %s", strings.Join(driftedDeps, ", "))
+		return ObserveResult{Target: name, State: "drifted", Diff: diff}
+	case hasConverged:
+		return ObserveResult{Target: name, State: "converged"}
+	default:
+		return ObserveResult{Target: name, State: "unknown"}
+	}
 }
 
 // prefixActions rewrites action IDs and DependsOn references with a target
