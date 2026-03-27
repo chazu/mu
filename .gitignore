@@ -1,2 +1,13 @@
 # bv (beads viewer) local config and caches
 .bv/
+
+# Build artifacts
+mu
+*-plugin.bb
+plugin.bb
+
+# Examples build output
+examples/*/hello
+
+# Misc
+greeting.txt

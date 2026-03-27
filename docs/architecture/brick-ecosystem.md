@@ -1,7 +1,7 @@
 # The BRICK Ecosystem: mu + pudl
 
-**Date:** 2026-03-24
-**Status:** Working document
+**Date:** 2026-03-24 (updated 2026-03-26)
+**Status:** Reference document
 
 ## What Is BRICK
 
@@ -610,12 +610,21 @@ don't support observe are never asked.
 | `zig` | Babashka | `zig` | discover, plan | Builds Zig projects |
 | `docker` | Babashka | `docker` | discover, plan | Builds Docker images |
 | `file` | Babashka | `file` | discover, plan | Converges local files |
-| `k8s` | Babashka | `k8s` | discover, plan, observe | Converges Kubernetes resources |
+| `k8s` | Babashka | `k8s` | discover, plan, observe | Converges Kubernetes resources (structured drift detection) |
 | `terraform` | Babashka | `terraform` | discover, plan, observe | Converges Terraform infrastructure |
+| `lint` | Babashka | `lint` | discover, plan, observe | Wraps any linter as observe/converge target |
 | `shell` | Go built-in | `shell` | plan, observe* | Runs arbitrary commands |
 | `cowsay` | Babashka | `cowsay` | discover, plan | Example/demo plugin |
+| `scratch` | Babashka | `scratch` | discover, plan | Toolchain bootstrapping |
 
-\* Shell observe requires `observe_command` in target config.
+\* Shell observe requires `observe_command` in target config. Shell kit
+targets (with deps, no observe_command) derive state from dependencies.
+
+Plugins can be written in any language — not just Babashka. The `runtime`
+field on plugin definitions controls execution: `"auto"` (default) runs
+`.bb` files via bb and everything else directly, `"bb"` forces bb, `"none"`
+forces direct execution. Compiled binaries, Python scripts, and shell
+scripts all work through the CAS pipeline.
 
 ### Pure vs Impure Actions
 

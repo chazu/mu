@@ -140,9 +140,45 @@ MU_SCRATCH=plugins/scratch/plugin.bb mu scratch
 mu build <targets...>
 
 Flags:
-  --jobs N      Max parallel actions (default: CPU count)
-  --no-cache    Skip cache reads, always rebuild
-  --verbose     Show plugin I/O
+  --jobs N          Max parallel actions (default: CPU count)
+  --no-cache        Skip cache reads, always rebuild
+  --plan            Show planned actions without executing
+  --emit-manifest   Emit build manifest as JSON to stdout
+  --json            Output as JSON
+  --verbose         Show plugin I/O
+```
+
+`--plan` shows the DAG without executing, useful for debugging. `--emit-manifest` produces a structured JSON manifest documenting what was built, cache hits, and output digests — used by pudl's ACUTE loop to track convergence state.
+
+### `mu observe`
+
+```bash
+mu observe <targets...>
+
+Flags:
+  --json    Output as JSON
+```
+
+Checks if targets are up-to-date by sending observe requests to their plugins. Each target reports one of three states:
+
+- **converged** — actual state matches desired state
+- **drifted** — actual state differs (diff is shown)
+- **unknown** — plugin doesn't implement observe
+
+Kit targets (shell targets with deps) derive their state from dependencies: converged if all deps are converged, drifted if any dep is drifted.
+
+JSON output conforms to pudl's `mu.#ObserveResult` schema for ingestion into the ACUTE loop:
+
+```bash
+mu observe --json //lint
+```
+
+```json
+[
+  {"target": "//lint/go-vet", "state": "converged"},
+  {"target": "//lint/gofmt", "state": "converged"},
+  {"target": "//lint", "state": "converged"}
+]
 ```
 
 ## Targets
@@ -159,6 +195,27 @@ Targets are declared in `mu.json` and describe what to build:
 ```
 
 Source paths support glob patterns (`*`, `?`, `[...]`). Globs are expanded at config load time relative to the project root, so `cmd/server/*.go` matches all `.go` files in that directory. Literal (non-glob) paths pass through as-is. Recursive `**` patterns are not currently supported.
+
+### BRICK Classification
+
+Targets can carry optional BRICK metadata for integration with pudl:
+
+```json
+{
+  "target": "//app/api",
+  "toolchain": "k8s",
+  "kind": "component",
+  "implements": "//interface/app",
+  "sources": ["deployment.yaml"],
+  "config": {"namespace": "default"}
+}
+```
+
+- **`kind`** — one of `"relationship"`, `"interface"`, `"component"`, `"kit"`
+- **`implements`** — which interface this component satisfies (components only)
+- **`deps`** — dependencies on other targets (used by kits to compose blocks)
+
+mu passes these fields through in build manifests but does not enforce them — constraint enforcement is pudl's job via CUE schema validation.
 
 ## Plugins
 
