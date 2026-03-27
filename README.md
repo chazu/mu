@@ -217,6 +217,42 @@ Targets can carry optional BRICK metadata for integration with pudl:
 
 mu passes these fields through in build manifests but does not enforce them — constraint enforcement is pudl's job via CUE schema validation.
 
+### Interfaces and Contract Enforcement
+
+An interface defines a contract that components must satisfy. In pudl, interfaces are CUE definitions with a `contract` field:
+
+```cue
+lint_interface: brick.#Interface & {
+    name: "//interface/lint"
+    kind: "interface"
+    contract: {
+        toolchain: "lint"
+        config: { command: [...string] }
+    }
+}
+```
+
+Components declare which interface they implement:
+
+```cue
+lint_go_vet: brick.#Target & {
+    name:       "//lint/go-vet"
+    kind:       "component"
+    implements: "//interface/lint"
+    toolchain:  "lint"
+    config: { command: ["go", "vet", "./..."] }
+}
+```
+
+pudl validates this relationship via `pudl definition validate` — CUE unification checks that every field in the interface's contract is present and compatible in the component. Violations produce specific errors:
+
+```
+  FAIL  //lint/bad (implements //interface/lint)
+        field "toolchain": conflicting values "lint" and "wrong"
+```
+
+mu does not perform this validation. Its role is to execute targets, not enforce contracts. The split: **pudl validates intent, mu executes it.**
+
 ## Plugins
 
 Plugins are external executables that tell mu what to build and how. mu itself has no built-in knowledge of any language or tool — plugins provide all of it.

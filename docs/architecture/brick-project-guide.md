@@ -158,9 +158,11 @@ The pudl interface schema (contract):
 detection. pudl's `brick.#Target` schema and `export-actions` bridge work.
 The `kind` and `implements` fields flow through mu's build manifests.
 
-**What's missing:** No interface validation — mu doesn't enforce that a
-component actually satisfies its interface's contract. That's pudl's job
-via CUE schema unification. Also no catalog-driven generation (the Midas
+**Interface enforcement** is implemented in pudl — `pudl definition validate`
+checks that components satisfy their interface contracts via CUE unification.
+See pudl's `docs/mu-integration.md` for details.
+
+**What's missing:** No catalog-driven generation (the Midas
 pattern) — currently you create component directories by hand.
 
 ### Infrastructure (Terraform)
@@ -657,7 +659,7 @@ This is analogous to defn's gen command but driven by CUE instead of Go.
 |---------|---------|-----------|
 | `pudl stamp` | Generate components from interface templates (Midas) | High |
 | Close schema validation | Validate project structure via CUE close() | Medium |
-| Interface contract enforcement | Verify components satisfy interface schemas | Medium |
+| ~~Interface contract enforcement~~ | ~~Verify components satisfy interface schemas~~ | **Done** |
 | Catalog management | Add/list/query catalog entries | Low |
 | ACUTE loop closure | Ingest mu manifests and observe results | Medium |
 | Secret policy constraints | CUE rules for secrets hygiene | Low |
