@@ -206,13 +206,91 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	return br, nil
 }
 
-// Build orchestrates the full build pipeline: Plan() + Execute().
+// Build orchestrates the full build pipeline: Plan() + Execute() + bundle plugins.
 func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
 	plan, err := c.Plan(ctx, targetNames)
 	if err != nil {
 		return nil, err
 	}
-	return c.Execute(ctx, plan)
+	result, err := c.Execute(ctx, plan)
+	if err != nil {
+		return result, err
+	}
+
+	// Bundle any plugin directories whose targets were built.
+	if err := c.bundlePlugins(ctx, targetNames); err != nil {
+		return result, fmt.Errorf("coordinator: bundling plugins: %w", err)
+	}
+
+	return result, nil
+}
+
+// bundlePlugins checks if any of the built targets belong to a plugin
+// directory (as declared by PluginDirs from the config loader). For each
+// match, it bundles the directory into CAS via the plugin resolver.
+func (c *Coordinator) bundlePlugins(ctx context.Context, targetNames []string) error {
+	if len(c.Config.PluginDirs) == 0 {
+		return nil
+	}
+
+	// Expand wildcards in target names to get actual target names.
+	index := make(map[string]bool, len(c.Config.Targets))
+	for _, t := range c.Config.Targets {
+		index[t.Name] = true
+	}
+	var expanded []string
+	for _, n := range targetNames {
+		if strings.HasSuffix(n, "/...") {
+			prefix := strings.TrimSuffix(n, "...")
+			for tname := range index {
+				if strings.HasPrefix(tname, prefix) {
+					expanded = append(expanded, tname)
+				}
+			}
+		} else if strings.HasSuffix(n, "/*") {
+			prefix := strings.TrimSuffix(n, "*")
+			for tname := range index {
+				if strings.HasPrefix(tname, prefix) && !strings.Contains(strings.TrimPrefix(tname, prefix), "/") {
+					expanded = append(expanded, tname)
+				}
+			}
+		} else {
+			expanded = append(expanded, n)
+		}
+	}
+
+	// Check which plugin directories had targets built.
+	home, _ := os.UserHomeDir()
+	resolver := &PluginResolver{
+		Store:       c.Store,
+		ProjectRoot: c.ProjectRoot,
+		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+	}
+
+	for _, pluginDir := range c.Config.PluginDirs {
+		prefix := "//" + filepath.ToSlash(pluginDir)
+		for _, tname := range expanded {
+			if strings.HasPrefix(tname, prefix) {
+				// This plugin directory had a target built — bundle it.
+				manifest, err := config.LoadPluginManifest(filepath.Join(c.ProjectRoot, pluginDir))
+				if err != nil {
+					return fmt.Errorf("plugin dir %s: %w", pluginDir, err)
+				}
+				dirPath := filepath.Join(c.ProjectRoot, pluginDir)
+				dgst, err := resolver.bundleDir(ctx, dirPath, manifest.Plugin.Files)
+				if err != nil {
+					return fmt.Errorf("bundle %s: %w", pluginDir, err)
+				}
+				// Extract so it's ready for use.
+				name := filepath.Base(pluginDir)
+				if _, err := resolver.extractDirFromCAS(ctx, name, dgst); err != nil {
+					return fmt.Errorf("extract %s: %w", pluginDir, err)
+				}
+				break // only bundle once per plugin dir
+			}
+		}
+	}
+	return nil
 }
 
 // ObserveResult holds the observation result for a single target.
@@ -486,11 +564,48 @@ func buildResultFrom(er *dag.ExecuteResult) *BuildResult {
 
 // resolveTargets returns targets in dependency order (leaves first).
 // It resolves transitive deps and detects cycles.
+//
+// Target names support two wildcard patterns:
+//   - "//pkg/..." matches all targets under //pkg/ (recursive)
+//   - "//pkg/*" matches direct children of //pkg/ (one level)
 func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 	index := make(map[string]config.Target, len(c.Config.Targets))
 	for _, t := range c.Config.Targets {
 		index[t.Name] = t
 	}
+
+	// Expand wildcard patterns, then validate.
+	var expanded []string
+	for _, n := range names {
+		if strings.HasSuffix(n, "/...") {
+			prefix := strings.TrimSuffix(n, "...")
+			found := false
+			for tname := range index {
+				if strings.HasPrefix(tname, prefix) {
+					expanded = append(expanded, tname)
+					found = true
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("pattern %q matched no targets", n)
+			}
+		} else if strings.HasSuffix(n, "/*") {
+			prefix := strings.TrimSuffix(n, "*")
+			found := false
+			for tname := range index {
+				if strings.HasPrefix(tname, prefix) && !strings.Contains(strings.TrimPrefix(tname, prefix), "/") {
+					expanded = append(expanded, tname)
+					found = true
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("pattern %q matched no targets", n)
+			}
+		} else {
+			expanded = append(expanded, n)
+		}
+	}
+	names = expanded
 
 	// Validate that all requested targets exist.
 	for _, n := range names {

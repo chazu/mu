@@ -166,11 +166,11 @@ func TestBundleDir_Deterministic(t *testing.T) {
 
 	r := &PluginResolver{Store: store, ProjectRoot: projectRoot, CacheDir: t.TempDir()}
 
-	d1, err := r.bundleDir(context.Background(), dir)
+	d1, err := r.bundleDir(context.Background(), dir, nil)
 	if err != nil {
 		t.Fatalf("first bundle: %v", err)
 	}
-	d2, err := r.bundleDir(context.Background(), dir)
+	d2, err := r.bundleDir(context.Background(), dir, nil)
 	if err != nil {
 		t.Fatalf("second bundle: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestBundleDir_SkipsHiddenDirs(t *testing.T) {
 
 	r := &PluginResolver{Store: store, ProjectRoot: projectRoot, CacheDir: t.TempDir()}
 
-	dgst, err := r.bundleDir(context.Background(), dir)
+	dgst, err := r.bundleDir(context.Background(), dir, nil)
 	if err != nil {
 		t.Fatalf("bundle: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestExtractDirFromCAS_Idempotent(t *testing.T) {
 
 	r := &PluginResolver{Store: store, ProjectRoot: projectRoot, CacheDir: t.TempDir()}
 
-	dgst, err := r.bundleDir(context.Background(), dir)
+	dgst, err := r.bundleDir(context.Background(), dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

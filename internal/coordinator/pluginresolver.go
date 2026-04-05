@@ -168,7 +168,7 @@ func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef
 	}
 
 	// 3. Bundle the directory as a deterministic tar and store in CAS.
-	dgst, err := r.bundleDir(ctx, dirPath)
+	dgst, err := r.bundleDir(ctx, dirPath, manifest.Plugin.Files)
 	if err != nil {
 		return nil, fmt.Errorf("bundle plugin directory: %w", err)
 	}
@@ -198,10 +198,11 @@ func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef
 }
 
 // bundleDir creates a deterministic tar archive of the directory and stores
-// it in CAS. Entries are sorted lexicographically and timestamps/UIDs are
-// zeroed for reproducible hashes. Hidden directories (.git, etc.) are skipped.
-func (r *PluginResolver) bundleDir(ctx context.Context, dirPath string) (cas.Digest, error) {
-	// Collect all files (sorted for determinism).
+// it in CAS. If files is non-empty, only those files (relative to dirPath)
+// are included. Otherwise all files are included (hidden directories like
+// .git are always skipped). Entries are sorted lexicographically and
+// timestamps/UIDs are zeroed for reproducible hashes.
+func (r *PluginResolver) bundleDir(ctx context.Context, dirPath string, files []string) (cas.Digest, error) {
 	type fileEntry struct {
 		relPath string
 		absPath string
@@ -209,27 +210,38 @@ func (r *PluginResolver) bundleDir(ctx context.Context, dirPath string) (cas.Dig
 	}
 	var entries []fileEntry
 
-	err := filepath.Walk(dirPath, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
+	if len(files) > 0 {
+		// Explicit file list from the plugin manifest.
+		for _, f := range files {
+			absPath := filepath.Join(dirPath, f)
+			info, err := os.Stat(absPath)
+			if err != nil {
+				return cas.Digest{}, fmt.Errorf("plugin file %q: %w", f, err)
+			}
+			entries = append(entries, fileEntry{relPath: f, absPath: absPath, info: info})
 		}
-		// Skip hidden directories.
-		if info.IsDir() && info.Name() != "." && strings.HasPrefix(info.Name(), ".") {
-			return filepath.SkipDir
-		}
-		// Skip directories themselves — we only tar files.
-		if info.IsDir() {
+	} else {
+		// No explicit list — include all non-hidden files.
+		err := filepath.Walk(dirPath, func(path string, info fs.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() && info.Name() != "." && strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
+			if info.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(dirPath, path)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, fileEntry{relPath: rel, absPath: path, info: info})
 			return nil
-		}
-		rel, err := filepath.Rel(dirPath, path)
+		})
 		if err != nil {
-			return err
+			return cas.Digest{}, fmt.Errorf("walking plugin directory: %w", err)
 		}
-		entries = append(entries, fileEntry{relPath: rel, absPath: path, info: info})
-		return nil
-	})
-	if err != nil {
-		return cas.Digest{}, fmt.Errorf("walking plugin directory: %w", err)
 	}
 
 	sort.Slice(entries, func(i, j int) bool {

@@ -98,6 +98,14 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 			return fmt.Errorf("computing relative path for %s: %w", path, err)
 		}
 
+		// Track plugin directories for post-build CAS bundling.
+		if !usePP {
+			raw, _ := os.ReadFile(path)
+			if IsPluginDir(raw) {
+				cfg.PluginDirs = append(cfg.PluginDirs, relDir)
+			}
+		}
+
 		prefix := "//" + filepath.ToSlash(relDir)
 		// Normalise the root case: "//."->"//".
 		prefix = strings.TrimSuffix(prefix, "/.")

@@ -155,29 +155,22 @@ func runPluginList(args []string) int {
 	return pluginListConfig(cfg, *jsonOut)
 }
 
-// pluginListCached finds all //plugins/<name> targets, builds them (hitting
-// cache), and displays each plugin with its CAS digest.
-func pluginListCached(cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
-	if err := config.Validate(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
-		return 2
-	}
-
-	// Find all //plugins/<name> targets (skip //plugins itself).
-	var targets []string
-	for _, t := range cfg.Targets {
-		if strings.HasPrefix(t.Name, "//plugins/") && !strings.Contains(t.Name[len("//plugins/"):], "/") {
-			targets = append(targets, t.Name)
-		}
-	}
-
-	if len(targets) == 0 {
-		fmt.Println("No //plugins/* targets found.")
-		return 0
-	}
-
-	result, err := buildTargets(projectRoot, cfg, targets)
+// pluginListCached scans ~/.mu/plugins/ and shows all plugins stored in
+// the CAS, regardless of the current project's configuration.
+func pluginListCached(_ *config.ProjectConfig, _ string, jsonOut bool) int {
+	home, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
+		return 1
+	}
+	pluginsDir := filepath.Join(home, ".mu", "plugins")
+
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No cached plugins.")
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
 		return 1
 	}
@@ -185,28 +178,35 @@ func pluginListCached(cfg *config.ProjectConfig, projectRoot string, jsonOut boo
 	type cachedInfo struct {
 		Name   string `json:"name"`
 		Digest string `json:"digest"`
-		Cached bool   `json:"cached"`
 	}
 
 	var items []cachedInfo
-	for _, target := range targets {
-		name := strings.TrimPrefix(target, "//plugins/")
-		dgst, err := extractPluginDigest(result, target)
-		if err != nil {
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-		wasCached := false
-		for _, s := range result.ExecResult.Completed {
-			if strings.HasPrefix(s.ID, target+":") && s.Cached {
-				wasCached = true
-				break
+		name := e.Name()
+		dir := filepath.Join(pluginsDir, name)
+		digest := ""
+		if bundles, err := filepath.Glob(filepath.Join(dir, "bundle-*")); err == nil && len(bundles) > 0 {
+			base := filepath.Base(bundles[0])
+			digest = "sha256:" + strings.TrimPrefix(base, "bundle-")
+		} else if singles, err := filepath.Glob(filepath.Join(dir, "plugin-*")); err == nil && len(singles) > 0 {
+			base := filepath.Base(singles[0])
+			base = strings.TrimPrefix(base, "plugin-")
+			if idx := strings.IndexByte(base, '.'); idx >= 0 {
+				base = base[:idx]
 			}
+			digest = "sha256:" + base
 		}
-		items = append(items, cachedInfo{
-			Name:   name,
-			Digest: dgst.String(),
-			Cached: wasCached,
-		})
+		if digest != "" {
+			items = append(items, cachedInfo{Name: name, Digest: digest})
+		}
+	}
+
+	if len(items) == 0 {
+		fmt.Println("No cached plugins.")
+		return 0
 	}
 
 	if jsonOut {
@@ -216,13 +216,9 @@ func pluginListCached(cfg *config.ProjectConfig, projectRoot string, jsonOut boo
 		return 0
 	}
 
-	fmt.Printf("%-20s %-7s %s\n", "PLUGIN", "CACHED", "DIGEST")
+	fmt.Printf("%-20s %s\n", "PLUGIN", "DIGEST")
 	for _, item := range items {
-		cachedStr := "no"
-		if item.Cached {
-			cachedStr = "yes"
-		}
-		fmt.Printf("%-20s %-7s %s\n", item.Name, cachedStr, item.Digest)
+		fmt.Printf("%-20s %s\n", item.Name, item.Digest)
 	}
 	return 0
 }

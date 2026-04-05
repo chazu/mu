@@ -7,6 +7,11 @@ type ProjectConfig struct {
 	Cache        *CacheConfig  `json:"cache,omitempty"`
 	Plugins      []PluginDef   `json:"plugins,omitempty"`
 	Preprocessor *Preprocessor `json:"preprocessor,omitempty"`
+
+	// PluginDirs is populated by the loader — directories (relative to
+	// project root) whose mu.json contains a "plugin" key. These are
+	// bundled into CAS after their build targets complete.
+	PluginDirs []string `json:"-"`
 }
 
 // Target describes a build target.
@@ -61,10 +66,12 @@ type Preprocessor struct {
 }
 
 // PluginManifest is the "plugin" key in a plugin directory's mu.json.
-// It declares the entrypoint and optional runtime toolchain for a plugin bundle.
+// It declares the entrypoint, optional runtime toolchain, and files to
+// include in the CAS bundle.
 type PluginManifest struct {
-	Entrypoint string `json:"entrypoint"`           // relative path to the executable within the plugin dir
-	Toolchain  string `json:"toolchain,omitempty"`   // runtime toolchain (e.g. "bb"); empty = direct execution
+	Entrypoint string   `json:"entrypoint"`           // relative path to the executable within the plugin dir
+	Toolchain  string   `json:"toolchain,omitempty"`   // runtime toolchain (e.g. "bb"); empty = direct execution
+	Files      []string `json:"files,omitempty"`        // files to include in CAS bundle; empty = all files
 }
 
 // PluginConfig is the structure of a plugin directory's mu.json.

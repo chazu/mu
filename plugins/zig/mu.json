@@ -1,6 +1,18 @@
 {
   "plugin": {
     "entrypoint": "plugin.bb",
-    "toolchain": "bb"
-  }
+    "toolchain": "bb",
+    "files": ["plugin.bb"]
+  },
+  "targets": [
+    {
+      "target": "build",
+      "toolchain": "shell",
+      "sources": ["plugin.bb"],
+      "config": {
+        "command": ["true"],
+        "impure": false
+      }
+    }
+  ]
 }
