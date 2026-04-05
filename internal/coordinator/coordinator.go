@@ -47,8 +47,9 @@ type BuildResult struct {
 // PlanResult holds the planned action graph. Plugins are shut down before
 // Plan() returns — they are only needed during planning, not execution.
 type PlanResult struct {
-	Graph   *dag.Graph
-	Targets []config.Target // the resolved targets (for manifest metadata)
+	Graph           *dag.Graph
+	Targets         []config.Target                // the resolved targets (for manifest metadata)
+	ResolvedSecrets map[string]map[string]string   // actionID → envName → secret value (never persisted)
 }
 
 // Plan runs the planning pipeline: build toolchains, resolve plugins, start
@@ -177,7 +178,13 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		}
 	}
 
-	return &PlanResult{Graph: graph, Targets: targets}, nil
+	// 7. Resolve sealed inputs (secrets) before shutting down plugins.
+	resolvedSecrets, err := resolveSecrets(ctx, graph, mgr)
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
+
+	return &PlanResult{Graph: graph, Targets: targets, ResolvedSecrets: resolvedSecrets}, nil
 }
 
 // Execute runs a previously planned DAG.
@@ -186,7 +193,7 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	executor := &dag.Executor{Store: c.Store, Workers: workers}
+	executor := &dag.Executor{Store: c.Store, Workers: workers, ResolvedSecrets: plan.ResolvedSecrets}
 	execResult, err := executor.Execute(ctx, plan.Graph)
 	if err != nil {
 		return nil, fmt.Errorf("coordinator: execution: %w", err)
@@ -392,6 +399,52 @@ func prefixActions(target string, actions []plugin.ActionSpec) {
 			actions[i].DependsOn[j] = target + ":" + actions[i].DependsOn[j]
 		}
 	}
+}
+
+// resolveSecrets walks all actions in the graph, finds those with SealedInputs,
+// parses the scheme from each reference, and calls the appropriate plugin's
+// resolve_secret method. Returns a map of actionID → envName → resolved value.
+//
+// Secret references use the format "scheme:path" (e.g. "pass:deploy/token").
+// The scheme maps to a plugin name. The path is sent to the plugin.
+func resolveSecrets(ctx context.Context, graph *dag.Graph, mgr *plugin.Manager) (map[string]map[string]string, error) {
+	resolved := make(map[string]map[string]string)
+
+	for _, a := range graph.Actions() {
+		if len(a.SealedInputs) == 0 {
+			continue
+		}
+
+		secrets := make(map[string]string, len(a.SealedInputs))
+		for envName, ref := range a.SealedInputs {
+			scheme, path, ok := parseSecretRef(ref)
+			if !ok {
+				return nil, fmt.Errorf("action %q: sealed input %q: invalid reference %q (expected scheme:path)", a.ID, envName, ref)
+			}
+
+			value, err := mgr.ResolveSecret(ctx, scheme, path)
+			if err != nil {
+				return nil, fmt.Errorf("action %q: sealed input %q: %w", a.ID, envName, err)
+			}
+			secrets[envName] = value
+		}
+		resolved[a.ID] = secrets
+	}
+
+	if len(resolved) == 0 {
+		return nil, nil
+	}
+	return resolved, nil
+}
+
+// parseSecretRef splits a secret reference "scheme:path" into its components.
+// Returns false if the reference is malformed (no colon or empty parts).
+func parseSecretRef(ref string) (scheme, path string, ok bool) {
+	i := strings.IndexByte(ref, ':')
+	if i <= 0 || i >= len(ref)-1 {
+		return "", "", false
+	}
+	return ref[:i], ref[i+1:], true
 }
 
 // buildResultFrom converts a dag.ExecuteResult into a BuildResult.

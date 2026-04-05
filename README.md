@@ -344,7 +344,7 @@ mu plugin list --cached --json
 
 Plugins communicate over NDJSON (newline-delimited JSON) on stdin/stdout. Any language works — Babashka, Go, Python, Rust, a shell script.
 
-A plugin implements two methods:
+A plugin implements two required methods and one optional method:
 
 **`discover`** — returns plugin metadata:
 
@@ -366,7 +366,16 @@ A plugin implements two methods:
 
 The coordinator resolves file paths to content digests, merges subgraphs from all targets into a unified DAG, checks the cache, and executes uncached actions in parallel.
 
-**Timeouts:** `discover` 10 seconds, `plan` 5 minutes.
+**`resolve_secret`** *(optional)* — resolves a secret reference to its value:
+
+```json
+← {"method": "resolve_secret", "secret_ref": "deploy/registry-password"}
+→ {"value": "s3cr3t"}
+```
+
+Plugins that provide secrets must declare `"resolve_secret"` in their `capabilities` array during discover. See [Sealed Inputs](#sealed-inputs) below.
+
+**Timeouts:** `discover` 10 seconds, `plan` 5 minutes, `resolve_secret` 30 seconds.
 
 ### Writing a Plugin
 
@@ -387,7 +396,7 @@ while IFS= read -r line; do
 done
 ```
 
-Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract.
+Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract. Plugins may also implement `resolve_secret` to act as secret providers — see [Sealed Inputs](#sealed-inputs).
 
 ### Bundled Plugins
 
@@ -402,6 +411,83 @@ Plugins read JSON lines from stdin, dispatch on `method`, and write JSON respons
 | `terraform` | Terraform | Infrastructure provisioning |
 | `scratch` | Bootstrap | Toolchain bootstrapping from scratch |
 
+## Sealed Inputs
+
+Actions can declare **sealed inputs** — secret references that are resolved at execution time and injected as environment variables. Sealed inputs are never stored in CAS, never included in cache keys, and never appear in build manifests or verbose output.
+
+### How it works
+
+A build plugin's `plan` response can include `sealed_inputs` on any action:
+
+```json
+{
+  "actions": [{
+    "id": "deploy",
+    "command": ["kubectl", "apply", "-f", "deployment.yaml"],
+    "sealed_inputs": {
+      "REGISTRY_PASSWORD": "pass:deploy/registry",
+      "API_TOKEN": "vault:secrets/api-token"
+    }
+  }]
+}
+```
+
+Each value is a reference in the format `scheme:path`, where the scheme maps to a registered plugin name. During the planning phase, after all targets are planned, the coordinator:
+
+1. Walks all actions and collects sealed input references
+2. Parses each reference's scheme to identify the secret-provider plugin
+3. Calls that plugin's `resolve_secret` method with the path
+4. Stores the resolved values in memory (never on disk)
+5. At execution time, injects the resolved values into the action's environment
+
+### Writing a secret-provider plugin
+
+A secret-provider plugin must declare the `resolve_secret` capability and handle the `resolve_secret` method:
+
+```bash
+#!/usr/bin/env bash
+while IFS= read -r line; do
+  method=$(echo "$line" | jq -r '.method')
+  case "$method" in
+    discover)
+      echo '{"name":"pass","version":"0.1.0","protocol_version":1,
+             "consumes":[],"produces":[],
+             "capabilities":["discover","resolve_secret"]}'
+      ;;
+    resolve_secret)
+      ref=$(echo "$line" | jq -r '.secret_ref')
+      value=$(pass show "$ref" 2>/dev/null | head -1)
+      if [ $? -eq 0 ]; then
+        echo "{\"value\":\"$value\"}"
+      else
+        echo "{\"error\":\"secret not found: $ref\"}"
+      fi
+      ;;
+  esac
+done
+```
+
+Register the plugin in `mu.json` like any other:
+
+```json
+{
+  "plugins": [
+    {"name": "pass", "script": "plugins/pass/plugin.sh"},
+    {"name": "go", "script": "plugins/go/plugin.bb"}
+  ]
+}
+```
+
+Build plugins reference secrets using the provider's name as the scheme prefix (e.g., `"pass:deploy/token"`).
+
+### Security properties
+
+- **Never in CAS.** Secret values are never content-addressed or stored as artifacts.
+- **Never in cache keys.** Changing a secret does not invalidate the cache. Actions with sealed inputs can still be cached based on their non-secret inputs.
+- **Never on disk.** Resolved values exist only in process memory and the spawned action's environment.
+- **Never logged.** Secret values are excluded from `--verbose` output and `--emit-manifest` JSON.
+- **Resolved late.** Secrets are resolved after planning but before execution — the value window is as short as possible.
+
 ## Caching
 
 All artifacts are stored by their SHA-256 content hash in OCI layout (same format locally and remotely).
@@ -414,8 +500,9 @@ An action's cache key is derived from:
 - The command
 - Sorted input digests
 - Environment variables
+- Network flag
 
-If the key matches, the action is skipped and outputs are restored from cache.
+Sealed inputs (secrets) are deliberately excluded from the cache key. If the key matches, the action is skipped and outputs are restored from cache.
 
 ## Toolchains
 
@@ -490,6 +577,7 @@ The build coordinator is functional end-to-end:
 - [x] `mu build` command with cache integration
 - [x] Cross-toolchain artifact composition
 - [x] Plugin distribution via CAS digests (`mu plugin add`, `mu plugin list --cached`)
+- [x] Sealed inputs for secret injection (`resolve_secret` protocol, excluded from CAS/cache/logs)
 
 ## Roadmap
 

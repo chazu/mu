@@ -16,6 +16,10 @@ import (
 //   - sorted env vars (key=value)
 //   - network flag
 //
+// SealedInputs are deliberately excluded: secrets must never appear in cache
+// keys, stored action results, or any persistent artifact. Actions that use
+// sealed inputs may still be cached based on their non-secret inputs.
+//
 // All maps are sorted by key before hashing to ensure determinism.
 // Command args preserve their original order since command order matters.
 func ComputeActionKey(a *Action) cas.ActionKey {

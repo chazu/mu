@@ -19,6 +19,12 @@ type Action struct {
 	WorkDir   string // execution working directory
 	Impure    bool   // skip CAS cache when true
 
+	// SealedInputs maps env var names to secret references (e.g. "pass:deploy/token").
+	// These are resolved to actual values by the coordinator before execution and
+	// injected into the action's environment. Sealed inputs are deliberately excluded
+	// from cache key computation, build manifests, and verbose logging.
+	SealedInputs map[string]string
+
 	// Toolchain is the set of artifacts (relative path → CAS digest) that
 	// constitute the hermetic build environment for this action. When set,
 	// the executor unpacks these into a sandbox before running the command.

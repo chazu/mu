@@ -8,10 +8,11 @@ const ProtocolVersion = 1
 // Request is the unified envelope sent to plugins via NDJSON.
 // Plugins dispatch on the Method field.
 type Request struct {
-	Method             string            `json:"method"`                        // "discover", "plan", or "observe"
+	Method             string            `json:"method"`                        // "discover", "plan", "observe", or "resolve_secret"
 	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan"
 	Deps               []DepInfo         `json:"deps,omitempty"`               // set for "plan"
 	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan"
+	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret"
 }
 
 // DiscoverResponse is returned by plugins for method "discover".
@@ -80,20 +81,36 @@ type DepInfo struct {
 // ActionSpec is the plugin's output -- an action template with file paths (not resolved digests).
 // The coordinator resolves paths to digests and converts ActionSpec to dag.Action.
 type ActionSpec struct {
-	ID        string            `json:"id"`
-	Command   []string          `json:"command"`
-	Inputs    map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
-	Outputs   []string          `json:"outputs"`              // declared output file paths
-	DependsOn []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
-	Env       map[string]string `json:"env,omitempty"`
-	Network   bool              `json:"network,omitempty"`
-	WorkDir   string            `json:"work_dir,omitempty"`   // relative to project root (default: project root)
-	Impure    bool              `json:"impure,omitempty"`     // skip CAS cache
+	ID           string            `json:"id"`
+	Command      []string          `json:"command"`
+	Inputs       map[string]string `json:"inputs"`                 // name -> file path or "{action:id}" reference
+	Outputs      []string          `json:"outputs"`                // declared output file paths
+	DependsOn    []string          `json:"depends_on,omitempty"`   // intra-subgraph action IDs
+	Env          map[string]string `json:"env,omitempty"`
+	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env var name -> secret reference (e.g. "pass:deploy/token")
+	Network      bool              `json:"network,omitempty"`
+	WorkDir      string            `json:"work_dir,omitempty"`     // relative to project root (default: project root)
+	Impure       bool              `json:"impure,omitempty"`       // skip CAS cache
+}
+
+// ResolveSecretResponse is returned by plugins for method "resolve_secret".
+// The Value field contains the resolved secret. It must never be logged,
+// cached, or included in build manifests.
+type ResolveSecretResponse struct {
+	Value string `json:"value"`
+	Error string `json:"error,omitempty"`
 }
 
 // NewDiscoverRequest returns a Request for the "discover" method.
 func NewDiscoverRequest() Request {
 	return Request{Method: "discover"}
+}
+
+// NewResolveSecretRequest returns a Request for the "resolve_secret" method.
+// The ref is the secret path with the scheme prefix stripped (e.g. "deploy/token",
+// not "pass:deploy/token").
+func NewResolveSecretRequest(ref string) Request {
+	return Request{Method: "resolve_secret", SecretRef: ref}
 }
 
 // NewPlanRequest returns a Request for the "plan" method.

@@ -160,6 +160,29 @@ func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetIn
 	return entry.process.Observe(ctx, target, toolchainArtifacts)
 }
 
+// ResolveSecret sends a resolve_secret request to the named plugin.
+// Returns an error if the plugin is not registered or does not declare the
+// "resolve_secret" capability. The returned value must never be logged,
+// cached, or stored in CAS.
+func (m *Manager) ResolveSecret(ctx context.Context, pluginName string, ref string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	entry, ok := m.plugins[pluginName]
+	if !ok {
+		return "", fmt.Errorf("no plugin registered for secret scheme %q", pluginName)
+	}
+	if entry.process == nil {
+		return "", fmt.Errorf("plugin %q: not started", pluginName)
+	}
+
+	if entry.discover != nil && !entry.discover.HasCapability("resolve_secret") {
+		return "", fmt.Errorf("plugin %q does not support resolve_secret", pluginName)
+	}
+
+	return entry.process.ResolveSecret(ctx, ref)
+}
+
 // DiscoverInfo returns a copy of the discover response for a plugin, or nil if not found.
 func (m *Manager) DiscoverInfo(name string) *DiscoverResponse {
 	m.mu.RLock()

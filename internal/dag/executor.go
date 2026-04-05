@@ -32,8 +32,9 @@ type ExecuteResult struct {
 
 // Executor runs a DAG of actions with parallel scheduling and CAS caching.
 type Executor struct {
-	Store   cas.Store
-	Workers int // 0 means runtime.NumCPU()
+	Store           cas.Store
+	Workers         int                          // 0 means runtime.NumCPU()
+	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
 }
 
 // Execute runs all actions in the graph, respecting dependencies.
@@ -164,13 +165,27 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command", a.ID)}
 	}
 
+	// Merge resolved secrets into a copy of the env. We must not mutate a.Env
+	// because ComputeActionKey is called again after execution for cache storage,
+	// and secrets must never be part of the cache key.
+	execEnv := a.Env
+	if secrets := e.ResolvedSecrets[a.ID]; len(secrets) > 0 {
+		execEnv = make(map[string]string, len(a.Env)+len(secrets))
+		for k, v := range a.Env {
+			execEnv[k] = v
+		}
+		for k, v := range secrets {
+			execEnv[k] = v
+		}
+	}
+
 	var exitCode int
 	var execErr error
 
 	if a.Toolchain != nil {
-		exitCode, execErr = e.executeInSandbox(ctx, a)
+		exitCode, execErr = e.executeInSandbox(ctx, a, execEnv)
 	} else {
-		exitCode, execErr = e.executeBare(ctx, a)
+		exitCode, execErr = e.executeBare(ctx, a, execEnv)
 	}
 
 	if execErr != nil {
@@ -204,10 +219,11 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 
 // executeBare runs a command directly on the host (no sandbox).
 // Used for actions without a toolchain, preserving backward compatibility.
-func (e *Executor) executeBare(ctx context.Context, a *Action) (int, error) {
+// The env parameter may include resolved secrets merged with the action's declared env.
+func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]string) (int, error) {
 	cmd := exec.CommandContext(ctx, a.Command[0], a.Command[1:]...)
 	cmd.Dir = a.WorkDir
-	cmd.Env = buildEnv(a.Env)
+	cmd.Env = buildEnv(env)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -222,7 +238,8 @@ func (e *Executor) executeBare(ctx context.Context, a *Action) (int, error) {
 // executeInSandbox runs a command in a hermetic sandbox environment.
 // The toolchain artifacts are unpacked into the sandbox, sources are copied in,
 // the command runs inside the sandbox, and outputs are copied back to WorkDir.
-func (e *Executor) executeInSandbox(ctx context.Context, a *Action) (int, error) {
+// The env parameter may include resolved secrets merged with the action's declared env.
+func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[string]string) (int, error) {
 	sb, err := sandbox.New(e.Store)
 	if err != nil {
 		return -1, fmt.Errorf("create sandbox: %w", err)
@@ -242,7 +259,7 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action) (int, error)
 	}
 
 	// Execute.
-	exitCode, err := sb.Exec(ctx, a.Command, a.Env, a.Network)
+	exitCode, err := sb.Exec(ctx, a.Command, env, a.Network)
 	if err != nil {
 		return exitCode, err
 	}

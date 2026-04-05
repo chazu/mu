@@ -262,6 +262,83 @@ func TestResolveWorkDirEmpty(t *testing.T) {
 	}
 }
 
+func TestResolveSealedInputsPassthrough(t *testing.T) {
+	dir := t.TempDir()
+
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "deploy",
+			Command: []string{"kubectl", "apply"},
+			SealedInputs: map[string]string{
+				"REGISTRY_PASSWORD": "pass:deploy/registry",
+				"API_TOKEN":         "vault:secrets/api",
+			},
+		},
+	}
+
+	actions, err := Resolve(specs, dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("got %d actions, want 1", len(actions))
+	}
+
+	a := actions[0]
+	if len(a.SealedInputs) != 2 {
+		t.Fatalf("SealedInputs count = %d, want 2", len(a.SealedInputs))
+	}
+	if a.SealedInputs["REGISTRY_PASSWORD"] != "pass:deploy/registry" {
+		t.Errorf("SealedInputs[REGISTRY_PASSWORD] = %q, want pass:deploy/registry", a.SealedInputs["REGISTRY_PASSWORD"])
+	}
+	if a.SealedInputs["API_TOKEN"] != "vault:secrets/api" {
+		t.Errorf("SealedInputs[API_TOKEN] = %q, want vault:secrets/api", a.SealedInputs["API_TOKEN"])
+	}
+}
+
+func TestResolveSealedInputsNil(t *testing.T) {
+	dir := t.TempDir()
+
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "build",
+			Command: []string{"make"},
+		},
+	}
+
+	actions, err := Resolve(specs, dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if actions[0].SealedInputs != nil {
+		t.Errorf("SealedInputs = %v, want nil", actions[0].SealedInputs)
+	}
+}
+
+func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
+	dir := t.TempDir()
+
+	original := map[string]string{"TOKEN": "pass:deploy/token"}
+	specs := []plugin.ActionSpec{
+		{
+			ID:           "deploy",
+			Command:      []string{"kubectl"},
+			SealedInputs: original,
+		},
+	}
+
+	actions, err := Resolve(specs, dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// Mutating the original should not affect the resolved action.
+	original["EXTRA"] = "pass:extra"
+	if len(actions[0].SealedInputs) != 1 {
+		t.Errorf("SealedInputs was not copied; mutation leaked through")
+	}
+}
+
 func TestResolveEmptySpecs(t *testing.T) {
 	actions, err := Resolve(nil, t.TempDir())
 	if err != nil {

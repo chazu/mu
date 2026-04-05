@@ -176,6 +176,10 @@ func (p *Process) Plan(ctx context.Context, target TargetInfo, deps []DepInfo, t
 	return &resp, nil
 }
 
+// DefaultResolveSecretTimeout is the default timeout for resolve_secret requests.
+// Kept short since secret resolution should be fast (local keyring, vault call, etc).
+const DefaultResolveSecretTimeout = 30 * time.Second
+
 // DefaultObserveTimeout is the default timeout for observe requests.
 const DefaultObserveTimeout = 5 * time.Minute
 
@@ -197,6 +201,24 @@ func (p *Process) Observe(ctx context.Context, target TargetInfo, toolchainArtif
 	}
 
 	return &resp, nil
+}
+
+// ResolveSecret sends a resolve_secret request and returns the resolved value.
+// The returned value must never be logged, cached, or stored in CAS.
+func (p *Process) ResolveSecret(ctx context.Context, ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultResolveSecretTimeout)
+	defer cancel()
+
+	var resp ResolveSecretResponse
+	if err := p.send(ctx, NewResolveSecretRequest(ref), &resp); err != nil {
+		return "", err
+	}
+
+	if resp.Error != "" {
+		return "", fmt.Errorf("plugin %q: resolve_secret error: %s", p.name, resp.Error)
+	}
+
+	return resp.Value, nil
 }
 
 // Close gracefully shuts down the plugin process.

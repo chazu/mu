@@ -72,16 +72,26 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			}
 		}
 
+		// Copy SealedInputs map (nil-safe).
+		var sealedInputs map[string]string
+		if spec.SealedInputs != nil {
+			sealedInputs = make(map[string]string, len(spec.SealedInputs))
+			for k, v := range spec.SealedInputs {
+				sealedInputs[k] = v
+			}
+		}
+
 		actions = append(actions, &dag.Action{
-			ID:        spec.ID,
-			Command:   spec.Command,
-			Inputs:    inputs,
-			Outputs:   spec.Outputs,
-			DependsOn: spec.DependsOn,
-			Env:       env,
-			Network:   spec.Network,
-			WorkDir:   workDir,
-			Impure:    spec.Impure,
+			ID:           spec.ID,
+			Command:      spec.Command,
+			Inputs:       inputs,
+			Outputs:      spec.Outputs,
+			DependsOn:    spec.DependsOn,
+			Env:          env,
+			SealedInputs: sealedInputs,
+			Network:      spec.Network,
+			WorkDir:      workDir,
+			Impure:       spec.Impure,
 		})
 	}
 

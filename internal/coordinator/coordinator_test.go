@@ -147,6 +147,42 @@ func TestPrefixActions(t *testing.T) {
 	}
 }
 
+// ---------- parseSecretRef tests ----------
+
+func TestParseSecretRef(t *testing.T) {
+	tests := []struct {
+		ref        string
+		wantScheme string
+		wantPath   string
+		wantOk     bool
+	}{
+		{"pass:deploy/token", "pass", "deploy/token", true},
+		{"vault:secrets/api/key", "vault", "secrets/api/key", true},
+		{"1password:op://vault/item", "1password", "op://vault/item", true},
+		{"nocolon", "", "", false},
+		{":nocheme", "", "", false},
+		{"empty:", "", "", false},
+		{"", "", "", false},
+	}
+
+	for _, tt := range tests {
+		scheme, path, ok := parseSecretRef(tt.ref)
+		if ok != tt.wantOk {
+			t.Errorf("parseSecretRef(%q) ok = %v, want %v", tt.ref, ok, tt.wantOk)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if scheme != tt.wantScheme {
+			t.Errorf("parseSecretRef(%q) scheme = %q, want %q", tt.ref, scheme, tt.wantScheme)
+		}
+		if path != tt.wantPath {
+			t.Errorf("parseSecretRef(%q) path = %q, want %q", tt.ref, path, tt.wantPath)
+		}
+	}
+}
+
 // helpers
 
 func names(targets []config.Target) []string {
