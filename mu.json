@@ -21,8 +21,8 @@
     }
   ],
   "plugins": [
-    {"name": "go", "script": "plugins/go/plugin.bb"},
-    {"name": "lint", "script": "plugins/lint/plugin.bb"}
+    {"name": "go", "script": "plugins/go"},
+    {"name": "lint", "script": "plugins/lint"}
   ],
   "targets": [
     {
@@ -46,116 +46,6 @@
         "output": "mu",
         "pkg": "./cmd/mu",
         "trimpath": true
-      }
-    },
-    {
-      "target": "//plugins/go",
-      "toolchain": "shell",
-      "sources": ["plugins/go/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/go/plugin.bb", "go-plugin.bb"],
-        "outputs": ["go-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/cowsay",
-      "toolchain": "shell",
-      "sources": ["plugins/cowsay/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/cowsay/plugin.bb", "cowsay-plugin.bb"],
-        "outputs": ["cowsay-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/docker",
-      "toolchain": "shell",
-      "sources": ["plugins/docker/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/docker/plugin.bb", "docker-plugin.bb"],
-        "outputs": ["docker-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/file",
-      "toolchain": "shell",
-      "sources": ["plugins/file/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/file/plugin.bb", "file-plugin.bb"],
-        "outputs": ["file-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/k8s",
-      "toolchain": "shell",
-      "sources": ["plugins/k8s/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/k8s/plugin.bb", "k8s-plugin.bb"],
-        "outputs": ["k8s-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/zig",
-      "toolchain": "shell",
-      "sources": ["plugins/zig/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/zig/plugin.bb", "zig-plugin.bb"],
-        "outputs": ["zig-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/terraform",
-      "toolchain": "shell",
-      "sources": ["plugins/terraform/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/terraform/plugin.bb", "terraform-plugin.bb"],
-        "outputs": ["terraform-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/scratch",
-      "toolchain": "shell",
-      "sources": ["plugins/scratch/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/scratch/plugin.bb", "scratch-plugin.bb"],
-        "outputs": ["scratch-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins/lint",
-      "toolchain": "shell",
-      "sources": ["plugins/lint/plugin.bb"],
-      "config": {
-        "command": ["cp", "plugins/lint/plugin.bb", "lint-plugin.bb"],
-        "outputs": ["lint-plugin.bb"],
-        "impure": false
-      }
-    },
-    {
-      "target": "//plugins",
-      "toolchain": "shell",
-      "sources": [],
-      "deps": [
-        "//plugins/go",
-        "//plugins/cowsay",
-        "//plugins/docker",
-        "//plugins/file",
-        "//plugins/k8s",
-        "//plugins/zig",
-        "//plugins/terraform",
-        "//plugins/scratch",
-        "//plugins/lint"
-      ],
-      "config": {
-        "command": ["true"],
-        "impure": false
       }
     },
     {

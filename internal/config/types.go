@@ -11,11 +11,12 @@ type ProjectConfig struct {
 
 // Target describes a build target.
 type Target struct {
-	Name       string         `json:"target"`
-	Toolchain  string         `json:"toolchain"`
-	Sources    []string       `json:"sources"`
-	Deps       []string       `json:"deps,omitempty"`
-	Config     map[string]any `json:"config,omitempty"`
+	Name         string            `json:"target"`
+	Toolchain    string            `json:"toolchain"`
+	Sources      []string          `json:"sources"`
+	Deps         []string          `json:"deps,omitempty"`
+	Config       map[string]any    `json:"config,omitempty"`
+	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env name → secret ref (e.g. "pass:deploy/token")
 	// BRICK classification (optional, set by pudl export-actions).
 	// mu does not validate these — pudl enforces BRICK constraints via CUE.
 	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"
@@ -58,6 +59,21 @@ type PluginDef struct {
 type Preprocessor struct {
 	Extension string   `json:"extension"`
 	Command   []string `json:"command"`
+}
+
+// PluginManifest is the "plugin" key in a plugin directory's mu.json.
+// It declares the entrypoint and runtime for a multi-file plugin bundle.
+type PluginManifest struct {
+	Entrypoint string `json:"entrypoint"`          // relative path to the executable within the plugin dir
+	Runtime    string `json:"runtime,omitempty"`    // "auto" (default), "bb", or "none"
+}
+
+// PluginConfig is the structure of a plugin directory's mu.json.
+// It extends the normal project config with a Plugin field.
+type PluginConfig struct {
+	Plugin     *PluginManifest `json:"plugin,omitempty"`
+	Targets    []Target        `json:"targets,omitempty"`
+	Toolchains []Toolchain     `json:"toolchains,omitempty"`
 }
 
 // CacheConfig configures the build cache system.

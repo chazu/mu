@@ -14,6 +14,7 @@ type PluginDef struct {
 	Command      []string `json:"command"`        // command to spawn, relative to project root
 	Script       string   `json:"script"`         // CAS-extracted file path (any executable)
 	NeedsRuntime bool     `json:"needs_runtime"`  // true = prepend ScriptRuntime (bb) to execute
+	WorkDir      string   `json:"work_dir"`       // if set, plugin cwd is this directory (for bundled plugins)
 }
 
 // Manager manages the lifecycle of plugin processes and routes requests.
@@ -83,7 +84,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, r := range toStart {
 		r := r // capture loop var
 		g.Go(func() error {
-			proc, err := StartProcess(r.name, r.command, m.projectRoot)
+			proc, err := StartProcess(r.name, r.command, m.projectRoot, r.entry.def.WorkDir)
 			if err != nil {
 				return err
 			}
@@ -140,7 +141,8 @@ func (m *Manager) Plan(ctx context.Context, toolchain string, target TargetInfo,
 
 // Observe sends an observe request to the plugin registered for the given toolchain.
 // If the plugin does not declare "observe" in its capabilities, returns an empty response.
-func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetInfo, toolchainArtifacts map[string]string) (*ObserveResponse, error) {
+// Secrets contains resolved sealed input values for the target (may be nil).
+func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetInfo, toolchainArtifacts map[string]string, secrets map[string]string) (*ObserveResponse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -157,7 +159,7 @@ func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetIn
 		return &ObserveResponse{}, nil
 	}
 
-	return entry.process.Observe(ctx, target, toolchainArtifacts)
+	return entry.process.Observe(ctx, target, toolchainArtifacts, secrets)
 }
 
 // ResolveSecret sends a resolve_secret request to the named plugin.

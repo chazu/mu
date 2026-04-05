@@ -9,9 +9,10 @@ const ProtocolVersion = 1
 // Plugins dispatch on the Method field.
 type Request struct {
 	Method             string            `json:"method"`                        // "discover", "plan", "observe", or "resolve_secret"
-	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan"
+	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan" and "observe"
 	Deps               []DepInfo         `json:"deps,omitempty"`               // set for "plan"
-	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan"
+	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan" and "observe"
+	Secrets            map[string]string `json:"secrets,omitempty"`             // set for "observe" — resolved sealed input values
 	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret"
 }
 
@@ -50,11 +51,13 @@ type ObserveResponse struct {
 }
 
 // NewObserveRequest returns a Request for the "observe" method.
-func NewObserveRequest(target TargetInfo, toolchainArtifacts map[string]string) Request {
+// Secrets contains resolved sealed input values (never logged, cached, or stored in CAS).
+func NewObserveRequest(target TargetInfo, toolchainArtifacts map[string]string, secrets map[string]string) Request {
 	return Request{
 		Method:             "observe",
 		Target:             &target,
 		ToolchainArtifacts: toolchainArtifacts,
+		Secrets:            secrets,
 	}
 }
 

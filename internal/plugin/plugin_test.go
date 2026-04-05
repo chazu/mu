@@ -161,7 +161,7 @@ func TestNewPlanRequest(t *testing.T) {
 
 func startTestPlugin(t *testing.T, script string) *plugin.Process {
 	t.Helper()
-	p, err := plugin.StartProcess("test", []string{"bash", testdataPath(script)}, ".")
+	p, err := plugin.StartProcess("test", []string{"bash", testdataPath(script)}, ".", "")
 	if err != nil {
 		t.Fatalf("StartProcess(%s): %v", script, err)
 	}
@@ -222,7 +222,7 @@ func TestProcessPlan(t *testing.T) {
 }
 
 func TestProcessTimeout(t *testing.T) {
-	p, err := plugin.StartProcess("timeout-test", []string{"bash", testdataPath("mock_timeout.sh")}, ".")
+	p, err := plugin.StartProcess("timeout-test", []string{"bash", testdataPath("mock_timeout.sh")}, ".", "")
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestProcessTimeout(t *testing.T) {
 }
 
 func TestProcessCrash(t *testing.T) {
-	p, err := plugin.StartProcess("crash-test", []string{"bash", testdataPath("mock_crash.sh")}, ".")
+	p, err := plugin.StartProcess("crash-test", []string{"bash", testdataPath("mock_crash.sh")}, ".", "")
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestProcessPlanError(t *testing.T) {
 }
 
 func TestProcessClose(t *testing.T) {
-	p, err := plugin.StartProcess("close-test", []string{"bash", testdataPath("mock_plugin.sh")}, ".")
+	p, err := plugin.StartProcess("close-test", []string{"bash", testdataPath("mock_plugin.sh")}, ".", "")
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}

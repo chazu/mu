@@ -253,13 +253,32 @@ Plugins are external executables that tell mu what to build and how. mu itself h
 
 ### Defining Plugins
 
-Plugins can be written in any language — anything that reads NDJSON on stdin and writes responses to stdout. They are declared in `mu.json`'s `plugins` array. There are four ways to reference a plugin:
+Plugins can be written in any language — anything that reads NDJSON on stdin and writes responses to stdout. They are declared in `mu.json`'s `plugins` array. There are five ways to reference a plugin:
 
-**Local file** — a plugin file vendored in the repo, hashed and stored in CAS:
+**Local file** — a single plugin file vendored in the repo, hashed and stored in CAS:
 
 ```json
 {"name": "go", "script": "plugins/go/plugin.bb"}
 ```
+
+**Plugin directory** — a directory containing a `mu.json` with a `plugin` key. All files in the directory are bundled together as a deterministic tar, stored in CAS, and extracted as a unit:
+
+```json
+{"name": "host", "script": "plugins/host"}
+```
+
+The directory must contain a `mu.json` declaring the entrypoint:
+
+```json
+{
+  "plugin": {
+    "entrypoint": "plugin.bb",
+    "runtime": "bb"
+  }
+}
+```
+
+Sibling files (helper scripts, templates, etc.) are available to the plugin at runtime via relative paths. Hidden directories (`.git`, etc.) are excluded from the bundle.
 
 **Remote file** — fetched by URL with SHA-256 verification, stored in CAS:
 
@@ -279,7 +298,7 @@ Plugins can be written in any language — anything that reads NDJSON on stdin a
 {"name": "go", "command": ["./my-plugin"]}
 ```
 
-For the first three modes, mu extracts the plugin to `~/.mu/plugins/<name>/` and executes it. `.bb` files are automatically run via the bb (Babashka) runtime; all other files are executed directly as binaries or scripts. Override this with the `runtime` field:
+For the first four modes, mu extracts the plugin to `~/.mu/plugins/<name>/` and executes it. `.bb` files are automatically run via the bb (Babashka) runtime; all other files are executed directly as binaries or scripts. Override this with the `runtime` field:
 
 ```json
 {"name": "go", "script": "plugins/go/plugin.py", "runtime": "none"}

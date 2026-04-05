@@ -16,7 +16,7 @@ import (
 // request for each toolchain in cfg. The resulting actions are collected but
 // not yet executed (the caller is responsible for DAG execution).
 func External(ctx context.Context, execPath string, projectRoot string, cfg *config.ProjectConfig, store cas.Store) error {
-	proc, err := plugin.StartProcess("scratch-external", []string{execPath}, projectRoot)
+	proc, err := plugin.StartProcess("scratch-external", []string{execPath}, projectRoot, "")
 	if err != nil {
 		return fmt.Errorf("start external scratch build: %w", err)
 	}

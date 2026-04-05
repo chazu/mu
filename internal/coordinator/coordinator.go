@@ -85,7 +85,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	mgr := plugin.NewManager(c.ProjectRoot)
 
 	// If any plugin uses "script", resolve the bb binary from the toolchain registry.
-	if needsScriptRuntime(c.Config.Plugins) {
+	if needsScriptRuntime(c.Config.Plugins, c.ProjectRoot) {
 		bbPath, err := c.resolveScriptRuntime(ctx, registry)
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: %w", err)
@@ -246,19 +246,25 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
-	// Collect which toolchains we need (skip shell targets).
-	neededToolchains := make(map[string]bool)
+	// Collect which toolchains and secret schemes we need.
+	neededPlugins := make(map[string]bool)
 	for _, t := range targets {
 		if t.Toolchain != "shell" {
-			neededToolchains[t.Toolchain] = true
+			neededPlugins[t.Toolchain] = true
+		}
+		for _, ref := range t.SealedInputs {
+			scheme, _, ok := parseSecretRef(ref)
+			if ok {
+				neededPlugins[scheme] = true
+			}
 		}
 	}
 
-	// 3. Only start plugins for needed toolchains.
+	// 3. Start plugins for needed toolchains and secret providers.
 	mgr := plugin.NewManager(c.ProjectRoot)
 
-	if len(neededToolchains) > 0 {
-		if needsScriptRuntime(c.Config.Plugins) {
+	if len(neededPlugins) > 0 {
+		if needsScriptRuntime(c.Config.Plugins, c.ProjectRoot) {
 			bbPath, err := c.resolveScriptRuntime(ctx, registry)
 			if err != nil {
 				return nil, fmt.Errorf("coordinator: %w", err)
@@ -278,7 +284,7 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 		}
 
 		for _, rp := range resolvedPlugins {
-			if neededToolchains[rp.Def.Name] {
+			if neededPlugins[rp.Def.Name] {
 				if err := mgr.Register(rp.Def); err != nil {
 					return nil, fmt.Errorf("coordinator: register plugin %q: %w", rp.Def.Name, err)
 				}
@@ -290,7 +296,28 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 		defer mgr.Close()
 	}
 
-	// 4. Send observe request for each target.
+	// 4. Resolve sealed inputs for all targets that declare them.
+	targetSecrets := make(map[string]map[string]string) // target name → env name → resolved value
+	for _, t := range targets {
+		if len(t.SealedInputs) == 0 {
+			continue
+		}
+		secrets := make(map[string]string, len(t.SealedInputs))
+		for envName, ref := range t.SealedInputs {
+			scheme, path, ok := parseSecretRef(ref)
+			if !ok {
+				return nil, fmt.Errorf("target %q: sealed input %q: invalid reference %q (expected scheme:path)", t.Name, envName, ref)
+			}
+			value, err := mgr.ResolveSecret(ctx, scheme, path)
+			if err != nil {
+				return nil, fmt.Errorf("target %q: sealed input %q: %w", t.Name, envName, err)
+			}
+			secrets[envName] = value
+		}
+		targetSecrets[t.Name] = secrets
+	}
+
+	// 5. Send observe request for each target.
 	var results []ObserveResult
 	for _, t := range targets {
 		if t.Toolchain == "shell" {
@@ -321,7 +348,7 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 			Config:    t.Config,
 		}
 
-		resp, err := mgr.Observe(ctx, t.Toolchain, ti, registry.ArtifactsMap(t.Toolchain))
+		resp, err := mgr.Observe(ctx, t.Toolchain, ti, registry.ArtifactsMap(t.Toolchain), targetSecrets[t.Name])
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: observing target %q: %w", t.Name, err)
 		}
@@ -551,14 +578,16 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 }
 
 // needsScriptRuntime returns true if any plugin will need the bb runtime.
-// This is determined by the Runtime config field and file extension:
+// This is determined by the Runtime config field, file extension, or
+// plugin manifest (for directory plugins):
 //   - runtime:"bb" → always needs it
 //   - runtime:"none" → never needs it
 //   - runtime:"" or "auto" → needs it if the source ends in .bb
+//   - directory plugin → check manifest runtime and entrypoint extension
 //
 // For digest-only plugins with no extension hint, we assume bb for
 // backward compatibility unless runtime is explicitly "none".
-func needsScriptRuntime(plugins []config.PluginDef) bool {
+func needsScriptRuntime(plugins []config.PluginDef, projectRoot string) bool {
 	for _, p := range plugins {
 		if len(p.Command) > 0 {
 			continue // command plugins never need bb
@@ -569,8 +598,27 @@ func needsScriptRuntime(plugins []config.PluginDef) bool {
 		case "none":
 			continue
 		default: // "" or "auto"
-			if p.Script != "" && strings.HasSuffix(p.Script, ".bb") {
-				return true
+			if p.Script != "" {
+				// Check if this is a directory plugin.
+				scriptPath := p.Script
+				if !filepath.IsAbs(scriptPath) {
+					scriptPath = filepath.Join(projectRoot, scriptPath)
+				}
+				if info, err := os.Stat(scriptPath); err == nil && info.IsDir() {
+					if manifest, err := config.LoadPluginManifest(scriptPath); err == nil {
+						runtime := manifest.Plugin.Runtime
+						if runtime == "" {
+							runtime = p.Runtime
+						}
+						if pluginNeedsRuntime(runtime, manifest.Plugin.Entrypoint) {
+							return true
+						}
+					}
+					continue
+				}
+				if strings.HasSuffix(p.Script, ".bb") {
+					return true
+				}
 			}
 			if p.URL != "" && strings.HasSuffix(p.URL, ".bb") {
 				return true

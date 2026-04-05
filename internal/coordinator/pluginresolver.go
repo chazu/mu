@@ -1,11 +1,15 @@
 package coordinator
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/chau/mu/internal/builtin"
@@ -96,14 +100,28 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 	}, nil
 }
 
-// resolveLocal reads a local plugin file, stores it in CAS, and returns a
-// resolved plugin pointing to the cached copy.
+// resolveLocal handles a local plugin path — either a single file or a
+// directory containing a plugin manifest (mu.json with a "plugin" key).
 func (r *PluginResolver) resolveLocal(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
 	scriptPath := p.Script
 	if !filepath.IsAbs(scriptPath) {
 		scriptPath = filepath.Join(r.ProjectRoot, scriptPath)
 	}
 
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", p.Script, err)
+	}
+
+	if info.IsDir() {
+		return r.resolveLocalDir(ctx, p, scriptPath)
+	}
+	return r.resolveLocalFile(ctx, p, scriptPath)
+}
+
+// resolveLocalFile reads a single local plugin file, stores it in CAS,
+// and returns a resolved plugin pointing to the cached copy.
+func (r *PluginResolver) resolveLocalFile(ctx context.Context, p config.PluginDef, scriptPath string) (*ResolvedPlugin, error) {
 	f, err := os.Open(scriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("open script %s: %w", p.Script, err)
@@ -130,6 +148,205 @@ func (r *PluginResolver) resolveLocal(ctx context.Context, p config.PluginDef) (
 		},
 		Digest: dgst,
 	}, nil
+}
+
+// resolveLocalDir bundles a plugin directory into a deterministic tar,
+// stores it in CAS, extracts the full directory, and returns a resolved
+// plugin with the entrypoint and WorkDir set.
+func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef, dirPath string) (*ResolvedPlugin, error) {
+	// 1. Load plugin manifest.
+	manifest, err := config.LoadPluginManifest(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Verify entrypoint exists.
+	entryRel := manifest.Plugin.Entrypoint
+	entryAbs := filepath.Join(dirPath, entryRel)
+	if _, err := os.Stat(entryAbs); err != nil {
+		return nil, fmt.Errorf("entrypoint %q not found in plugin directory: %w", entryRel, err)
+	}
+
+	// 3. Bundle the directory as a deterministic tar and store in CAS.
+	dgst, err := r.bundleDir(ctx, dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("bundle plugin directory: %w", err)
+	}
+
+	// 4. Extract the tar to a stable directory.
+	extractDir, err := r.extractDirFromCAS(ctx, p.Name, dgst)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Resolve entrypoint and runtime.
+	entryPath := filepath.Join(extractDir, entryRel)
+	runtime := manifest.Plugin.Runtime
+	if runtime == "" {
+		runtime = p.Runtime
+	}
+
+	return &ResolvedPlugin{
+		Def: plugin.PluginDef{
+			Name:         p.Name,
+			Script:       entryPath,
+			NeedsRuntime: pluginNeedsRuntime(runtime, entryPath),
+			WorkDir:      extractDir,
+		},
+		Digest: dgst,
+	}, nil
+}
+
+// bundleDir creates a deterministic tar archive of the directory and stores
+// it in CAS. Entries are sorted lexicographically and timestamps/UIDs are
+// zeroed for reproducible hashes. Hidden directories (.git, etc.) are skipped.
+func (r *PluginResolver) bundleDir(ctx context.Context, dirPath string) (cas.Digest, error) {
+	// Collect all files (sorted for determinism).
+	type fileEntry struct {
+		relPath string
+		absPath string
+		info    fs.FileInfo
+	}
+	var entries []fileEntry
+
+	err := filepath.Walk(dirPath, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip hidden directories.
+		if info.IsDir() && info.Name() != "." && strings.HasPrefix(info.Name(), ".") {
+			return filepath.SkipDir
+		}
+		// Skip directories themselves — we only tar files.
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dirPath, path)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, fileEntry{relPath: rel, absPath: path, info: info})
+		return nil
+	})
+	if err != nil {
+		return cas.Digest{}, fmt.Errorf("walking plugin directory: %w", err)
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].relPath < entries[j].relPath
+	})
+
+	// Create deterministic tar in memory.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	for _, e := range entries {
+		hdr := &tar.Header{
+			Name:    e.relPath,
+			Size:    e.info.Size(),
+			Mode:    int64(e.info.Mode() & fs.ModePerm),
+			Typeflag: tar.TypeReg,
+			// Zero timestamps and UIDs for determinism.
+		}
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return cas.Digest{}, fmt.Errorf("write tar header for %s: %w", e.relPath, err)
+		}
+
+		f, err := os.Open(e.absPath)
+		if err != nil {
+			return cas.Digest{}, fmt.Errorf("open %s: %w", e.relPath, err)
+		}
+		if _, err := io.Copy(tw, f); err != nil {
+			f.Close()
+			return cas.Digest{}, fmt.Errorf("write tar body for %s: %w", e.relPath, err)
+		}
+		f.Close()
+	}
+
+	if err := tw.Close(); err != nil {
+		return cas.Digest{}, fmt.Errorf("close tar: %w", err)
+	}
+
+	// Store the tar blob in CAS.
+	dgst, err := r.Store.Put(ctx, bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		return cas.Digest{}, fmt.Errorf("store tar in CAS: %w", err)
+	}
+
+	return dgst, nil
+}
+
+// extractDirFromCAS extracts a plugin tar bundle from CAS to a stable
+// directory: ~/.mu/plugins/<name>/bundle-<hash>/.
+func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgst cas.Digest) (string, error) {
+	dir := filepath.Join(r.CacheDir, name)
+	short := dgst.Hash
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	extractDir := filepath.Join(dir, "bundle-"+short)
+
+	// Skip if already extracted.
+	if _, err := os.Stat(extractDir); err == nil {
+		return extractDir, nil
+	}
+
+	// Clean old bundle versions.
+	entries, _ := filepath.Glob(filepath.Join(dir, "bundle-*"))
+	for _, old := range entries {
+		if old != extractDir {
+			os.RemoveAll(old)
+		}
+	}
+
+	// Get tar from CAS.
+	rc, err := r.Store.Get(ctx, dgst)
+	if err != nil {
+		return "", fmt.Errorf("get plugin bundle from CAS: %w", err)
+	}
+	defer rc.Close()
+
+	// Extract tar entries.
+	tr := tar.NewReader(rc)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("read tar entry: %w", err)
+		}
+
+		// Validate: no absolute paths, no path traversal.
+		if filepath.IsAbs(hdr.Name) || strings.Contains(hdr.Name, "..") {
+			return "", fmt.Errorf("tar entry %q: path traversal not allowed", hdr.Name)
+		}
+
+		destPath := filepath.Join(extractDir, hdr.Name)
+
+		// Ensure parent directory exists.
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			return "", err
+		}
+
+		mode := fs.FileMode(hdr.Mode)
+		if mode == 0 {
+			mode = 0o644
+		}
+
+		f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+		if err != nil {
+			return "", fmt.Errorf("create %s: %w", hdr.Name, err)
+		}
+		if _, err := io.Copy(f, tr); err != nil {
+			f.Close()
+			return "", fmt.Errorf("extract %s: %w", hdr.Name, err)
+		}
+		f.Close()
+	}
+
+	return extractDir, nil
 }
 
 // resolveRemote fetches a remote plugin by URL, verifies sha256, stores in CAS.
@@ -184,7 +401,7 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 	}, nil
 }
 
-// extractFromCAS writes a plugin from CAS to a stable filesystem path.
+// extractFromCAS writes a single-file plugin from CAS to a stable filesystem path.
 // srcHint is the original file path or URL, used to preserve the file extension.
 // If empty, the file is extracted with no extension (bare executable).
 // Files are always extracted with executable permissions (0o755).

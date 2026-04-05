@@ -29,14 +29,20 @@ type Process struct {
 }
 
 // StartProcess spawns a plugin process with the given command.
-// The command's working directory is set to projectRoot.
-func StartProcess(name string, command []string, projectRoot string) (*Process, error) {
+// If workDir is non-empty, it is used as the process working directory;
+// otherwise projectRoot is used. Bundled plugins use workDir so they
+// can find sibling files relative to the extracted bundle root.
+func StartProcess(name string, command []string, projectRoot string, workDir string) (*Process, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("plugin %q: empty command", name)
 	}
 
 	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Dir = projectRoot
+	if workDir != "" {
+		cmd.Dir = workDir
+	} else {
+		cmd.Dir = projectRoot
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -186,12 +192,12 @@ const DefaultObserveTimeout = 5 * time.Minute
 // Observe sends an observe request and returns the response.
 // If the plugin returns an error (e.g., "unknown method"), this is returned
 // as a normal error — the Manager handles fallback to an empty response.
-func (p *Process) Observe(ctx context.Context, target TargetInfo, toolchainArtifacts map[string]string) (*ObserveResponse, error) {
+func (p *Process) Observe(ctx context.Context, target TargetInfo, toolchainArtifacts map[string]string, secrets map[string]string) (*ObserveResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultObserveTimeout)
 	defer cancel()
 
 	var resp ObserveResponse
-	req := NewObserveRequest(target, toolchainArtifacts)
+	req := NewObserveRequest(target, toolchainArtifacts, secrets)
 	if err := p.send(ctx, req, &resp); err != nil {
 		return nil, err
 	}

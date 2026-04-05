@@ -1,0 +1,6 @@
+{
+  "plugin": {
+    "entrypoint": "plugin.bb",
+    "runtime": "bb"
+  }
+}

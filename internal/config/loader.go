@@ -80,6 +80,19 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 			return nil
 		}
 
+		// Skip plugin directories — a mu.json with a "plugin" key is a
+		// plugin manifest, not a project config fragment. Reading the raw
+		// bytes is cheap and avoids merging plugin targets into the project.
+		if !usePP {
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return fmt.Errorf("reading %s: %w", path, readErr)
+			}
+			if IsPluginDir(raw) {
+				return filepath.SkipDir
+			}
+		}
+
 		var partial *ProjectConfig
 		if usePP {
 			partial, err = Preprocess(cfg.Preprocessor, path)

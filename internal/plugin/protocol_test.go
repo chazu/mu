@@ -86,7 +86,7 @@ func TestObserveResponseJSONRoundTrip(t *testing.T) {
 
 func TestNewObserveRequest(t *testing.T) {
 	target := plugin.TargetInfo{Name: "//k8s/api", Toolchain: "k8s"}
-	req := plugin.NewObserveRequest(target, map[string]string{"bin/kubectl": "sha256:abc"})
+	req := plugin.NewObserveRequest(target, map[string]string{"bin/kubectl": "sha256:abc"}, nil)
 
 	if req.Method != "observe" {
 		t.Errorf("Method = %q, want observe", req.Method)
