@@ -251,47 +251,63 @@ mu does not perform this validation. Its role is to execute targets, not enforce
 
 Plugins are external executables that tell mu what to build and how. mu itself has no built-in knowledge of any language or tool — plugins provide all of it.
 
-### Defining Plugins
+### Plugin Structure
 
-Plugins can be written in any language — anything that reads NDJSON on stdin and writes responses to stdout. They are declared in `mu.json`'s `plugins` array. There are five ways to reference a plugin:
-
-**Local file** — a single plugin file vendored in the repo, hashed and stored in CAS:
-
-```json
-{"name": "go", "script": "plugins/go/plugin.bb"}
-```
-
-**Plugin directory** — a directory containing a `mu.json` with a `plugin` key. All files in the directory are bundled together as a deterministic tar, stored in CAS, and extracted as a unit:
-
-```json
-{"name": "host", "script": "plugins/host"}
-```
-
-The directory must contain a `mu.json` declaring the entrypoint and optional runtime toolchain:
+A plugin is a directory containing a `mu.json` with a `plugin` key and at least one build target. The `mu.json` declares how to build the plugin, what files to include, and how to run it:
 
 ```json
 {
   "plugin": {
     "entrypoint": "plugin.bb",
-    "toolchain": "bb"
-  }
+    "toolchain": "bb",
+    "files": ["plugin.bb", "helper.sh"]
+  },
+  "targets": [
+    {
+      "target": "build",
+      "toolchain": "shell",
+      "sources": ["plugin.bb", "helper.sh"],
+      "config": {
+        "command": ["true"],
+        "impure": false
+      }
+    }
+  ]
 }
 ```
 
-The `toolchain` field names the toolchain needed to run the plugin (e.g. `"bb"` for Babashka scripts). Omit it for compiled binaries or scripts that execute directly. If omitted, mu infers the toolchain from the file extension (`.bb` → `bb`).
+**Plugin manifest fields** (`plugin` key):
 
-Sibling files (helper scripts, templates, etc.) are available to the plugin at runtime via relative paths. Hidden directories (`.git`, etc.) are excluded from the bundle.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `entrypoint` | yes | Relative path to the executable within the plugin directory |
+| `toolchain` | no | Runtime toolchain needed to execute the plugin (e.g. `"bb"` for Babashka). Omit for compiled binaries. If omitted, inferred from file extension (`.bb` → `bb`) |
+| `files` | no | Files to include in the CAS bundle. If omitted, all non-hidden files are included |
+
+**Build targets**: Every plugin declares its own build targets in its `mu.json`. For interpreted plugins (Babashka scripts), the build target can be a no-op (`true`). For compiled plugins (Go, Rust), the build target compiles the binary. mu does not dictate how plugins are built — the plugin author is in control.
+
+When `mu build` runs a plugin's build target, the plugin directory is automatically bundled as a deterministic tar and stored in CAS. The bundle is extracted to `~/.mu/plugins/<name>/` for execution.
+
+### Referencing Plugins
+
+Plugins are declared in the consuming project's `mu.json` `plugins` array. There are four ways to reference a plugin:
+
+**Plugin directory** (preferred) — point `script` at a directory containing a plugin `mu.json`:
+
+```json
+{"name": "go", "script": "plugins/go"}
+```
+
+**Single file** (legacy) — a single script file, hashed and stored in CAS:
+
+```json
+{"name": "go", "script": "plugins/go/plugin.bb"}
+```
 
 **Remote file** — fetched by URL with SHA-256 verification, stored in CAS:
 
 ```json
 {"name": "go", "url": "https://example.com/go-plugin.bb", "sha256": "abc123..."}
-```
-
-**CAS digest** — reference a plugin already stored in the content-addressed cache:
-
-```json
-{"name": "go", "digest": "sha256:818f0c36b02f946611b674eac0f658de2184e759a2c389f4a6f13d0caa8652ab"}
 ```
 
 **Command** — run an arbitrary executable directly (not stored in CAS):
@@ -300,69 +316,59 @@ Sibling files (helper scripts, templates, etc.) are available to the plugin at r
 {"name": "go", "command": ["./my-plugin"]}
 ```
 
-For the first four modes, mu extracts the plugin to `~/.mu/plugins/<name>/` and executes it. The runtime toolchain is determined by the plugin manifest's `toolchain` field, or inferred from the file extension (`.bb` → Babashka). Compiled binaries and shell scripts execute directly.
+### Building Plugins
 
-### Building and Distributing Plugins
-
-mu includes build targets for all bundled plugins. Each `//plugins/<name>` target hashes the plugin script and stores it in CAS:
+Plugin build targets appear in `mu target list` like any other target. Build them individually or use wildcard patterns:
 
 ```bash
-# Build all plugins into CAS
-mu build //plugins
+# Build all plugins
+mu build //plugins/...
 
 # Build a single plugin
-mu build //plugins/go
+mu build //plugins/go/build
+
+# Build everything under a prefix (one level)
+mu build //plugins/*
 ```
 
-List all plugins available in the cache with their digests:
-
-```bash
-mu plugin list --cached
-```
-
-```
-PLUGIN               CACHED  DIGEST
-go                   yes     sha256:818f0c36...
-cowsay               yes     sha256:b3df9813...
-docker               yes     sha256:1fd5b618...
-```
-
-Add a cached plugin to your project's `mu.json` by name:
-
-```bash
-mu plugin add go
-```
-
-This builds `//plugins/go`, extracts the output digest, and writes a `digest`-based entry into `mu.json`. If an entry with the same name already exists, it is replaced.
+Building a plugin target bundles the plugin directory into CAS automatically.
 
 ### Inspecting Plugins
 
 ```bash
-# List plugins defined in mu.json
+# List plugins declared in mu.json
 mu plugin list
 
-# Start plugins and show their capabilities (requires built toolchains)
-mu plugin list --discover
+# List all plugins stored in CAS (across all projects)
+mu plugin list --cached
 
-# JSON output
-mu plugin list --cached --json
+# Start plugins and show their capabilities
+mu plugin list --discover
+```
+
+```
+PLUGIN               DIGEST
+go                   sha256:ea33df5f454a
+cowsay               sha256:ff96f94da42e
+docker               sha256:433d180dbe2e
 ```
 
 ### Plugin Protocol
 
 Plugins communicate over NDJSON (newline-delimited JSON) on stdin/stdout. Any language works — Babashka, Go, Python, Rust, a shell script.
 
-A plugin implements two required methods and one optional method:
+A plugin implements these methods:
 
-**`discover`** — returns plugin metadata:
+**`discover`** (required) — returns plugin metadata:
 
 ```json
 ← {"method": "discover"}
 → {"name": "go", "version": "0.1.0", "protocol_version": 1,
-   "consumes": ["go_source"], "produces": ["executable", "go_library"]}
+   "consumes": ["go_source"], "produces": ["executable", "go_library"],
+   "capabilities": ["discover", "plan", "observe"]}
 ```
 
-**`plan`** — given a target, returns an action subgraph:
+**`plan`** (required) — given a target, returns an action subgraph:
 
 ```json
 ← {"method": "plan", "target": {"name": "//cmd/server", "toolchain": "go",
@@ -374,6 +380,15 @@ A plugin implements two required methods and one optional method:
 
 The coordinator resolves file paths to content digests, merges subgraphs from all targets into a unified DAG, checks the cache, and executes uncached actions in parallel.
 
+**`observe`** *(optional)* — reports current state of a resource for drift detection:
+
+```json
+← {"method": "observe", "target": {...}, "secrets": {"API_KEY": "resolved-value"}}
+→ {"current": {"replicas": 3, "image": "nginx:1.25"}}
+```
+
+Observe requests include resolved secrets from the target's `sealed_inputs` (see [Sealed Inputs](#sealed-inputs)). The plugin reports the current state; convergence decisions are made downstream by pudl, not by the plugin.
+
 **`resolve_secret`** *(optional)* — resolves a secret reference to its value:
 
 ```json
@@ -383,7 +398,7 @@ The coordinator resolves file paths to content digests, merges subgraphs from al
 
 Plugins that provide secrets must declare `"resolve_secret"` in their `capabilities` array during discover. See [Sealed Inputs](#sealed-inputs) below.
 
-**Timeouts:** `discover` 10 seconds, `plan` 5 minutes, `resolve_secret` 30 seconds.
+**Timeouts:** `discover` 10 seconds, `plan` 5 minutes, `observe` 5 minutes, `resolve_secret` 30 seconds.
 
 ### Writing a Plugin
 
@@ -395,7 +410,7 @@ while IFS= read -r line; do
   method=$(echo "$line" | jq -r '.method')
   case "$method" in
     discover)
-      echo '{"name":"my-plugin","version":"0.1.0","protocol_version":1,"consumes":[],"produces":["text_output"]}'
+      echo '{"name":"my-plugin","version":"0.1.0","protocol_version":1,"consumes":[],"produces":["text_output"],"capabilities":["discover","plan"]}'
       ;;
     plan)
       echo '{"actions":[{"id":"run","command":["echo","hello"],"inputs":{},"outputs":["out.txt"],"env":{}}],"declared_outputs":{"text_output":"out.txt"}}'
@@ -404,26 +419,36 @@ while IFS= read -r line; do
 done
 ```
 
-Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract. Plugins may also implement `resolve_secret` to act as secret providers — see [Sealed Inputs](#sealed-inputs).
+Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract.
+
+To package it as a plugin, create a directory with the script and a `mu.json`:
+
+```
+my-plugin/
+  mu.json       # {"plugin": {"entrypoint": "plugin.sh"}, "targets": [...]}
+  plugin.sh     # the script above
+```
 
 ### Bundled Plugins
 
-| Plugin | Toolchain | Description |
-|--------|-----------|-------------|
-| `go` | Go | Builds Go binaries (cross-compile, tags, ldflags, race) |
-| `cowsay` | Text | Demo text transformation |
-| `docker` | Docker | Docker image builder |
-| `file` | File | File operations |
-| `k8s` | Kubernetes | Kubernetes resource management |
-| `zig` | Zig | Zig language toolchain |
-| `terraform` | Terraform | Infrastructure provisioning |
-| `scratch` | Bootstrap | Toolchain bootstrapping from scratch |
+| Plugin | Description |
+|--------|-------------|
+| `go` | Builds Go binaries (cross-compile, tags, ldflags, race) |
+| `cowsay` | Demo text transformation |
+| `docker` | Docker image builder |
+| `file` | File convergence (write, copy, symlink, delete) |
+| `k8s` | Kubernetes resource convergence and drift detection |
+| `zig` | Zig language toolchain |
+| `terraform` | Infrastructure provisioning |
+| `scratch` | Toolchain bootstrapping from scratch |
+| `lint` | Linter wrapper (observe + fix) |
+| `pass` | Secret provider backed by [pass](https://passwordstore.org) |
 
 ## Sealed Inputs
 
-Actions can declare **sealed inputs** — secret references that are resolved at execution time and injected as environment variables. Sealed inputs are never stored in CAS, never included in cache keys, and never appear in build manifests or verbose output.
+Sealed inputs are secret references that are resolved at runtime and never stored in CAS, cache keys, or logs. They are used in two contexts:
 
-### How it works
+### In build actions
 
 A build plugin's `plan` response can include `sealed_inputs` on any action:
 
@@ -440,53 +465,37 @@ A build plugin's `plan` response can include `sealed_inputs` on any action:
 }
 ```
 
-Each value is a reference in the format `scheme:path`, where the scheme maps to a registered plugin name. During the planning phase, after all targets are planned, the coordinator:
+Each value is a reference in the format `scheme:path`, where the scheme maps to a registered plugin name. The coordinator resolves secrets after planning and injects them into the action's environment at execution time.
 
-1. Walks all actions and collects sealed input references
-2. Parses each reference's scheme to identify the secret-provider plugin
-3. Calls that plugin's `resolve_secret` method with the path
-4. Stores the resolved values in memory (never on disk)
-5. At execution time, injects the resolved values into the action's environment
+### In observe targets
 
-### Writing a secret-provider plugin
-
-A secret-provider plugin must declare the `resolve_secret` capability and handle the `resolve_secret` method:
-
-```bash
-#!/usr/bin/env bash
-while IFS= read -r line; do
-  method=$(echo "$line" | jq -r '.method')
-  case "$method" in
-    discover)
-      echo '{"name":"pass","version":"0.1.0","protocol_version":1,
-             "consumes":[],"produces":[],
-             "capabilities":["discover","resolve_secret"]}'
-      ;;
-    resolve_secret)
-      ref=$(echo "$line" | jq -r '.secret_ref')
-      value=$(pass show "$ref" 2>/dev/null | head -1)
-      if [ $? -eq 0 ]; then
-        echo "{\"value\":\"$value\"}"
-      else
-        echo "{\"error\":\"secret not found: $ref\"}"
-      fi
-      ;;
-  esac
-done
-```
-
-Register the plugin in `mu.json` like any other:
+Targets can declare `sealed_inputs` directly in `mu.json` for use during observation (e.g., SSH credentials, API keys):
 
 ```json
 {
-  "plugins": [
-    {"name": "pass", "script": "plugins/pass/plugin.sh"},
-    {"name": "go", "script": "plugins/go/plugin.bb"}
-  ]
+  "target": "//home/server",
+  "toolchain": "host",
+  "config": {"host": "192.168.1.104", "user": "root"},
+  "sealed_inputs": {
+    "SSH_PASS": "pass:servers/root-password"
+  }
 }
 ```
 
-Build plugins reference secrets using the provider's name as the scheme prefix (e.g., `"pass:deploy/token"`).
+The coordinator resolves these before calling the plugin's `observe` method and passes them as a `secrets` map in the observe request. The plugin uses them to authenticate but never persists them.
+
+### Secret resolution flow
+
+1. Parse each reference's `scheme:path` to identify the secret-provider plugin
+2. Call that plugin's `resolve_secret` method with the path
+3. Store the resolved values in memory (never on disk)
+4. Inject into action environments (build) or observe requests (observe)
+
+### Writing a secret-provider plugin
+
+A secret-provider plugin declares the `resolve_secret` capability and handles the method. The bundled `pass` plugin (`plugins/pass/`) provides an example backed by [password-store](https://passwordstore.org).
+
+Register the plugin in `mu.json` and reference secrets using the provider's name as the scheme prefix (e.g., `"pass:deploy/token"`).
 
 ### Security properties
 
