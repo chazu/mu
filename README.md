@@ -159,15 +159,9 @@ Flags:
   --json    Output as JSON
 ```
 
-Checks if targets are up-to-date by sending observe requests to their plugins. Each target reports one of three states:
+Reports the current observed state of each target by sending observe requests to their plugins. Plugins return structured data describing what they see — mu does not make convergence decisions. The observed state is designed for ingestion into pudl's value lattice, where it is compared against desired state to determine drift.
 
-- **converged** — actual state matches desired state
-- **drifted** — actual state differs (diff is shown)
-- **unknown** — plugin doesn't implement observe
-
-Kit targets (shell targets with deps) derive their state from dependencies: converged if all deps are converged, drifted if any dep is drifted.
-
-JSON output conforms to pudl's `mu.#ObserveResult` schema for ingestion into the ACUTE loop:
+Kit targets (shell targets with deps) aggregate their dependencies' observed state.
 
 ```bash
 mu observe --json //lint
@@ -175,9 +169,9 @@ mu observe --json //lint
 
 ```json
 [
-  {"target": "//lint/go-vet", "state": "converged"},
-  {"target": "//lint/gofmt", "state": "converged"},
-  {"target": "//lint", "state": "converged"}
+  {"target": "//lint/go-vet", "current": {"exit_code": 0, "output": "", "command": "go vet ./..."}},
+  {"target": "//lint/gofmt", "current": {"exit_code": 0, "output": "", "command": "gofmt -l ."}},
+  {"target": "//lint", "current": {"deps": {"//lint/go-vet": {...}, "//lint/gofmt": {...}}}}
 ]
 ```
 

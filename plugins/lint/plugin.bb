@@ -17,8 +17,8 @@
 ;; When sources change, the lint check re-runs.
 ;;
 ;; Observe behavior:
-;;   exit 0 + no stdout = converged (lint passes)
-;;   exit != 0 or stdout present = drifted (violations found)
+;;   Returns the current state: exit code and any lint output.
+;;   Convergence decisions are made downstream (by pudl), not here.
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
@@ -72,27 +72,16 @@
       (let [opts (cond-> {:out :string :err :string}
                    env     (assoc :extra-env env)
                    workdir (assoc :dir workdir))
-            result (process/sh (into command) opts)]
-        (cond
-          ;; Exit 0 = lint passes = converged
-          (= 0 (:exit result))
-          (let [output (str/trim (str (:out result)))]
-            (if (empty? output)
-              {"state" "converged"}
-              ;; Some linters exit 0 but print warnings — still converged
-              ;; but include the output for visibility.
-              {"state" "converged"}))
-
-          ;; Non-zero exit = lint violations = drifted
-          :else
-          {"state" "drifted"
-           "diff"  (let [out (str/trim (str (:out result)))
-                         err (str/trim (str (:err result)))]
-                     (str/join "\n" (remove empty? [out err])))}))
+            result (process/sh (into command) opts)
+            out    (str/trim (str (:out result)))
+            err-out (str/trim (str (:err result)))
+            output (str/join "\n" (remove empty? [out err-out]))]
+        {"current" {"exit_code" (:exit result)
+                    "output"    output
+                    "command"   (str/join " " command)}})
 
       (catch Exception e
-        {"state" "drifted"
-         "diff"  (str "lint command failed: " (.getMessage e))}))))
+        {"error" (str "lint command failed: " (.getMessage e))}))))
 
 (defn handle-request [req]
   (case (get req "method")

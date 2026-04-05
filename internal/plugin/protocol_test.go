@@ -59,8 +59,11 @@ func TestHasCapability_EmptyDefaultsToDiscoverPlan(t *testing.T) {
 
 func TestObserveResponseJSONRoundTrip(t *testing.T) {
 	resp := plugin.ObserveResponse{
-		State: "drifted",
-		Diff:  "- replicas: 3\n+ replicas: 2",
+		Current: map[string]any{
+			"active":  true,
+			"enabled": true,
+			"unit":    "victoriametrics",
+		},
 	}
 
 	data, err := json.Marshal(resp)
@@ -73,11 +76,11 @@ func TestObserveResponseJSONRoundTrip(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if got.State != "drifted" {
-		t.Errorf("State = %q, want drifted", got.State)
+	if got.Current == nil {
+		t.Fatal("expected non-nil Current")
 	}
-	if got.Diff == "" {
-		t.Error("expected non-empty Diff")
+	if got.Current["active"] != true {
+		t.Errorf("Current[active] = %v, want true", got.Current["active"])
 	}
 }
 

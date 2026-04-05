@@ -123,14 +123,15 @@
                        (conj (str "-var-file=" (get config "var_file"))))
             result   (process/sh plan-cmd {:dir dir})]
         (cond
-          ;; Exit 0 = no changes = converged
+          ;; Exit 0 = no changes
           (= 0 (:exit result))
-          {"state" "converged"}
+          {"current" {"has_changes" false
+                      "plan_output" (str/trim (str (:out result)))}}
 
-          ;; Exit 2 = changes detected = drifted
+          ;; Exit 2 = changes detected
           (= 2 (:exit result))
-          {"state" "drifted"
-           "diff"  (str (:out result))}
+          {"current" {"has_changes" true
+                      "plan_output" (str/trim (str (:out result)))}}
 
           ;; Exit 1 = error
           :else

@@ -185,7 +185,7 @@ const DefaultObserveTimeout = 5 * time.Minute
 
 // Observe sends an observe request and returns the response.
 // If the plugin returns an error (e.g., "unknown method"), this is returned
-// as a normal error — the Manager handles fallback to {State: "unknown"}.
+// as a normal error — the Manager handles fallback to an empty response.
 func (p *Process) Observe(ctx context.Context, target TargetInfo, toolchainArtifacts map[string]string) (*ObserveResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultObserveTimeout)
 	defer cancel()

@@ -41,10 +41,11 @@ func (d *DiscoverResponse) HasCapability(method string) bool {
 }
 
 // ObserveResponse is returned by plugins for method "observe".
+// Plugins report the current state of the resource as structured data.
+// Convergence decisions (converged vs. drifted) are made by pudl, not
+// by the plugin — the plugin is a sensor, not a judge.
 type ObserveResponse struct {
-	State   string         `json:"state"`             // "converged", "drifted", or "unknown"
-	Current map[string]any `json:"current,omitempty"` // plugin-specific current state
-	Diff    string         `json:"diff,omitempty"`    // human-readable diff
+	Current map[string]any `json:"current,omitempty"` // observed state of the resource
 	Error   string         `json:"error,omitempty"`
 }
 

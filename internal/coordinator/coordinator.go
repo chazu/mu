@@ -216,15 +216,18 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 }
 
 // ObserveResult holds the observation result for a single target.
+// The Current field contains the observed state as reported by the plugin.
+// Convergence decisions are made downstream (by pudl), not here.
 type ObserveResult struct {
-	Target string `json:"target"`
-	State  string `json:"state"` // "converged", "drifted", "unknown"
-	Diff   string `json:"diff,omitempty"`
+	Target  string         `json:"target"`
+	Current map[string]any `json:"current,omitempty"` // observed state from plugin
+	Error   string         `json:"error,omitempty"`   // non-empty if observation failed
 }
 
 // Observe checks the current state of the given targets by sending observe
-// requests to their plugins. Shell targets return {State: "unknown"} unless
-// they have an observe_command configured.
+// requests to their plugins. Each plugin reports the observed state as
+// structured data. Convergence decisions are made downstream (by pudl),
+// not by mu.
 func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]ObserveResult, error) {
 	// 1. Build toolchains from scratch.
 	registry := c.ToolchainRegistry
@@ -295,21 +298,19 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 			if t.Config != nil {
 				if obsCmd, ok := t.Config["observe_command"]; ok {
 					if cmdSlice, ok := obsCmd.([]any); ok && len(cmdSlice) > 0 {
-						// Run the observe command and check exit code.
 						result := observeViaCommand(ctx, t, cmdSlice, c.ProjectRoot)
 						results = append(results, result)
 						continue
 					}
 				}
 			}
-			// Kit targets (shell with deps, no observe_command): derive state
-			// from dependency results. Converged if all deps converged, drifted
-			// if any dep drifted, unknown only if no deps had results.
+			// Kit targets (shell with deps, no observe_command): aggregate
+			// dependency state for downstream consumption.
 			if len(t.Deps) > 0 {
-				results = append(results, deriveKitState(t.Name, t.Deps, results))
+				results = append(results, aggregateKitState(t.Name, t.Deps, results))
 				continue
 			}
-			results = append(results, ObserveResult{Target: t.Name, State: "unknown"})
+			results = append(results, ObserveResult{Target: t.Name})
 			continue
 		}
 
@@ -326,16 +327,16 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 		}
 
 		results = append(results, ObserveResult{
-			Target: t.Name,
-			State:  resp.State,
-			Diff:   resp.Diff,
+			Target:  t.Name,
+			Current: resp.Current,
 		})
 	}
 
 	return results, nil
 }
 
-// observeViaCommand runs an observe_command for a shell target and returns the result.
+// observeViaCommand runs an observe_command for a shell target and returns
+// the result. The command's stdout is captured as the observed state.
 func observeViaCommand(ctx context.Context, t config.Target, cmdSlice []any, projectRoot string) ObserveResult {
 	args := make([]string, 0, len(cmdSlice))
 	for _, item := range cmdSlice {
@@ -344,49 +345,42 @@ func observeViaCommand(ctx context.Context, t config.Target, cmdSlice []any, pro
 		}
 	}
 	if len(args) == 0 {
-		return ObserveResult{Target: t.Name, State: "unknown"}
+		return ObserveResult{Target: t.Name}
 	}
 
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = projectRoot
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return ObserveResult{Target: t.Name, State: "drifted", Diff: string(output)}
+	current := map[string]any{
+		"output":    strings.TrimSpace(string(output)),
+		"exit_code": 0,
 	}
-	return ObserveResult{Target: t.Name, State: "converged"}
+	if err != nil {
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		current["exit_code"] = exitCode
+	}
+	return ObserveResult{Target: t.Name, Current: current}
 }
 
-// deriveKitState computes a kit target's observe state from its dependencies.
-// The kit is converged only if all deps with results are converged.
-// If any dep is drifted, the kit is drifted with a summary diff.
-func deriveKitState(name string, deps []string, results []ObserveResult) ObserveResult {
-	depStates := make(map[string]string, len(deps))
+// aggregateKitState collects the observed state of a kit's dependencies
+// into a single result. The downstream consumer (pudl) decides convergence.
+func aggregateKitState(name string, deps []string, results []ObserveResult) ObserveResult {
+	depResults := make(map[string]any, len(deps))
+	resultIndex := make(map[string]ObserveResult, len(results))
 	for _, r := range results {
-		depStates[r.Target] = r.State
+		resultIndex[r.Target] = r
 	}
-
-	hasDrifted := false
-	hasConverged := false
-	var driftedDeps []string
-
 	for _, dep := range deps {
-		switch depStates[dep] {
-		case "drifted":
-			hasDrifted = true
-			driftedDeps = append(driftedDeps, dep)
-		case "converged":
-			hasConverged = true
+		if r, ok := resultIndex[dep]; ok {
+			depResults[dep] = r.Current
 		}
 	}
-
-	switch {
-	case hasDrifted:
-		diff := fmt.Sprintf("drifted deps: %s", strings.Join(driftedDeps, ", "))
-		return ObserveResult{Target: name, State: "drifted", Diff: diff}
-	case hasConverged:
-		return ObserveResult{Target: name, State: "converged"}
-	default:
-		return ObserveResult{Target: name, State: "unknown"}
+	return ObserveResult{
+		Target:  name,
+		Current: map[string]any{"deps": depResults},
 	}
 }
 

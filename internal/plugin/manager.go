@@ -139,7 +139,7 @@ func (m *Manager) Plan(ctx context.Context, toolchain string, target TargetInfo,
 }
 
 // Observe sends an observe request to the plugin registered for the given toolchain.
-// If the plugin does not declare "observe" in its capabilities, returns {State: "unknown"}.
+// If the plugin does not declare "observe" in its capabilities, returns an empty response.
 func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetInfo, toolchainArtifacts map[string]string) (*ObserveResponse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -154,7 +154,7 @@ func (m *Manager) Observe(ctx context.Context, toolchain string, target TargetIn
 
 	// Check capabilities before sending observe.
 	if entry.discover != nil && !entry.discover.HasCapability("observe") {
-		return &ObserveResponse{State: "unknown"}, nil
+		return &ObserveResponse{}, nil
 	}
 
 	return entry.process.Observe(ctx, target, toolchainArtifacts)

@@ -257,29 +257,21 @@
         base-args (kubectl-base-args config)]
     (try
       (let [manifests (parse-source-manifests sources)
-            diffs (for [manifest manifests
-                        :let [rid  (resource-id manifest)
-                              live (fetch-live-object base-args rid)]]
-                    (if (nil? live)
-                      {:resource rid
-                       :drifted? true
-                       :message  (str (:kind rid) "/" (:name rid)
-                                      " does not exist on cluster")}
-                      (assoc (diff-resource manifest live config)
-                             :resource rid)))
-            any-drifted? (some :drifted? diffs)]
-        (if any-drifted?
-          {"state" "drifted"
-           "diff"  (->> diffs
-                        (filter :drifted?)
-                        (map #(if (:message %)
-                                (:message %)
-                                (format-diff (:resource %) %)))
-                        (str/join "\n\n"))}
-          {"state" "converged"}))
+            resources (for [manifest manifests
+                           :let [rid  (resource-id manifest)
+                                 live (fetch-live-object base-args rid)]]
+                        (if (nil? live)
+                          {"resource" (str (:kind rid) "/" (:name rid))
+                           "exists"   false}
+                          (let [d (diff-resource manifest live config)]
+                            (cond-> {"resource"  (str (:kind rid) "/" (:name rid))
+                                     "exists"    true
+                                     "matches"   (not (:drifted? d))}
+                              (:drifted? d)
+                              (assoc "diff" (format-diff rid d))))))]
+        {"current" {"resources" (vec resources)}})
       (catch Exception e
-        {"state" "drifted"
-         "diff"  (str "observe failed: " (.getMessage e))}))))
+        {"error" (str "observe failed: " (.getMessage e))}))))
 
 ;;; ─── Dispatch ───────────────────────────────────────────────────────
 

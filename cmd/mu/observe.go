@@ -114,53 +114,34 @@ func runObserve(args []string) int {
 		enc.Encode(results)
 	} else {
 		for _, r := range results {
-			switch r.State {
-			case "converged":
-				fmt.Printf("  %s\tconverged\n", r.Target)
-			case "drifted":
-				fmt.Printf("  %s\tdrifted\n", r.Target)
-				if r.Diff != "" {
-					for _, line := range strings.Split(r.Diff, "\n") {
-						if line != "" {
-							fmt.Printf("    %s\n", line)
-						}
-					}
-				}
-			default:
-				fmt.Printf("  %s\tunknown\n", r.Target)
+			if r.Error != "" {
+				fmt.Printf("  %s\terror: %s\n", r.Target, r.Error)
+			} else if r.Current != nil {
+				currentJSON, _ := json.Marshal(r.Current)
+				fmt.Printf("  %s\t%s\n", r.Target, string(currentJSON))
+			} else {
+				fmt.Printf("  %s\t(no observe data)\n", r.Target)
 			}
 		}
 	}
 
-	// Count results.
-	var converged, drifted, unknown int
+	// Count errors.
+	var errors int
 	for _, r := range results {
-		switch r.State {
-		case "converged":
-			converged++
-		case "drifted":
-			drifted++
-		default:
-			unknown++
+		if r.Error != "" {
+			errors++
 		}
 	}
 
 	if !*jsonOut {
-		parts := []string{}
-		if converged > 0 {
-			parts = append(parts, fmt.Sprintf("%d converged", converged))
+		fmt.Fprintf(os.Stderr, "\n  %d observed", len(results))
+		if errors > 0 {
+			fmt.Fprintf(os.Stderr, ", %d errors", errors)
 		}
-		if drifted > 0 {
-			parts = append(parts, fmt.Sprintf("%d drifted", drifted))
-		}
-		if unknown > 0 {
-			parts = append(parts, fmt.Sprintf("%d unknown", unknown))
-		}
-		fmt.Fprintf(os.Stderr, "\n  %s\n", strings.Join(parts, ", "))
+		fmt.Fprintln(os.Stderr)
 	}
 
-	// Exit 1 if any target is drifted.
-	if drifted > 0 {
+	if errors > 0 {
 		return 1
 	}
 	return 0
