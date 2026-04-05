@@ -581,21 +581,38 @@ The build coordinator is functional end-to-end:
 
 ## Roadmap
 
-### Near-term
+### Core
 
-- [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS
-- [ ] **Tiered cache composition** — Chain local + OCI backends with configurable policies
-- [ ] **`mu clean` / `mu verify`** — Cache management and integrity checking
+- [ ] **Tiered cache composition** — Chain local + OCI backends with read-repair and write-through policies
+- [ ] **`mu clean`** — Prune stale artifacts from the local CAS
+- [ ] **CLI polish** — Color output, `--verbose` for all commands, consistent `--json` across subcommands
 
-### Medium-term
+### Build intelligence
 
-- [ ] **OS-level sandboxing** — Linux: user namespaces + overlayfs. macOS: sandbox-exec profiles
+- [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS. See [`docs/brainstorms/2026-02-28-go-toolchain-plugin-design.md`](docs/brainstorms/2026-02-28-go-toolchain-plugin-design.md)
 - [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
+- [ ] **OS-level sandboxing** — Linux: user namespaces + overlayfs. macOS: sandbox-exec profiles
 
-### Long-term
+### Plugin ecosystem
+
+Proposed plugins and the mu/pudl ownership split are documented in [`docs/brainstorms/2026-03-25-plugin-ideas.md`](docs/brainstorms/2026-03-25-plugin-ideas.md).
+
+- [ ] **Secrets plugins** — `pass` and `op` (1Password) plugins using the `resolve_secret` protocol for secret injection and drift detection
+- [ ] **Policy plugin** — OPA/conftest for runtime policy enforcement via observe
+- [ ] **Container image plugins** — `buildpack` and `ko` as alternatives to the Docker plugin
+- [ ] **Developer standards plugins** — `structure`, `docs`, `convention` for project layout and documentation enforcement
+
+### Infrastructure
 
 - [ ] **Remote execution** — Distribute actions to worker pools
 - [ ] **Protocol extensions** — Streaming progress, async planning, format negotiation
+
+### Architecture references
+
+- [Conceptual model](docs/architecture/mu-conceptual-model.md) — mu's primitives, hermeticity model, and execution flow
+- [BRICK ecosystem](docs/architecture/brick-ecosystem.md) — how mu and pudl work together (BRICK/IDEA/ACUTE frameworks)
+- [BRICK project guide](docs/architecture/brick-project-guide.md) — practical guide to structuring a BRICK project
+- [BRICK integration plan](docs/plans/2026-03-24-feat-brick-ecosystem-integration-plan.md) — implementation plan for convergence and observation
 
 ## License
 
