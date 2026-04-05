@@ -65,7 +65,8 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		}
 		// Skip hidden directories (e.g. .git, .claude) to avoid picking up
 		// configs from worktrees, caches, and other tool-managed copies.
-		if d.IsDir() && d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
+		// Also skip testdata directories (Go convention for test fixtures).
+		if d.IsDir() && d.Name() != "." && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata") {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
@@ -78,19 +79,6 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		// Skip the root mu.json — it was already loaded above.
 		if path == rootFile {
 			return nil
-		}
-
-		// Skip plugin directories — a mu.json with a "plugin" key is a
-		// plugin manifest, not a project config fragment. Reading the raw
-		// bytes is cheap and avoids merging plugin targets into the project.
-		if !usePP {
-			raw, readErr := os.ReadFile(path)
-			if readErr != nil {
-				return fmt.Errorf("reading %s: %w", path, readErr)
-			}
-			if IsPluginDir(raw) {
-				return filepath.SkipDir
-			}
 		}
 
 		var partial *ProjectConfig
@@ -114,9 +102,10 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 		// Normalise the root case: "//."->"//".
 		prefix = strings.TrimSuffix(prefix, "/.")
 
+		subDir := filepath.Dir(path)
+
 		// Prefix target names and rebase source paths so they are
 		// absolute within the project.
-		subDir := filepath.Dir(path)
 		for i := range partial.Targets {
 			t := &partial.Targets[i]
 			if !strings.HasPrefix(t.Name, "//") {
@@ -219,6 +208,7 @@ func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
 	}
 	return nil
 }
+
 
 // loadFile reads and unmarshals a single JSON config file.
 func loadFile(path string) (*ProjectConfig, error) {

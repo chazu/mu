@@ -577,56 +577,43 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 	return result, nil
 }
 
-// needsScriptRuntime returns true if any plugin will need the bb runtime.
-// This is determined by the Runtime config field, file extension, or
-// plugin manifest (for directory plugins):
-//   - runtime:"bb" → always needs it
-//   - runtime:"none" → never needs it
-//   - runtime:"" or "auto" → needs it if the source ends in .bb
-//   - directory plugin → check manifest runtime and entrypoint extension
-//
-// For digest-only plugins with no extension hint, we assume bb for
-// backward compatibility unless runtime is explicitly "none".
+// needsScriptRuntime returns true if any plugin will need the bb runtime
+// toolchain. This is determined by checking plugin manifests (for directory
+// plugins) or inferring from file extensions (.bb → needs bb toolchain).
 func needsScriptRuntime(plugins []config.PluginDef, projectRoot string) bool {
 	for _, p := range plugins {
 		if len(p.Command) > 0 {
-			continue // command plugins never need bb
-		}
-		switch p.Runtime {
-		case "bb":
-			return true
-		case "none":
 			continue
-		default: // "" or "auto"
-			if p.Script != "" {
-				// Check if this is a directory plugin.
-				scriptPath := p.Script
-				if !filepath.IsAbs(scriptPath) {
-					scriptPath = filepath.Join(projectRoot, scriptPath)
-				}
-				if info, err := os.Stat(scriptPath); err == nil && info.IsDir() {
-					if manifest, err := config.LoadPluginManifest(scriptPath); err == nil {
-						runtime := manifest.Plugin.Runtime
-						if runtime == "" {
-							runtime = p.Runtime
-						}
-						if pluginNeedsRuntime(runtime, manifest.Plugin.Entrypoint) {
-							return true
-						}
+		}
+		if p.Script != "" {
+			scriptPath := p.Script
+			if !filepath.IsAbs(scriptPath) {
+				scriptPath = filepath.Join(projectRoot, scriptPath)
+			}
+			// Directory plugin: check manifest toolchain.
+			if info, err := os.Stat(scriptPath); err == nil && info.IsDir() {
+				if manifest, err := config.LoadPluginManifest(scriptPath); err == nil {
+					tc := manifest.Plugin.Toolchain
+					if tc == "" {
+						tc = inferPluginToolchain(manifest.Plugin.Entrypoint)
 					}
-					continue
+					if tc == "bb" {
+						return true
+					}
 				}
-				if strings.HasSuffix(p.Script, ".bb") {
-					return true
-				}
+				continue
 			}
-			if p.URL != "" && strings.HasSuffix(p.URL, ".bb") {
+			// Single-file plugin: infer from extension.
+			if inferPluginToolchain(p.Script) == "bb" {
 				return true
 			}
-			// Digest-only with no extension hint: assume bb for backward compat.
-			if p.Digest != "" {
-				return true
-			}
+		}
+		if p.URL != "" && inferPluginToolchain(p.URL) == "bb" {
+			return true
+		}
+		// Digest-only with no extension hint: assume bb for backward compat.
+		if p.Digest != "" {
+			return true
 		}
 	}
 	return false

@@ -91,9 +91,7 @@ func Validate(cfg *ProjectConfig) error {
 		if hasURL && p.SHA256 == "" {
 			errs = append(errs, fmt.Sprintf("%s: \"url\" requires \"sha256\"", label))
 		}
-		if p.Runtime != "" && p.Runtime != "auto" && p.Runtime != "bb" && p.Runtime != "none" {
-			errs = append(errs, fmt.Sprintf("%s: invalid runtime %q (must be \"auto\", \"bb\", or \"none\")", label, p.Runtime))
-		}
+		// Runtime field removed — toolchain is declared in plugin manifest.
 	}
 
 	// Validate cache config.

@@ -51,7 +51,6 @@ type PluginDef struct {
 	URL     string   `json:"url,omitempty"`
 	SHA256  string   `json:"sha256,omitempty"`
 	Digest  string   `json:"digest,omitempty"`
-	Runtime string   `json:"runtime,omitempty"` // "auto" (default), "bb", or "none"
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON
@@ -62,10 +61,10 @@ type Preprocessor struct {
 }
 
 // PluginManifest is the "plugin" key in a plugin directory's mu.json.
-// It declares the entrypoint and runtime for a multi-file plugin bundle.
+// It declares the entrypoint and optional runtime toolchain for a plugin bundle.
 type PluginManifest struct {
-	Entrypoint string `json:"entrypoint"`          // relative path to the executable within the plugin dir
-	Runtime    string `json:"runtime,omitempty"`    // "auto" (default), "bb", or "none"
+	Entrypoint string `json:"entrypoint"`           // relative path to the executable within the plugin dir
+	Toolchain  string `json:"toolchain,omitempty"`   // runtime toolchain (e.g. "bb"); empty = direct execution
 }
 
 // PluginConfig is the structure of a plugin directory's mu.json.

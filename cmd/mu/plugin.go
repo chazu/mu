@@ -348,11 +348,11 @@ func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jso
 	}
 
 	for _, p := range plugins {
-		isBB := strings.HasSuffix(p.path, ".bb")
+		tc := inferPluginToolchain(p.path)
 		if err := mgr.Register(plugin.PluginDef{
-			Name:         p.name,
-			Script:       p.path,
-			NeedsRuntime: isBB,
+			Name:      p.name,
+			Script:    p.path,
+			Toolchain: tc,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
 			return 1
@@ -483,10 +483,10 @@ func pluginListConfig(cfg *config.ProjectConfig, jsonOut bool) int {
 func pluginListDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
 	mgr := plugin.NewManager(projectRoot)
 
-	// Resolve bb if any plugin needs it (based on .bb extension or explicit runtime).
+	// Resolve bb if any plugin needs it.
 	for _, p := range cfg.Plugins {
-		needsBB := p.Runtime == "bb" || (p.Runtime == "" && p.Script != "" && strings.HasSuffix(p.Script, ".bb"))
-		if needsBB {
+		tc := inferPluginToolchain(p.Script)
+		if tc == "bb" {
 			bbPath := resolveBbPath()
 			if bbPath == "" {
 				fmt.Fprintln(os.Stderr, "mu plugin list: --discover requires bb toolchain; run mu build first to bootstrap it")
@@ -498,17 +498,11 @@ func pluginListDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut b
 	}
 
 	for _, p := range cfg.Plugins {
-		needsBB := p.Script != "" && strings.HasSuffix(p.Script, ".bb")
-		if p.Runtime == "bb" {
-			needsBB = true
-		} else if p.Runtime == "none" {
-			needsBB = false
-		}
 		def := plugin.PluginDef{
-			Name:         p.Name,
-			Command:      p.Command,
-			Script:       p.Script,
-			NeedsRuntime: needsBB,
+			Name:      p.Name,
+			Command:   p.Command,
+			Script:    p.Script,
+			Toolchain: inferPluginToolchain(p.Script),
 		}
 		if err := mgr.Register(def); err != nil {
 			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
@@ -566,6 +560,15 @@ func pluginListDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut b
 		fmt.Printf("%-20s %-10s %-30s %s\n", item.Name, item.Version, consumes, produces)
 	}
 	return 0
+}
+
+// inferPluginToolchain infers the runtime toolchain from a plugin's file
+// extension. Returns "bb" for .bb files, empty string for direct execution.
+func inferPluginToolchain(path string) string {
+	if strings.HasSuffix(path, ".bb") {
+		return "bb"
+	}
+	return ""
 }
 
 // resolveBbPath finds the cached bb binary. Returns "" if not found.

@@ -10,11 +10,11 @@ import (
 
 // PluginDef defines a plugin as declared in mu.json.
 type PluginDef struct {
-	Name         string   `json:"name"`          // logical name, matches target toolchain field
-	Command      []string `json:"command"`        // command to spawn, relative to project root
-	Script       string   `json:"script"`         // CAS-extracted file path (any executable)
-	NeedsRuntime bool     `json:"needs_runtime"`  // true = prepend ScriptRuntime (bb) to execute
-	WorkDir      string   `json:"work_dir"`       // if set, plugin cwd is this directory (for bundled plugins)
+	Name      string   `json:"name"`       // logical name, matches target toolchain field
+	Command   []string `json:"command"`     // command to spawn, relative to project root
+	Script    string   `json:"script"`      // CAS-extracted file path (any executable)
+	Toolchain string   `json:"toolchain"`   // runtime toolchain (e.g. "bb"); empty = direct execution
+	WorkDir   string   `json:"work_dir"`    // if set, plugin cwd is this directory (for bundled plugins)
 }
 
 // Manager manages the lifecycle of plugin processes and routes requests.
@@ -107,14 +107,14 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 // resolveCommand returns the command to spawn for a plugin definition.
-// For CAS-extracted plugins that need a runtime (e.g. .bb scripts), the
-// script runtime is prepended. Other CAS-extracted plugins (compiled
-// binaries, shell scripts) are executed directly.
+// If the plugin declares a runtime toolchain (e.g. "bb"), the toolchain
+// binary is prepended to the command. Otherwise the script or command
+// is executed directly.
 func (m *Manager) resolveCommand(def PluginDef) ([]string, error) {
 	if def.Script != "" {
-		if def.NeedsRuntime {
+		if def.Toolchain != "" {
 			if m.scriptRuntime == "" {
-				return nil, fmt.Errorf("script %q requires a bb toolchain but no script runtime is available", def.Script)
+				return nil, fmt.Errorf("plugin %q requires toolchain %q but no runtime is available", def.Name, def.Toolchain)
 			}
 			return []string{m.scriptRuntime, def.Script}, nil
 		}

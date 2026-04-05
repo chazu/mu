@@ -94,8 +94,8 @@ func TestResolveLocalDir(t *testing.T) {
 	if string(data) != "hello" {
 		t.Errorf("helper.txt content = %q, want hello", string(data))
 	}
-	if rp.Def.NeedsRuntime {
-		t.Error("NeedsRuntime should be false for runtime:none")
+	if rp.Def.Toolchain != "" {
+		t.Errorf("Toolchain = %q, want empty for direct-execution plugin", rp.Def.Toolchain)
 	}
 }
 

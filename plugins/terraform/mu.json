@@ -1,6 +1,6 @@
 {
   "plugin": {
     "entrypoint": "plugin.bb",
-    "runtime": "bb"
+    "toolchain": "bb"
   }
 }

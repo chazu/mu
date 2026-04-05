@@ -9,7 +9,7 @@ import (
 func TestLoadPluginManifest_Valid(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "mu.json"), []byte(`{
-		"plugin": {"entrypoint": "plugin.bb", "runtime": "bb"}
+		"plugin": {"entrypoint": "plugin.bb", "toolchain": "bb"}
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -21,8 +21,8 @@ func TestLoadPluginManifest_Valid(t *testing.T) {
 	if cfg.Plugin.Entrypoint != "plugin.bb" {
 		t.Errorf("Entrypoint = %q, want plugin.bb", cfg.Plugin.Entrypoint)
 	}
-	if cfg.Plugin.Runtime != "bb" {
-		t.Errorf("Runtime = %q, want bb", cfg.Plugin.Runtime)
+	if cfg.Plugin.Toolchain != "bb" {
+		t.Errorf("Toolchain = %q, want bb", cfg.Plugin.Toolchain)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestLoadPluginManifest_NoPluginKey(t *testing.T) {
 func TestLoadPluginManifest_MissingEntrypoint(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "mu.json"), []byte(`{
-		"plugin": {"runtime": "bb"}
+		"plugin": {"toolchain": "bb"}
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -94,7 +94,7 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 		Def: plugin.PluginDef{
 			Name:         p.Name,
 			Script:       cachedPath,
-			NeedsRuntime: pluginNeedsRuntime(p.Runtime, cachedPath),
+			Toolchain: inferPluginToolchain(cachedPath),
 		},
 		Digest: dgst,
 	}, nil
@@ -144,7 +144,7 @@ func (r *PluginResolver) resolveLocalFile(ctx context.Context, p config.PluginDe
 		Def: plugin.PluginDef{
 			Name:         p.Name,
 			Script:       cachedPath,
-			NeedsRuntime: pluginNeedsRuntime(p.Runtime, cachedPath),
+			Toolchain: inferPluginToolchain(cachedPath),
 		},
 		Digest: dgst,
 	}, nil
@@ -179,19 +179,19 @@ func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef
 		return nil, err
 	}
 
-	// 5. Resolve entrypoint and runtime.
+	// 5. Resolve entrypoint and toolchain.
 	entryPath := filepath.Join(extractDir, entryRel)
-	runtime := manifest.Plugin.Runtime
-	if runtime == "" {
-		runtime = p.Runtime
+	toolchain := manifest.Plugin.Toolchain
+	if toolchain == "" {
+		toolchain = inferPluginToolchain(entryPath)
 	}
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:         p.Name,
-			Script:       entryPath,
-			NeedsRuntime: pluginNeedsRuntime(runtime, entryPath),
-			WorkDir:      extractDir,
+			Name:      p.Name,
+			Script:    entryPath,
+			Toolchain: toolchain,
+			WorkDir:   extractDir,
 		},
 		Digest: dgst,
 	}, nil
@@ -395,7 +395,7 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 		Def: plugin.PluginDef{
 			Name:         p.Name,
 			Script:       cachedPath,
-			NeedsRuntime: pluginNeedsRuntime(p.Runtime, cachedPath),
+			Toolchain: inferPluginToolchain(cachedPath),
 		},
 		Digest: expectedDigest,
 	}, nil
@@ -455,18 +455,13 @@ func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst c
 	return destPath, nil
 }
 
-// pluginNeedsRuntime determines whether a CAS-extracted plugin needs the bb
-// runtime to execute. The config Runtime field takes precedence:
-//   - "bb": always needs runtime
-//   - "none": never needs runtime (direct execution)
-//   - "" or "auto": infer from file extension (.bb → needs runtime)
-func pluginNeedsRuntime(runtime string, path string) bool {
-	switch runtime {
-	case "bb":
-		return true
-	case "none":
-		return false
-	default: // "" or "auto"
-		return strings.HasSuffix(path, ".bb")
+// inferPluginToolchain infers the runtime toolchain from a plugin's file
+// extension. Returns "bb" for .bb files, empty string for everything else
+// (direct execution). This is used when the plugin doesn't explicitly
+// declare a toolchain.
+func inferPluginToolchain(path string) string {
+	if strings.HasSuffix(path, ".bb") {
+		return "bb"
 	}
+	return ""
 }

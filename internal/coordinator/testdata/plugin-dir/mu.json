@@ -1,6 +1,5 @@
 {
   "plugin": {
-    "entrypoint": "plugin.sh",
-    "runtime": "none"
+    "entrypoint": "plugin.sh"
   }
 }

@@ -267,16 +267,18 @@ Plugins can be written in any language — anything that reads NDJSON on stdin a
 {"name": "host", "script": "plugins/host"}
 ```
 
-The directory must contain a `mu.json` declaring the entrypoint:
+The directory must contain a `mu.json` declaring the entrypoint and optional runtime toolchain:
 
 ```json
 {
   "plugin": {
     "entrypoint": "plugin.bb",
-    "runtime": "bb"
+    "toolchain": "bb"
   }
 }
 ```
+
+The `toolchain` field names the toolchain needed to run the plugin (e.g. `"bb"` for Babashka scripts). Omit it for compiled binaries or scripts that execute directly. If omitted, mu infers the toolchain from the file extension (`.bb` → `bb`).
 
 Sibling files (helper scripts, templates, etc.) are available to the plugin at runtime via relative paths. Hidden directories (`.git`, etc.) are excluded from the bundle.
 
@@ -298,14 +300,7 @@ Sibling files (helper scripts, templates, etc.) are available to the plugin at r
 {"name": "go", "command": ["./my-plugin"]}
 ```
 
-For the first four modes, mu extracts the plugin to `~/.mu/plugins/<name>/` and executes it. `.bb` files are automatically run via the bb (Babashka) runtime; all other files are executed directly as binaries or scripts. Override this with the `runtime` field:
-
-```json
-{"name": "go", "script": "plugins/go/plugin.py", "runtime": "none"}
-{"name": "go", "script": "plugins/go/plugin.bb", "runtime": "bb"}
-```
-
-Valid values: `"auto"` (default — infer from extension), `"bb"`, `"none"`.
+For the first four modes, mu extracts the plugin to `~/.mu/plugins/<name>/` and executes it. The runtime toolchain is determined by the plugin manifest's `toolchain` field, or inferred from the file extension (`.bb` → Babashka). Compiled binaries and shell scripts execute directly.
 
 ### Building and Distributing Plugins
 
