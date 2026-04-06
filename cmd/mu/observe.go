@@ -22,6 +22,7 @@ func runObserve(args []string) int {
 	fs.SetOutput(os.Stderr)
 	configFile := fs.String("config", "", "path to mu.json (default: discover by walking up)")
 	jsonOut := fs.Bool("json", false, "output as JSON")
+	ndjsonOut := fs.Bool("ndjson", false, "output current.records as NDJSON (one record per line)")
 	_ = fs.Bool("verbose", false, "show plugin I/O")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -108,7 +109,21 @@ func runObserve(args []string) int {
 		return 1
 	}
 
-	if *jsonOut {
+	if *ndjsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		for _, r := range results {
+			if r.Current == nil {
+				continue
+			}
+			if records, ok := r.Current["records"]; ok {
+				if arr, ok := records.([]interface{}); ok {
+					for _, rec := range arr {
+						enc.Encode(rec)
+					}
+				}
+			}
+		}
+	} else if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(results)
