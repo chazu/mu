@@ -41,13 +41,12 @@ func ValidateTargetConfig(target config.Target, schema map[string]any) error {
 
 		val, present := cfg[field]
 
-		// Check required: a field is required if the schema explicitly sets
-		// "required": true, OR if the field has no "default" value (implicit
-		// required). A field with "default" is always optional.
+		// Check required: a field is required only if the schema explicitly
+		// sets "required": true. Fields without a value that aren't required
+		// are simply absent and will use plugin-side defaults.
 		if !present {
-			_, hasDefault := fieldSchema["default"]
 			explicitRequired, _ := fieldSchema["required"].(bool)
-			if explicitRequired || !hasDefault {
+			if explicitRequired {
 				errs = append(errs, fmt.Sprintf("target %q: missing required config field %q", target.Name, field))
 			}
 			continue
