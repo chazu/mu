@@ -156,23 +156,42 @@ Flags:
 mu observe <targets...>
 
 Flags:
-  --json    Output as JSON
+  --json      Output as JSON (array of ObserveResult)
+  --ndjson    Output current.records as flat NDJSON (one record per line)
 ```
 
-Reports the current observed state of each target by sending observe requests to their plugins. Plugins return structured data describing what they see — mu does not make convergence decisions. The observed state is designed for ingestion into pudl's value lattice, where it is compared against desired state to determine drift.
+Reports the current observed state of each target by sending observe requests to their plugins. Plugins return structured data describing what they see — mu does not make convergence decisions. The observed state is designed for ingestion into pudl's catalog, where it is compared against desired state to determine drift.
 
 Kit targets (shell targets with deps) aggregate their dependencies' observed state.
 
+#### Piping to pudl
+
+The `--json` output is the canonical format for ingestion into pudl:
+
 ```bash
-mu observe --json //lint
+mu observe --json //home/odroid | pudl ingest-observe
 ```
+
+`pudl ingest-observe` reads the JSON array, iterates each target's `current.records`, and stores each record as an individual observe entry. Records with a `_schema` field (e.g. `"linux.host"`) are routed to the corresponding pudl schema (e.g. `pudl/linux.#Host`). Records without `_schema` are stored as `pudl/mu.#ObserveResult`.
+
+#### Output formats
+
+`--json` preserves target context and is the format pudl expects:
 
 ```json
 [
-  {"target": "//lint/go-vet", "current": {"exit_code": 0, "output": "", "command": "go vet ./..."}},
-  {"target": "//lint/gofmt", "current": {"exit_code": 0, "output": "", "command": "gofmt -l ."}},
-  {"target": "//lint", "current": {"deps": {"//lint/go-vet": {...}, "//lint/gofmt": {...}}}}
+  {"target": "//home/odroid", "current": {"records": [
+    {"_schema": "linux.host", "hostname": "renge", "kernel": "5.10.0", ...},
+    {"_schema": "linux.package", "host": "renge", "name": "acl", ...}
+  ]}}
 ]
+```
+
+`--ndjson` flattens `current.records` into one JSON line per record (useful for ad-hoc piping to `jq`, etc., but loses target context):
+
+```
+{"_schema":"linux.host","hostname":"renge","kernel":"5.10.0",...}
+{"_schema":"linux.package","host":"renge","name":"acl",...}
 ```
 
 ## Targets
@@ -383,11 +402,19 @@ The coordinator resolves file paths to content digests, merges subgraphs from al
 **`observe`** *(optional)* — reports current state of a resource for drift detection:
 
 ```json
-← {"method": "observe", "target": {...}, "secrets": {"API_KEY": "resolved-value"}}
-→ {"current": {"replicas": 3, "image": "nginx:1.25"}}
+← {"method": "observe", "target": {...}, "secrets": {"SSH_PASS": "resolved-value"}}
+→ {"current": {"records": [
+    {"_schema": "linux.host", "hostname": "renge", "kernel": "5.10.0", ...},
+    {"_schema": "linux.package", "host": "renge", "name": "acl", ...}
+  ]}}
 ```
 
 Observe requests include resolved secrets from the target's `sealed_inputs` (see [Sealed Inputs](#sealed-inputs)). The plugin reports the current state; convergence decisions are made downstream by pudl, not by the plugin.
+
+**Observe response conventions:**
+- `current.records` should be an array of resource instances when the plugin observes multiple resources (e.g. packages, services, users on a host).
+- Each record should include a `_schema` field with a `package.resource_type` value (e.g. `"linux.package"`) so pudl can route it to the correct schema (e.g. `pudl/linux.#Package`).
+- If a plugin observes a single resource, `current` can be a flat map without `records`.
 
 **`resolve_secret`** *(optional)* — resolves a secret reference to its value:
 
