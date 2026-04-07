@@ -2,7 +2,8 @@
   "plugin": {
     "entrypoint": "plugin.bb",
     "toolchain": "bb",
-    "files": ["plugin.bb", "gather.sh"]
+    "files": ["plugin.bb", "gather.sh"],
+    "guide": "GUIDE.md"
   },
   "targets": [
     {
