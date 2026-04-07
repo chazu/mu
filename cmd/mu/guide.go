@@ -1,8 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/chau/mu/internal/config"
 )
 
 func runGuide(args []string) int {
@@ -32,6 +37,12 @@ func runGuide(args []string) int {
 		printGuideShell()
 	case "protocol":
 		printGuideProtocol()
+	case "plugin":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: mu guide plugin <name>")
+			return 2
+		}
+		return printGuideForPlugin(args[1])
 	default:
 		fmt.Fprintf(os.Stderr, "mu guide: unknown topic %q\n", args[0])
 		fmt.Fprintln(os.Stderr, "Run 'mu guide' for a list of topics.")
@@ -55,6 +66,7 @@ Topics:
   mu guide secrets       Sealed inputs and secret resolution
   mu guide toolchains    Bootstrapping toolchains from scratch
   mu guide shell         The built-in shell toolchain
+  mu guide plugin <name> Show guide text bundled with a plugin
 `)
 }
 
@@ -259,6 +271,7 @@ PLUGIN DIRECTORY STRUCTURE
     plugins/myplugin/
       mu.json        Declares plugin metadata and build target.
       plugin.bb      The plugin script.
+      GUIDE.md       Optional guide text (shown by 'mu guide plugin myplugin').
 
   The mu.json has a "plugin" key:
 
@@ -266,7 +279,8 @@ PLUGIN DIRECTORY STRUCTURE
       "plugin": {
         "entrypoint": "plugin.bb",
         "toolchain": "bb",
-        "files": ["plugin.bb"]
+        "files": ["plugin.bb"],
+        "guide": "GUIDE.md"
       },
       "targets": [
         {
@@ -288,6 +302,23 @@ BUILDING AND DISTRIBUTING PLUGINS
   mu plugin list --discover      Start plugins and show capabilities.
   mu plugin list --cached        Show all plugins stored in ~/.mu/plugins/.
   mu plugin list --json          Output as JSON.
+
+PLUGIN GUIDES
+
+  Plugins can include a guide file that describes their usage. Set the
+  "guide" field in the plugin manifest to the relative path of the file:
+
+    {"plugin": {"guide": "GUIDE.md", "entrypoint": "plugin.bb", ...}}
+
+  The guide file is automatically bundled with the plugin in CAS, even
+  if it is not listed in "files". View a plugin's guide with:
+
+    mu guide plugin <name>
+
+  This searches extracted bundles (~/.mu/plugins/<name>/bundle-*/) first,
+  then falls back to local plugin directories (plugins/<name>/).
+  Conventional filenames (GUIDE.md, GUIDE, guide.md) are also detected
+  without an explicit manifest entry.
 `)
 }
 
@@ -755,4 +786,90 @@ INTER-ACTION REFERENCES
     "inputs": {"lib.a": "{action:compile-lib}"}
   mu resolves these to the actual output digests after execution.
 `)
+}
+
+// printGuideForPlugin finds and prints the guide text for a named plugin.
+// It searches in order:
+//  1. Extracted CAS bundles in ~/.mu/plugins/<name>/bundle-*/
+//  2. Local plugin directory in the current project (plugins/<name>/)
+func printGuideForPlugin(name string) int {
+	// 1. Check extracted bundles in ~/.mu/plugins/<name>/bundle-*/.
+	home, err := os.UserHomeDir()
+	if err == nil {
+		bundleDirs, _ := filepath.Glob(filepath.Join(home, ".mu", "plugins", name, "bundle-*"))
+		for _, dir := range bundleDirs {
+			if path := findGuideInDir(dir); path != "" {
+				return printGuideFile(name, path)
+			}
+		}
+	}
+
+	// 2. Check local plugin directory in the current project.
+	projectRoot, err := findGuideProjectRoot()
+	if err == nil {
+		localDir := filepath.Join(projectRoot, "plugins", name)
+		if path := findGuideInDir(localDir); path != "" {
+			return printGuideFile(name, path)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "mu guide plugin %s: no guide found\n", name)
+	fmt.Fprintf(os.Stderr, "\nTo add a guide, create a GUIDE.md file in the plugin directory\n")
+	fmt.Fprintf(os.Stderr, "and set \"guide\": \"GUIDE.md\" in the plugin manifest:\n\n")
+	fmt.Fprintf(os.Stderr, "  plugins/%s/GUIDE.md\n", name)
+	fmt.Fprintf(os.Stderr, "  plugins/%s/mu.json → {\"plugin\": {\"guide\": \"GUIDE.md\", ...}}\n", name)
+	return 1
+}
+
+// findGuideInDir looks for a guide file in a plugin directory.
+// It checks the manifest first (for the declared guide path), then
+// falls back to conventional filenames.
+func findGuideInDir(dir string) string {
+	// Try manifest-declared guide path.
+	manifestPath := filepath.Join(dir, "mu.json")
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		var manifest struct {
+			Plugin *struct {
+				Guide string `json:"guide"`
+			} `json:"plugin"`
+		}
+		if json.Unmarshal(data, &manifest) == nil && manifest.Plugin != nil && manifest.Plugin.Guide != "" {
+			guidePath := filepath.Join(dir, manifest.Plugin.Guide)
+			if _, err := os.Stat(guidePath); err == nil {
+				return guidePath
+			}
+		}
+	}
+
+	// Fall back to conventional filenames.
+	for _, name := range []string{"GUIDE.md", "GUIDE", "guide.md", "guide.txt"} {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return ""
+}
+
+// findGuideProjectRoot finds the mu project root for guide lookups.
+func findGuideProjectRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return config.FindProjectRoot(cwd)
+}
+
+// printGuideFile reads and prints a guide file.
+func printGuideFile(pluginName, path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu guide plugin %s: %v\n", pluginName, err)
+		return 1
+	}
+
+	content := strings.TrimRight(string(data), "\n")
+	fmt.Println(content)
+	return 0
 }

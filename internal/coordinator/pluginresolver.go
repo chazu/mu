@@ -168,7 +168,24 @@ func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef
 	}
 
 	// 3. Bundle the directory as a deterministic tar and store in CAS.
-	dgst, err := r.bundleDir(ctx, dirPath, manifest.Plugin.Files)
+	//    Always include the guide file if declared, even if files is explicit.
+	files := manifest.Plugin.Files
+	if manifest.Plugin.Guide != "" {
+		guideAbs := filepath.Join(dirPath, manifest.Plugin.Guide)
+		if _, err := os.Stat(guideAbs); err == nil {
+			found := false
+			for _, f := range files {
+				if f == manifest.Plugin.Guide {
+					found = true
+					break
+				}
+			}
+			if !found && len(files) > 0 {
+				files = append(files, manifest.Plugin.Guide)
+			}
+		}
+	}
+	dgst, err := r.bundleDir(ctx, dirPath, files)
 	if err != nil {
 		return nil, fmt.Errorf("bundle plugin directory: %w", err)
 	}

@@ -72,6 +72,7 @@ type PluginManifest struct {
 	Entrypoint string   `json:"entrypoint"`           // relative path to the executable within the plugin dir
 	Toolchain  string   `json:"toolchain,omitempty"`   // runtime toolchain (e.g. "bb"); empty = direct execution
 	Files      []string `json:"files,omitempty"`        // files to include in CAS bundle; empty = all files
+	Guide      string   `json:"guide,omitempty"`        // relative path to a guide text file (bundled automatically)
 }
 
 // PluginConfig is the structure of a plugin directory's mu.json.
