@@ -11,10 +11,17 @@ import (
 
 // ComputeActionKey computes a deterministic cache key for an Action.
 // The key is a SHA-256 hash of the canonical representation of:
-//   - sorted command args
-//   - sorted input digests (name -> hash)
+//   - command args (in original order)
 //   - sorted env vars (key=value)
+//   - sorted input digests (name -> hash)
 //   - network flag
+//   - impure flag
+//   - work_dir (if set)
+//
+// The impure flag is included so that if a plugin version flips an action's
+// impurity without changing any other field, the cache key changes. Without
+// this, a pure run could in principle match a previously-impure entry under
+// future cache-policy changes.
 //
 // SealedInputs are deliberately excluded: secrets must never appear in cache
 // keys, stored action results, or any persistent artifact. Actions that use
@@ -52,6 +59,9 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 
 	// Network flag.
 	fmt.Fprintf(h, "network:%t\n", a.Network)
+
+	// Impure flag.
+	fmt.Fprintf(h, "impure:%t\n", a.Impure)
 
 	// Include work_dir in the key.
 	if a.WorkDir != "" {
