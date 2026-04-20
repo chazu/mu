@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -23,6 +24,12 @@ type Manager struct {
 	scriptRuntime string                  // path to bb binary for script-based plugins (optional)
 	plugins       map[string]*pluginEntry // name → entry
 	mu            sync.RWMutex
+
+	// verboseSink, if non-nil, receives tagged stderr lines from every
+	// spawned plugin as they arrive. Writes across plugins are
+	// serialized through sinkMu so lines never interleave mid-line.
+	verboseSink io.Writer
+	sinkMu      sync.Mutex
 }
 
 type pluginEntry struct {
@@ -45,6 +52,29 @@ func NewManager(projectRoot string) *Manager {
 // Must be called before Start.
 func (m *Manager) SetScriptRuntime(path string) {
 	m.scriptRuntime = path
+}
+
+// SetVerbose configures a writer that receives tagged stderr lines from
+// every plugin as they arrive ("[name] <line>\n"). Writes across
+// concurrent plugins are serialized so lines never interleave. Passing
+// nil disables live streaming (buffered ring capture continues regardless).
+// Must be called before Start.
+func (m *Manager) SetVerbose(w io.Writer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.verboseSink = w
+}
+
+// Logs returns a fresh copy of the tagged stderr ring for a plugin, or
+// nil if the plugin is unknown or not started. Oldest line first.
+func (m *Manager) Logs(name string) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, ok := m.plugins[name]
+	if !ok || entry.process == nil {
+		return nil
+	}
+	return entry.process.Logs()
 }
 
 // SetCachedDiscover pre-seeds plugin discover responses so Start will skip
@@ -129,7 +159,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, r := range toStart {
 		r := r // capture loop var
 		g.Go(func() error {
-			proc, err := StartProcess(r.name, r.command, m.projectRoot, r.entry.def.WorkDir)
+			opts := ProcessOptions{}
+			if m.verboseSink != nil {
+				opts.LiveSink = m.verboseSink
+				opts.LiveSinkMu = &m.sinkMu
+			}
+			proc, err := StartProcessWithOptions(r.name, r.command, m.projectRoot, r.entry.def.WorkDir, opts)
 			if err != nil {
 				return err
 			}

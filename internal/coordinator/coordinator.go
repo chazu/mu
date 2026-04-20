@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,8 +40,12 @@ type Coordinator struct {
 
 	// Verbose increases coordinator-level log verbosity when true. Cache
 	// layer events (hit/miss/repair) are surfaced at info level instead
-	// of debug; other structured events become more detailed.
+	// of debug; plugin stderr is mirrored live to VerboseSink.
 	Verbose bool
+
+	// VerboseSink receives tagged plugin stderr when Verbose is true.
+	// Defaults to os.Stderr when nil and Verbose is true.
+	VerboseSink io.Writer
 }
 
 // BuildResult summarises the outcome of a build.
@@ -93,6 +98,14 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 
 	// 3. Start plugins.
 	mgr := plugin.NewManager(c.ProjectRoot)
+
+	if c.Verbose {
+		sink := c.VerboseSink
+		if sink == nil {
+			sink = os.Stderr
+		}
+		mgr.SetVerbose(sink)
+	}
 
 	// If any plugin uses "script", resolve the bb binary from the toolchain registry.
 	if needsScriptRuntime(c.Config.Plugins, c.ProjectRoot) {

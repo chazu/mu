@@ -2,12 +2,12 @@ package plugin
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,13 +19,40 @@ const DefaultDiscoverTimeout = 10 * time.Second
 const DefaultPlanTimeout = 5 * time.Minute
 
 // Process manages a single plugin subprocess communicating via NDJSON.
+//
+// Stderr semantics: plugins may write free-form line-delimited text to
+// stderr for human debugging. The coordinator captures each line into
+// a fixed-size ring buffer (tagged "[name] "), and optionally mirrors
+// it to a shared live sink (Manager.SetVerbose). stdout is reserved
+// for NDJSON protocol traffic and is never parsed as free text.
 type Process struct {
 	name    string
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	scanner *bufio.Scanner
-	stderr  bytes.Buffer
-	mu      sync.Mutex // serializes request/response pairs
+	logs    *logBuffer
+
+	// liveSink, if non-nil, receives every tagged stderr line as it
+	// arrives. Writes are serialized through liveSinkMu so lines from
+	// multiple Processes never interleave mid-line.
+	liveSink   io.Writer
+	liveSinkMu *sync.Mutex
+
+	stderrDone chan struct{} // closed when the stderr pump exits
+
+	mu sync.Mutex // serializes request/response pairs on stdout
+}
+
+// ProcessOptions configures optional behaviour for a spawned plugin.
+type ProcessOptions struct {
+	// LiveSink, if non-nil, receives every tagged stderr line as soon
+	// as it arrives. Intended for --verbose CLI forwarding.
+	LiveSink io.Writer
+	// LiveSinkMu protects shared LiveSink writes across multiple
+	// processes. Required iff LiveSink is non-nil.
+	LiveSinkMu *sync.Mutex
+	// LogCapacity overrides the default ring size (DefaultLogRingSize).
+	LogCapacity int
 }
 
 // StartProcess spawns a plugin process with the given command.
@@ -33,6 +60,12 @@ type Process struct {
 // otherwise projectRoot is used. Bundled plugins use workDir so they
 // can find sibling files relative to the extracted bundle root.
 func StartProcess(name string, command []string, projectRoot string, workDir string) (*Process, error) {
+	return StartProcessWithOptions(name, command, projectRoot, workDir, ProcessOptions{})
+}
+
+// StartProcessWithOptions spawns a plugin process with optional live
+// stderr forwarding and ring-capacity override.
+func StartProcessWithOptions(name string, command []string, projectRoot string, workDir string, opts ProcessOptions) (*Process, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("plugin %q: empty command", name)
 	}
@@ -55,13 +88,22 @@ func StartProcess(name string, command []string, projectRoot string, workDir str
 		return nil, fmt.Errorf("plugin %q: stdout pipe: %w", name, err)
 	}
 
-	p := &Process{
-		name:    name,
-		cmd:     cmd,
-		stdin:   stdin,
-		scanner: bufio.NewScanner(stdout),
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("plugin %q: stderr pipe: %w", name, err)
 	}
-	cmd.Stderr = &p.stderr
+
+	p := &Process{
+		name:       name,
+		cmd:        cmd,
+		stdin:      stdin,
+		scanner:    bufio.NewScanner(stdout),
+		logs:       newLogBuffer(opts.LogCapacity),
+		liveSink:   opts.LiveSink,
+		liveSinkMu: opts.LiveSinkMu,
+		stderrDone: make(chan struct{}),
+	}
 
 	// Allow large responses (default 64KB may be too small for big action graphs).
 	p.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -70,8 +112,57 @@ func StartProcess(name string, command []string, projectRoot string, workDir str
 		return nil, fmt.Errorf("plugin %q: start: %w", name, err)
 	}
 
+	go p.pumpStderr(stderr)
+
 	return p, nil
 }
+
+// pumpStderr consumes the plugin's stderr pipe until EOF, tagging each
+// line and storing it in the ring buffer. When a live sink is
+// configured, the tagged line is also written through immediately. The
+// goroutine exits when the pipe returns EOF (typically on child exit);
+// stderrDone is then closed so Close() can join.
+func (p *Process) pumpStderr(stderr io.ReadCloser) {
+	defer close(p.stderrDone)
+	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		tagged := "[" + p.name + "] " + scanner.Text()
+		p.logs.Append(tagged)
+		if p.liveSink != nil {
+			p.writeLive(tagged)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		synthetic := fmt.Sprintf("[%s] <stderr read error: %v>", p.name, err)
+		p.logs.Append(synthetic)
+		if p.liveSink != nil {
+			p.writeLive(synthetic)
+		}
+	}
+}
+
+func (p *Process) writeLive(line string) {
+	if p.liveSinkMu != nil {
+		p.liveSinkMu.Lock()
+		defer p.liveSinkMu.Unlock()
+	}
+	_, _ = io.WriteString(p.liveSink, line+"\n")
+}
+
+// logsSnapshot returns a joined string of the ring contents, oldest
+// first, for error wrapping. Returns "" when empty.
+func (p *Process) logsSnapshot() string {
+	snap := p.logs.Snapshot()
+	if len(snap) == 0 {
+		return ""
+	}
+	return strings.Join(snap, "\n")
+}
+
+// Logs returns a fresh copy of the ring contents (tagged strings,
+// oldest first). Safe to call before or after Close.
+func (p *Process) Logs() []string { return p.logs.Snapshot() }
 
 // send writes a JSON request line and reads a JSON response line.
 // It holds the mutex to ensure request/response pairs aren't interleaved.
@@ -82,7 +173,7 @@ func (p *Process) send(ctx context.Context, req Request, resp any) error {
 	// Check if process is still alive before sending.
 	if p.cmd.ProcessState != nil {
 		return fmt.Errorf("plugin %q: process exited (code %d): %s",
-			p.name, p.cmd.ProcessState.ExitCode(), p.stderr.String())
+			p.name, p.cmd.ProcessState.ExitCode(), p.logsSnapshot())
 	}
 
 	// Encode request as a single JSON line.
@@ -139,7 +230,7 @@ func (p *Process) scanError() error {
 		return fmt.Errorf("plugin %q: read response: %w", p.name, err)
 	}
 	// EOF — process closed stdout. Check if it crashed.
-	stderr := p.stderr.String()
+	stderr := p.logsSnapshot()
 	if stderr != "" {
 		return fmt.Errorf("plugin %q: process closed stdout: %s", p.name, stderr)
 	}
@@ -228,14 +319,17 @@ func (p *Process) ResolveSecret(ctx context.Context, ref string) (string, error)
 }
 
 // Close gracefully shuts down the plugin process.
-// Closes stdin and waits for the process to exit.
+// Closes stdin and waits for the process and the stderr pump to exit.
 func (p *Process) Close() error {
 	p.stdin.Close()
 	err := p.cmd.Wait()
+	// Drain the stderr pump — cmd.Wait() signals process exit but the
+	// pump may still be flushing buffered lines before EOF is observed.
+	<-p.stderrDone
 	if err != nil {
 		// Exit code != 0 after stdin close is expected for some plugins.
 		// Only return error if there's useful stderr.
-		if stderr := p.stderr.String(); stderr != "" {
+		if stderr := p.logsSnapshot(); stderr != "" {
 			return fmt.Errorf("plugin %q: exit: %w: %s", p.name, err, stderr)
 		}
 	}
