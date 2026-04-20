@@ -2,7 +2,7 @@
 .bv/
 
 # Build artifacts
-mu
+/mu
 *-plugin.bb
 plugin.bb
 

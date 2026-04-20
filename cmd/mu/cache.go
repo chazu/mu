@@ -537,7 +537,8 @@ func runCache(args []string) int {
 Commands:
   ls        List cached action results and toolchains
   inspect   Show details of a cached item
-  size      Show total cache disk usage`)
+  size      Show total cache disk usage
+  clean     Remove unreachable blobs (GC)`)
 		return 2
 	}
 
@@ -548,6 +549,8 @@ Commands:
 		return runCacheInspect(args[1:])
 	case "size":
 		return runCacheSize(args[1:])
+	case "clean":
+		return runCacheClean(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "mu cache: unknown command %q\n", args[0])
 		return 2
