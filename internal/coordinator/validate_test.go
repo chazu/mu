@@ -35,7 +35,7 @@ func TestValidateTargetConfig_MissingRequired(t *testing.T) {
 		Config: map[string]any{},
 	}
 	schema := map[string]any{
-		"namespace": map[string]any{"type": "string"}, // no default → required
+		"namespace": map[string]any{"type": "string", "required": true},
 	}
 
 	err := ValidateTargetConfig(target, schema)
@@ -158,7 +158,7 @@ func TestValidateTargetConfig_NilConfig_RequiredField(t *testing.T) {
 		Config: nil,
 	}
 	schema := map[string]any{
-		"namespace": map[string]any{"type": "string"}, // required
+		"namespace": map[string]any{"type": "string", "required": true},
 	}
 
 	err := ValidateTargetConfig(target, schema)
@@ -244,6 +244,36 @@ func TestValidateTargetConfig_ArrayType(t *testing.T) {
 	target.Config["tags"] = "not-an-array"
 	if err := ValidateTargetConfig(target, schema); err == nil {
 		t.Fatal("expected error for non-array")
+	}
+}
+
+func TestValidateTargetConfig_EnumSuggestsDidYouMean(t *testing.T) {
+	target := config.Target{
+		Name:   "//app",
+		Config: map[string]any{"goos": "linx"},
+	}
+	schema := map[string]any{
+		"goos": map[string]any{"type": "string", "enum": []any{"linux", "darwin", "windows"}},
+	}
+	err := ValidateTargetConfig(target, schema)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "did you mean") || !strings.Contains(err.Error(), "linux") {
+		t.Fatalf("expected suggestion for typo, got: %v", err)
+	}
+}
+
+func TestValidateTargetConfig_PatternEnforced(t *testing.T) {
+	target := config.Target{
+		Name:   "//app",
+		Config: map[string]any{"semver": "not-a-version"},
+	}
+	schema := map[string]any{
+		"semver": map[string]any{"type": "string", "pattern": `^\d+\.\d+\.\d+$`},
+	}
+	if err := ValidateTargetConfig(target, schema); err == nil {
+		t.Fatal("expected error for pattern mismatch (new in jsonschema validator)")
 	}
 }
 
