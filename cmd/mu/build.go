@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/coordinator"
 	"github.com/chau/mu/internal/dag"
@@ -84,21 +83,16 @@ func runBuild(args []string) int {
 		return 2
 	}
 
-	// Create CAS store.
+	// Create CAS store. Honors cfg.Cache (tiered composition) when set;
+	// otherwise falls back to a single local disk cache at ~/.mu/cache.
 	var store cas.Store
 	if !*noCache {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu build: resolving home directory: %v\n", err)
-			return 2
-		}
-		cachePath := filepath.Join(home, ".mu", "cache")
-		ds, err := oci.NewLocal(cachePath)
+		s, err := buildCacheStore(cfg.Cache, false)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mu build: creating cache store: %v\n", err)
 			return 2
 		}
-		store = ds
+		store = s
 	}
 
 	// Build with cancellation on SIGINT.
