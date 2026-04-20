@@ -24,6 +24,7 @@ func runBuild(args []string) int {
 	fs.SetOutput(os.Stderr)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
+	noDiscoverCache := fs.Bool("no-discover-cache", false, "bypass the plugin discover response cache (force live discover)")
 	configFile := fs.String("config", "", "path to mu.json (default: discover by walking up)")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
 	dryRun := fs.Bool("dry-run", false, "alias for --plan")
@@ -113,6 +114,7 @@ func runBuild(args []string) int {
 		Store:             store,
 		ToolchainRegistry: registry,
 		Workers:           *jobs,
+		NoDiscoverCache:   *noDiscoverCache,
 	}
 
 	if len(cfg.Toolchains) > 0 && store != nil {
