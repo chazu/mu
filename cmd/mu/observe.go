@@ -10,9 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/cas/oci"
-	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/coordinator"
 	"github.com/chau/mu/internal/scratch"
 )
@@ -20,82 +17,42 @@ import (
 func runObserve(args []string) int {
 	fs := flag.NewFlagSet("observe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	configFile := fs.String("config", "", "path to mu.json (default: discover by walking up)")
-	jsonOut := fs.Bool("json", false, "output as JSON")
+	cli := newCLIContext("observe", fs)
 	ndjsonOut := fs.Bool("ndjson", false, "output current.records as NDJSON (one record per line)")
-	_ = fs.Bool("verbose", false, "show plugin I/O")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
 
 	targets := fs.Args()
 	if len(targets) == 0 {
-		fmt.Fprintln(os.Stderr, "mu observe: no targets specified")
-		return 2
+		return cli.fail(exitUsage, "no targets specified")
 	}
 
-	// Find project root and load config.
-	var projectRoot string
-	if *configFile != "" {
-		absConfig, err := filepath.Abs(*configFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu observe: %v\n", err)
-			return 2
-		}
-		projectRoot = filepath.Dir(absConfig)
-	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu observe: %v\n", err)
-			return 2
-		}
-		projectRoot, err = config.FindProjectRoot(cwd)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu observe: %v\n", err)
-			return 2
-		}
+	if code, ok := cli.Resolve(resolveOpts{
+		NeedConfig:     true,
+		NeedStore:      true,
+		ValidateConfig: true,
+	}); !ok {
+		return code
 	}
-
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu observe: %v\n", err)
-		return 2
-	}
-	if err := config.Validate(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "mu observe: %v\n", err)
-		return 2
-	}
-
-	// Create CAS store.
-	var store cas.Store
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu observe: resolving home directory: %v\n", err)
-		return 2
-	}
-	cachePath := filepath.Join(home, ".mu", "cache")
-	ds, err := oci.NewLocal(cachePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu observe: creating cache store: %v\n", err)
-		return 2
-	}
-	store = ds
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	registry := coordinator.NewToolchainRegistry(store)
+	registry := coordinator.NewToolchainRegistry(cli.Store)
 
 	c := &coordinator.Coordinator{
-		ProjectRoot:       projectRoot,
-		Config:            cfg,
-		Store:             store,
+		ProjectRoot:       cli.ProjectRoot,
+		Config:            cli.Config,
+		Store:             cli.Store,
 		ToolchainRegistry: registry,
+		Verbose:           cli.Verbose,
 	}
 
-	if len(cfg.Toolchains) > 0 {
+	if len(cli.Config.Toolchains) > 0 {
+		home, _ := os.UserHomeDir()
 		c.Builder = &scratch.Builder{
-			Store:    store,
+			Store:    cli.Store,
 			Registry: registry,
 			CacheDir: filepath.Join(home, ".mu", "cache"),
 		}
@@ -105,11 +62,11 @@ func runObserve(args []string) int {
 
 	results, err := c.Observe(ctx, targets)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  error: %v\n", err)
-		return 1
+		return cli.fail(exitFail, "%v", err)
 	}
 
-	if *ndjsonOut {
+	switch {
+	case *ndjsonOut:
 		enc := json.NewEncoder(os.Stdout)
 		for _, r := range results {
 			if r.Current == nil {
@@ -123,11 +80,11 @@ func runObserve(args []string) int {
 				}
 			}
 		}
-	} else if *jsonOut {
+	case cli.JSON:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(results)
-	} else {
+	default:
 		for _, r := range results {
 			if r.Error != "" {
 				fmt.Printf("  %s\terror: %s\n", r.Target, r.Error)
@@ -140,7 +97,6 @@ func runObserve(args []string) int {
 		}
 	}
 
-	// Count errors.
 	var errors int
 	for _, r := range results {
 		if r.Error != "" {
@@ -148,7 +104,7 @@ func runObserve(args []string) int {
 		}
 	}
 
-	if !*jsonOut {
+	if !cli.JSON {
 		fmt.Fprintf(os.Stderr, "\n  %d observed", len(results))
 		if errors > 0 {
 			fmt.Fprintf(os.Stderr, ", %d errors", errors)
@@ -157,7 +113,7 @@ func runObserve(args []string) int {
 	}
 
 	if errors > 0 {
-		return 1
+		return exitFail
 	}
-	return 0
+	return exitOK
 }

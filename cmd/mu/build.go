@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/coordinator"
 	"github.com/chau/mu/internal/dag"
 	"github.com/chau/mu/internal/scratch"
@@ -21,99 +19,57 @@ import (
 func runBuild(args []string) int {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	cli := newCLIContext("build", fs)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	noDiscoverCache := fs.Bool("no-discover-cache", false, "bypass the plugin discover response cache (force live discover)")
-	configFile := fs.String("config", "", "path to mu.json (default: discover by walking up)")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
 	dryRun := fs.Bool("dry-run", false, "alias for --plan")
-	jsonOut := fs.Bool("json", false, "output as JSON")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
-	_ = fs.Bool("verbose", false, "show plugin I/O")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
 
 	if *dryRun {
 		*planOnly = true
 	}
-
 	if *emitManifest && *planOnly {
-		fmt.Fprintln(os.Stderr, "mu build: --emit-manifest and --plan are mutually exclusive")
-		return 2
+		return cli.fail(exitUsage, "--emit-manifest and --plan are mutually exclusive")
 	}
 
 	targets := fs.Args()
 	if len(targets) == 0 {
-		fmt.Fprintln(os.Stderr, "mu build: no targets specified")
-		return 2
+		return cli.fail(exitUsage, "no targets specified")
 	}
 
-	// Find project root and load config.
-	var projectRoot string
-	if *configFile != "" {
-		// Explicit config: project root is the directory containing the config file.
-		absConfig, err := filepath.Abs(*configFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-			return 2
-		}
-		projectRoot = filepath.Dir(absConfig)
-	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-			return 2
-		}
-		projectRoot, err = config.FindProjectRoot(cwd)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-			return 2
-		}
+	if code, ok := cli.Resolve(resolveOpts{
+		NeedConfig:     true,
+		NeedStore:      true,
+		NoCache:        *noCache,
+		ValidateConfig: true,
+	}); !ok {
+		return code
 	}
 
-	// Load and validate config.
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-		return 2
-	}
-	if err := config.Validate(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "mu build: %v\n", err)
-		return 2
-	}
-
-	// Create CAS store. Honors cfg.Cache (tiered composition) when set;
-	// otherwise falls back to a single local disk cache at ~/.mu/cache.
-	var store cas.Store
-	if !*noCache {
-		s, err := buildCacheStore(cfg.Cache, false)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mu build: creating cache store: %v\n", err)
-			return 2
-		}
-		store = s
-	}
-
-	// Build with cancellation on SIGINT.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	registry := coordinator.NewToolchainRegistry(store)
+	registry := coordinator.NewToolchainRegistry(cli.Store)
 	home, _ := os.UserHomeDir()
 
 	c := &coordinator.Coordinator{
-		ProjectRoot:       projectRoot,
-		Config:            cfg,
-		Store:             store,
+		ProjectRoot:       cli.ProjectRoot,
+		Config:            cli.Config,
+		Store:             cli.Store,
 		ToolchainRegistry: registry,
 		Workers:           *jobs,
 		NoDiscoverCache:   *noDiscoverCache,
+		Verbose:           cli.Verbose,
 	}
 
-	if len(cfg.Toolchains) > 0 && store != nil {
+	if len(cli.Config.Toolchains) > 0 && cli.Store != nil {
 		c.Builder = &scratch.Builder{
-			Store:    store,
+			Store:    cli.Store,
 			Registry: registry,
 			CacheDir: filepath.Join(home, ".mu", "cache"),
 		}
@@ -125,11 +81,10 @@ func runBuild(args []string) int {
 
 		plan, err := c.Plan(ctx, targets)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
-			return 1
+			return cli.fail(exitFail, "%v", err)
 		}
 
-		if *jsonOut {
+		if cli.JSON {
 			return printPlanJSON(plan.Graph, targets)
 		}
 		return printPlanHuman(plan.Graph, targets)
@@ -144,8 +99,7 @@ func runBuild(args []string) int {
 	elapsed := time.Since(start)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  error: %v\n", err)
-		return 1
+		return cli.fail(exitFail, "%v", err)
 	}
 
 	if *emitManifest {
@@ -153,24 +107,23 @@ func runBuild(args []string) int {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if encErr := enc.Encode(manifest); encErr != nil {
-			fmt.Fprintf(os.Stderr, "mu build: encoding manifest: %v\n", encErr)
-			return 1
+			return cli.fail(exitFail, "encoding manifest: %v", encErr)
 		}
 	}
 
-	if *jsonOut && !*emitManifest {
+	if cli.JSON && !*emitManifest {
 		printBuildJSON(result, elapsed)
 	}
 
 	if result.Failed > 0 {
 		fmt.Fprintf(os.Stderr, "  \u2717 %d failed, %d cancelled\n", result.Failed, result.Cancelled)
-		return 1
+		return exitFail
 	}
 
 	total := result.Completed + result.Cached
 	fmt.Fprintf(os.Stderr, "  \u2713 %d completed (%d cached), %d failed in %.1fs\n",
 		total, result.Cached, result.Failed, elapsed.Seconds())
-	return 0
+	return exitOK
 }
 
 // printPlanJSON emits the planned action DAG as JSON to stdout.

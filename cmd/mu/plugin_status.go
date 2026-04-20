@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/config"
 )
 
 // runPluginStatus reconciles plugins declared in mu.json against plugins
@@ -22,28 +21,19 @@ import (
 func runPluginStatus(args []string) int {
 	fs := flag.NewFlagSet("plugin status", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	configFile := fs.String("config", "", "path to mu.json")
-	jsonOut := fs.Bool("json", false, "output as JSON")
+	cli := newCLIContext("plugin status", fs)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
-
-	projectRoot, err := resolveProjectRoot(*configFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin status: %v\n", err)
-		return 2
+	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true}); !ok {
+		return code
 	}
-
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin status: %v\n", err)
-		return 2
-	}
+	cfg := cli.Config
+	jsonOut := &cli.JSON
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin status: %v\n", err)
-		return 1
+		return cli.fail(exitFail, "%v", err)
 	}
 	pluginsDir := filepath.Join(home, ".mu", "plugins")
 

@@ -15,18 +15,21 @@ import (
 func runVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	jsonOut := fs.Bool("json", false, "output as JSON")
+	ctx := newCLIContext("verify", fs)
 	fix := fs.Bool("fix", false, "delete corrupt blobs")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
+	if code, ok := ctx.Resolve(resolveOpts{}); !ok {
+		return code
+	}
+	jsonOut := &ctx.JSON
 
-	cacheDir := cachePath()
+	cacheDir := ctx.CachePath()
 	blobDir := filepath.Join(cacheDir, "blobs", "sha256")
 
 	if _, err := os.Stat(blobDir); os.IsNotExist(err) {
-		fmt.Fprintln(os.Stderr, "mu verify: no cache found")
-		return 1
+		return ctx.fail(exitFail, "no cache found")
 	}
 
 	var ok, corrupt, missing, errCount int
@@ -38,7 +41,7 @@ func runVerify(args []string) int {
 	}
 	var corrupted []corruptEntry
 
-	err := filepath.Walk(blobDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(blobDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			errCount++
 			return nil
@@ -97,9 +100,8 @@ func runVerify(args []string) int {
 
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu verify: walking cache: %v\n", err)
-		return 1
+	if walkErr != nil {
+		return ctx.fail(exitFail, "walking cache: %v", walkErr)
 	}
 
 	// Verify action results reference valid blobs.
@@ -160,7 +162,7 @@ func runVerify(args []string) int {
 	}
 
 	if corrupt > 0 || missing > 0 {
-		return 1
+		return exitFail
 	}
-	return 0
+	return exitOK
 }

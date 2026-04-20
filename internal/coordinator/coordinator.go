@@ -36,6 +36,11 @@ type Coordinator struct {
 	// NoDiscoverCache disables the plugin discover response cache for this
 	// build (no reads, no writes). Useful when hacking on a plugin locally.
 	NoDiscoverCache bool
+
+	// Verbose increases coordinator-level log verbosity when true. Cache
+	// layer events (hit/miss/repair) are surfaced at info level instead
+	// of debug; other structured events become more detailed.
+	Verbose bool
 }
 
 // BuildResult summarises the outcome of a build.

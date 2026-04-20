@@ -47,32 +47,20 @@ Commands:
 func runPluginAdd(args []string) int {
 	fs := flag.NewFlagSet("plugin add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	configFile := fs.String("config", "", "path to mu.json")
+	cli := newCLIContext("plugin add", fs)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
-
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin add <name>")
-		return 2
+		return exitUsage
 	}
 	pluginName := fs.Arg(0)
-
-	projectRoot, err := resolveProjectRoot(*configFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin add: %v\n", err)
-		return 2
+	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true, ValidateConfig: true}); !ok {
+		return code
 	}
-
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin add: %v\n", err)
-		return 2
-	}
-	if err := config.Validate(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin add: %v\n", err)
-		return 2
-	}
+	projectRoot := cli.ProjectRoot
+	cfg := cli.Config
 
 	// Check that //plugins/<name> target exists.
 	targetName := "//plugins/" + pluginName
@@ -119,25 +107,18 @@ func runPluginAdd(args []string) int {
 func runPluginList(args []string) int {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	configFile := fs.String("config", "", "path to mu.json")
+	cli := newCLIContext("plugin list", fs)
 	discover := fs.Bool("discover", false, "start plugins and run discover to show capabilities")
 	cached := fs.Bool("cached", false, "show all //plugins/* targets with their CAS digests")
-	jsonOut := fs.Bool("json", false, "output as JSON")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
-
-	projectRoot, err := resolveProjectRoot(*configFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
-		return 2
+	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true}); !ok {
+		return code
 	}
-
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
-		return 2
-	}
+	projectRoot := cli.ProjectRoot
+	cfg := cli.Config
+	jsonOut := &cli.JSON
 
 	if *cached && *discover {
 		return pluginListCachedDiscover(cfg, projectRoot, *jsonOut)
@@ -581,22 +562,6 @@ func resolveBbPath() string {
 		return path
 	}
 	return ""
-}
-
-// resolveProjectRoot finds the project root from a --config flag or cwd.
-func resolveProjectRoot(configFile string) (string, error) {
-	if configFile != "" {
-		absConfig, err := filepath.Abs(configFile)
-		if err != nil {
-			return "", err
-		}
-		return filepath.Dir(absConfig), nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	return config.FindProjectRoot(cwd)
 }
 
 // buildTargets sets up a Coordinator and builds the given targets.
