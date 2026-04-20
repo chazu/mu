@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/chau/mu/internal/cas"
 	"github.com/chau/mu/internal/sandbox"
@@ -21,6 +22,11 @@ type ActionStatus struct {
 	ExitCode int
 	Err      error
 	Outputs  map[string]cas.Digest // output name -> content digest
+
+	// Attempts is the number of times the action was run. 0 if served
+	// from cache, 1 if executed successfully on the first try, >1 if
+	// retries happened. Only meaningful for actions with Retries > 0.
+	Attempts int
 }
 
 // ExecuteResult holds the outcome of a full DAG execution.
@@ -179,17 +185,10 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 	}
 
-	var exitCode int
-	var execErr error
-
-	if a.Toolchain != nil {
-		exitCode, execErr = e.executeInSandbox(ctx, a, execEnv)
-	} else {
-		exitCode, execErr = e.executeBare(ctx, a, execEnv)
-	}
+	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv)
 
 	if execErr != nil {
-		return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
+		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
 	}
 
 	// Hash declared outputs and store in CAS — only for pure actions.
@@ -214,7 +213,74 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 	}
 
-	return ActionStatus{ID: a.ID, ExitCode: exitCode, Outputs: actionResult.Outputs}
+	return ActionStatus{ID: a.ID, ExitCode: exitCode, Outputs: actionResult.Outputs, Attempts: attempts}
+}
+
+// runWithTimeoutAndRetry executes the action with optional per-attempt
+// timeout and optional retry. Retries apply only when Network is true;
+// Retries on a non-network action are silently ignored. Parent-context
+// cancellation (SIGINT) returns immediately.
+//
+// Returns (exitCode, attempts, err). attempts is 1 on success without
+// retry. err is non-nil iff the final attempt failed OR the parent
+// context was cancelled.
+func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env map[string]string) (int, int, error) {
+	maxRetries := 0
+	if a.Network && a.Retries > 0 {
+		maxRetries = a.Retries
+	}
+	timeout := time.Duration(a.TimeoutS) * time.Second
+	backoff := time.Duration(a.RetryBackoffMs) * time.Millisecond
+
+	var lastExit int
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return lastExit, attempt, ctx.Err()
+		}
+
+		attemptCtx := ctx
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+
+		var exitCode int
+		var err error
+		if a.Toolchain != nil {
+			exitCode, err = e.executeInSandbox(attemptCtx, a, env)
+		} else {
+			exitCode, err = e.executeBare(attemptCtx, a, env)
+		}
+
+		if cancel != nil {
+			cancel()
+		}
+
+		if err == nil {
+			return exitCode, attempt + 1, nil
+		}
+
+		lastExit = exitCode
+		lastErr = err
+
+		// Don't retry on parent-context cancellation.
+		if ctx.Err() != nil {
+			return lastExit, attempt + 1, ctx.Err()
+		}
+
+		// If we have attempts remaining, back off then loop.
+		if attempt < maxRetries && backoff > 0 {
+			select {
+			case <-ctx.Done():
+				return lastExit, attempt + 1, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+	}
+
+	return lastExit, maxRetries + 1, lastErr
 }
 
 // executeBare runs a command directly on the host (no sandbox).

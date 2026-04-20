@@ -19,6 +19,16 @@ type Action struct {
 	WorkDir   string // execution working directory
 	Impure    bool   // skip CAS cache when true
 
+	// Per-attempt wall-clock timeout in seconds. 0 = no timeout.
+	TimeoutS int
+
+	// Retries is the number of *additional* attempts on failure. Applies
+	// only when Network is true; silently ignored on pure actions.
+	Retries int
+
+	// RetryBackoffMs is the sleep between attempts in milliseconds.
+	RetryBackoffMs int
+
 	// SealedInputs maps env var names to secret references (e.g. "pass:deploy/token").
 	// These are resolved to actual values by the coordinator before execution and
 	// injected into the action's environment. Sealed inputs are deliberately excluded

@@ -81,17 +81,24 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			}
 		}
 
+		if spec.TimeoutS < 0 || spec.Retries < 0 || spec.RetryBackoffMs < 0 {
+			return nil, fmt.Errorf("action %q: timeout_s, retries, and retry_backoff_ms must be non-negative", spec.ID)
+		}
+
 		actions = append(actions, &dag.Action{
-			ID:           spec.ID,
-			Command:      spec.Command,
-			Inputs:       inputs,
-			Outputs:      spec.Outputs,
-			DependsOn:    spec.DependsOn,
-			Env:          env,
-			SealedInputs: sealedInputs,
-			Network:      spec.Network,
-			WorkDir:      workDir,
-			Impure:       spec.Impure,
+			ID:             spec.ID,
+			Command:        spec.Command,
+			Inputs:         inputs,
+			Outputs:        spec.Outputs,
+			DependsOn:      spec.DependsOn,
+			Env:            env,
+			SealedInputs:   sealedInputs,
+			Network:        spec.Network,
+			WorkDir:        workDir,
+			Impure:         spec.Impure,
+			TimeoutS:       spec.TimeoutS,
+			Retries:        spec.Retries,
+			RetryBackoffMs: spec.RetryBackoffMs,
 		})
 	}
 

@@ -95,6 +95,20 @@ type ActionSpec struct {
 	Network      bool              `json:"network,omitempty"`
 	WorkDir      string            `json:"work_dir,omitempty"`     // relative to project root (default: project root)
 	Impure       bool              `json:"impure,omitempty"`       // skip CAS cache
+
+	// TimeoutS is the per-attempt wall-clock timeout in seconds. 0 = no
+	// timeout (legacy). Applies to all actions regardless of Network.
+	TimeoutS int `json:"timeout_s,omitempty"`
+
+	// Retries is the number of additional attempts on failure. 0 = no
+	// retry (legacy). Retries ONLY apply when Network is true — pure
+	// actions are deterministic and retrying is meaningless. Non-network
+	// actions silently ignore Retries (with a one-time warning per build).
+	Retries int `json:"retries,omitempty"`
+
+	// RetryBackoffMs is the sleep between attempts in milliseconds.
+	// 0 = retry immediately.
+	RetryBackoffMs int `json:"retry_backoff_ms,omitempty"`
 }
 
 // ResolveSecretResponse is returned by plugins for method "resolve_secret".
