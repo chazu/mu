@@ -27,7 +27,8 @@ func runPlugin(args []string) int {
 Commands:
   list      List registered plugins
   add       Add a plugin from cache by building its //plugins/<name> target
-  status    Reconcile declared plugins against the local cache`)
+  status    Reconcile declared plugins against the local cache
+  test      Run scenarios against a plugin (bundled + testdata/*.yaml)`)
 		return 2
 	}
 
@@ -38,6 +39,8 @@ Commands:
 		return runPluginAdd(args[1:])
 	case "status":
 		return runPluginStatus(args[1:])
+	case "test":
+		return runPluginTest(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "mu plugin: unknown command %q\n", args[0])
 		return 2
