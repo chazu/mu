@@ -202,10 +202,11 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			planActions = actions
 		} else {
 			ti := plugin.TargetInfo{
-				Name:      t.Name,
-				Toolchain: t.Toolchain,
-				Sources:   t.Sources,
-				Config:    t.Config,
+				Name:         t.Name,
+				Toolchain:    t.Toolchain,
+				Sources:      t.Sources,
+				Config:       t.Config,
+				SealedInputs: t.SealedInputs,
 			}
 
 			// For v1 dep artifacts are empty; full wiring comes later.

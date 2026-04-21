@@ -70,10 +70,11 @@ type PlanResponse struct {
 
 // TargetInfo carries the build file declaration for a target.
 type TargetInfo struct {
-	Name      string         `json:"name"`      // e.g. "//lib/crypto"
-	Toolchain string         `json:"toolchain"` // e.g. "go"
-	Sources   []string       `json:"sources"`
-	Config    map[string]any `json:"config,omitempty"`
+	Name         string            `json:"name"`                    // e.g. "//lib/crypto"
+	Toolchain    string            `json:"toolchain"`               // e.g. "go"
+	Sources      []string          `json:"sources"`
+	Config       map[string]any    `json:"config,omitempty"`
+	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env var name -> secret reference (e.g. "pass:deploy/token")
 }
 
 // DepInfo carries what a dependency produced.
