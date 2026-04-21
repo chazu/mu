@@ -470,6 +470,8 @@ my-plugin/
 | `scratch` | Toolchain bootstrapping from scratch |
 | `lint` | Linter wrapper (observe + fix) |
 | `pass` | Secret provider backed by [pass](https://passwordstore.org) |
+| `remote-exec` | Run a command on a remote host via SSH (with optional `check` guard and `sudo`) |
+| `remote-file` | Converge a file on a remote host via SSH (bytes, mode, owner) with observe support |
 
 ## Sealed Inputs
 
@@ -600,7 +602,7 @@ internal/
 ├── scratch/         Toolchain download, verify, extract, register
 ├── sandbox/         Hermetic execution environments
 └── builtin/         Built-in fetch command with SHA-256 verification
-plugins/             Babashka plugins (go, cowsay, docker, file, k8s, zig, terraform, scratch)
+plugins/             Babashka plugins (go, cowsay, docker, file, k8s, zig, terraform, scratch, remote-exec, remote-file)
 examples/            Example projects
 ```
 
