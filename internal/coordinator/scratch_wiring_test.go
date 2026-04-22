@@ -31,7 +31,7 @@ func TestBuild_ToolchainDeclared_ScratchBuildCalled(t *testing.T) {
 	registry := NewToolchainRegistry(newTestStore(t))
 
 	c := &Coordinator{
-		ProjectRoot:       t.TempDir(),
+		ProjectRoot: t.TempDir(),
 		Config: &config.ProjectConfig{
 			Targets: []config.Target{
 				{Name: "//app", Toolchain: "mock"},

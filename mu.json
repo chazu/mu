@@ -1,4 +1,15 @@
 {
+  "cache": {
+    "backends": [
+      {"type": "disk", "path": "~/.mu/cache"},
+      {"type": "oci", "registry": "registry.loosh.cloud/mu", "write": false}
+    ],
+    "read_repair": true,
+    "push": {
+      "registry": "registry.loosh.cloud",
+      "repository": "mu"
+    }
+  },
   "toolchains": [
     {
       "toolchain": "bb",

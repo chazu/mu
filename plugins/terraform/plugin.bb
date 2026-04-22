@@ -13,6 +13,10 @@
 ;;   auto_approve   - include apply step (default: true)
 ;;                    when false, only init + plan are emitted (plan-only mode)
 ;;   parallelism    - max concurrent terraform operations (optional)
+;;   emit_state     - run `terraform show -json` and `terraform output -json`
+;;                    after apply (or after plan in plan-only mode), capturing
+;;                    state.json and outputs.json as CAS outputs so downstream
+;;                    targets (e.g. pudl) can consume them. Default: true.
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
@@ -29,7 +33,8 @@
                        "var_file"       {"type" "string"}
                        "backend_config" {"type" "object"}
                        "auto_approve"   {"type" "boolean" "default" true}
-                       "parallelism"    {"type" "integer"}}})
+                       "parallelism"    {"type" "integer"}
+                       "emit_state"     {"type" "boolean" "default" true}}})
 
 (defn build-init-cmd
   "Build terraform init command with backend config flags."
@@ -62,6 +67,7 @@
         config   (get target "config" {})
         dir      (get config "dir" ".")
         auto?    (get config "auto_approve" true)
+        emit?    (get config "emit_state" true)
 
         ;; Build input map from declared sources (.tf files)
         inputs (into {} (map (fn [s] [s s]) sources))
@@ -99,11 +105,36 @@
                       "impure"     true
                       "work_dir"   dir}
 
+        ;; Show action: capture post-apply (or post-plan, if plan-only)
+        ;; state + outputs as JSON. Wrapped in `sh -c` so we can redirect
+        ;; both commands' stdout into the declared output files in one
+        ;; shot. `terraform output -json` prints "{}" when no outputs
+        ;; are declared, so the file is always present for downstream
+        ;; targets to read.
+        show-depends (if auto? ["apply"] ["plan"])
+        show-action  {"id"         "show"
+                      "command"    ["sh" "-c"
+                                    "terraform show -json > state.json && terraform output -json > outputs.json"]
+                      "inputs"     {}
+                      "outputs"    [(str dir "/state.json")
+                                    (str dir "/outputs.json")]
+                      "depends_on" show-depends
+                      "env"        {}
+                      "network"    true
+                      "impure"     true
+                      "work_dir"   dir}
+
         actions (cond-> [init-action plan-action]
-                  auto? (conj apply-action))]
+                  auto?     (conj apply-action)
+                  emit?     (conj show-action))
+
+        declared (if emit?
+                   {"terraform_state"   (str dir "/state.json")
+                    "terraform_outputs" (str dir "/outputs.json")}
+                   {})]
 
     {"actions"          actions
-     "declared_outputs" {}}))
+     "declared_outputs" declared}))
 
 (defn handle-observe [req]
   (let [target  (get req "target")

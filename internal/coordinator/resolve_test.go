@@ -26,7 +26,7 @@ func TestResolveFileInputs(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -62,6 +62,55 @@ func TestResolveFileInputs(t *testing.T) {
 	}
 }
 
+func TestResolveCrossTargetProducer(t *testing.T) {
+	// Simulate a dependent target whose plugin referenced a dep's declared
+	// output path (e.g. "infra/vpc/state.json"). The file does NOT exist on
+	// disk yet — the producer hasn't run — so Resolve must not try to hash
+	// it. Instead it should defer the input and wire an implicit DependsOn
+	// edge to the producing action.
+	dir := t.TempDir()
+
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "//pudl/ingest:run",
+			Command: []string{"pudl", "ingest"},
+			Inputs: map[string]string{
+				"state": "infra/vpc/state.json",
+			},
+			Outputs:   []string{"ingested.db"},
+			DependsOn: []string{"//pudl/ingest:setup"},
+		},
+	}
+
+	producers := map[string]string{
+		"infra/vpc/state.json": "//infra/vpc:show",
+	}
+
+	actions, err := Resolve(specs, dir, producers)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("got %d actions, want 1", len(actions))
+	}
+
+	a := actions[0]
+	if !a.Inputs["state"].IsZero() {
+		t.Errorf("cross-target input should be a zero-digest placeholder, got %v", a.Inputs["state"])
+	}
+	// Original DependsOn preserved, plus producer injected.
+	gotDeps := map[string]bool{}
+	for _, d := range a.DependsOn {
+		gotDeps[d] = true
+	}
+	if !gotDeps["//pudl/ingest:setup"] {
+		t.Errorf("DependsOn missing original edge, got %v", a.DependsOn)
+	}
+	if !gotDeps["//infra/vpc:show"] {
+		t.Errorf("DependsOn missing cross-target edge to producer, got %v", a.DependsOn)
+	}
+}
+
 func TestResolveActionRef(t *testing.T) {
 	dir := t.TempDir()
 
@@ -74,7 +123,7 @@ func TestResolveActionRef(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -110,7 +159,7 @@ func TestResolveMixedInputs(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -149,7 +198,7 @@ func TestResolveMissingFile(t *testing.T) {
 		},
 	}
 
-	_, err := Resolve(specs, dir)
+	_, err := Resolve(specs, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -179,7 +228,7 @@ func TestResolvePathTraversal(t *testing.T) {
 			},
 		}
 
-		_, err := Resolve(specs, dir)
+		_, err := Resolve(specs, dir, nil)
 		if err == nil {
 			t.Errorf("expected error for traversal input %q, got nil", input)
 			continue
@@ -201,7 +250,7 @@ func TestResolveWorkDirTraversal(t *testing.T) {
 		},
 	}
 
-	_, err := Resolve(specs, dir)
+	_, err := Resolve(specs, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for work_dir traversal, got nil")
 	}
@@ -227,7 +276,7 @@ func TestResolveWorkDirValid(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -250,7 +299,7 @@ func TestResolveWorkDirEmpty(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -276,7 +325,7 @@ func TestResolveSealedInputsPassthrough(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -306,7 +355,7 @@ func TestResolveSealedInputsNil(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -327,7 +376,7 @@ func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir)
+	actions, err := Resolve(specs, dir, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -340,7 +389,7 @@ func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 }
 
 func TestResolveEmptySpecs(t *testing.T) {
-	actions, err := Resolve(nil, t.TempDir())
+	actions, err := Resolve(nil, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}

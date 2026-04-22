@@ -20,16 +20,34 @@ func isActionRef(value string) bool {
 // Resolve converts a slice of plugin ActionSpecs into resolved dag.Actions.
 // File-path inputs are resolved relative to projectRoot and hashed via cas.ComputeDigest.
 // Action-reference inputs ("{action:id}") are stored with a zero cas.Digest placeholder.
-func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, error) {
+//
+// crossTargetProducers maps project-relative output paths to the action IDs
+// that produce them in this build. When a plugin declares an input whose
+// path matches such an entry, the input is treated as deferred (zero
+// digest) and an implicit DependsOn edge to the producing action is added
+// so the DAG executes in the correct order. This lets a dependent target
+// consume a dep's declared output by path without needing to wait for
+// execution during planning.
+func Resolve(specs []plugin.ActionSpec, projectRoot string, crossTargetProducers map[string]string) ([]*dag.Action, error) {
 	actions := make([]*dag.Action, 0, len(specs))
 
 	for _, spec := range specs {
 		inputs := make(map[string]cas.Digest, len(spec.Inputs))
+		extraDeps := make(map[string]struct{})
 
 		for name, value := range spec.Inputs {
 			if isActionRef(value) {
 				// Placeholder for inter-action dependency; executor resolves later.
 				inputs[name] = cas.Digest{}
+				continue
+			}
+
+			// Cross-target reference: value is a project-relative path that
+			// another already-planned action produces. File won't exist on
+			// disk yet, so defer hashing and wire in a DependsOn edge.
+			if producer, ok := crossTargetProducers[value]; ok {
+				inputs[name] = cas.Digest{}
+				extraDeps[producer] = struct{}{}
 				continue
 			}
 
@@ -85,12 +103,36 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string) ([]*dag.Action, erro
 			return nil, fmt.Errorf("action %q: timeout_s, retries, and retry_backoff_ms must be non-negative", spec.ID)
 		}
 
+		// Merge implicit cross-target DependsOn edges with any already
+		// declared by the plugin. Order is irrelevant for DAG correctness,
+		// but we de-dup.
+		dependsOn := spec.DependsOn
+		if len(extraDeps) > 0 {
+			seen := make(map[string]struct{}, len(dependsOn)+len(extraDeps))
+			merged := make([]string, 0, len(dependsOn)+len(extraDeps))
+			for _, d := range dependsOn {
+				if _, ok := seen[d]; ok {
+					continue
+				}
+				seen[d] = struct{}{}
+				merged = append(merged, d)
+			}
+			for d := range extraDeps {
+				if _, ok := seen[d]; ok {
+					continue
+				}
+				seen[d] = struct{}{}
+				merged = append(merged, d)
+			}
+			dependsOn = merged
+		}
+
 		actions = append(actions, &dag.Action{
 			ID:             spec.ID,
 			Command:        spec.Command,
 			Inputs:         inputs,
 			Outputs:        spec.Outputs,
-			DependsOn:      spec.DependsOn,
+			DependsOn:      dependsOn,
 			Env:            env,
 			SealedInputs:   sealedInputs,
 			Network:        spec.Network,

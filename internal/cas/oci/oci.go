@@ -19,12 +19,16 @@ import (
 	"io"
 	"os"
 
+	"net/http"
+
 	"github.com/chau/mu/internal/cas"
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	ocilayout "oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 const (
@@ -90,17 +94,77 @@ func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
 	return ok, nil
 }
 
-// Get fetches the blob identified by dgst from the registry.
+// Get fetches the blob identified by dgst from the registry. When the
+// underlying repo is a remote registry, oras-go's blobStore.Fetch validates
+// the response's Content-Length against desc.Size; passing Size=0 would
+// falsely trip that check. We therefore resolve the blob's size first
+// (HEAD for remote; layout index for local) and populate the descriptor
+// before fetching.
 func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
+	ocidgst := toOCIDigest(dgst)
+
+	// Remote repositories: bypass oras-go's blobStore.Fetch, which refuses
+	// to return a body unless desc.Size matches the server's
+	// Content-Length. We usually don't have the size (ActionResult.Outputs
+	// stores digests only) and some registries return 404 on HEAD even
+	// when GET works — so we can't reliably populate the size up front.
+	// Go straight to a GET through the authed client.
+	if rr, ok := s.repo.(*remote.Repository); ok {
+		return remoteBlobGet(ctx, rr, ocidgst)
+	}
+
 	desc := ocispec.Descriptor{
 		MediaType: MediaTypeMuBlob,
-		Digest:    toOCIDigest(dgst),
+		Digest:    ocidgst,
+	}
+	if d, err := s.repo.Resolve(ctx, ocidgst.String()); err == nil {
+		desc.Size = d.Size
 	}
 	rc, err := s.repo.Fetch(ctx, desc)
 	if err != nil {
 		return nil, fmt.Errorf("oci: fetch blob %s: %w", dgst, err)
 	}
 	return rc, nil
+}
+
+// remoteBlobGet streams a blob body directly from a remote repository via
+// its authenticated Client. It skips oras-go's Content-Length validation
+// and (intentionally) does not verify the content digest here: callers are
+// responsible for digest verification (the CAS boundary does this via
+// Digest.Match on Put, and the tiered cache re-Puts any fetched bytes).
+func remoteBlobGet(ctx context.Context, rr *remote.Repository, dgst godigest.Digest) (io.ReadCloser, error) {
+	ref := rr.Reference
+	ref.Reference = dgst.String()
+	ctx = auth.AppendRepositoryScope(ctx, ref, auth.ActionPull)
+
+	scheme := "https"
+	if rr.PlainHTTP {
+		scheme = "http"
+	}
+	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, ref.Host(), ref.Repository, dgst.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("oci: build blob request: %w", err)
+	}
+
+	client := rr.Client
+	if client == nil {
+		client = auth.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("oci: fetch blob %s: %w", dgst, err)
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return resp.Body, nil
+	case http.StatusNotFound:
+		resp.Body.Close()
+		return nil, fmt.Errorf("oci: fetch blob %s: %w", dgst, errdef.ErrNotFound)
+	default:
+		resp.Body.Close()
+		return nil, fmt.Errorf("oci: fetch blob %s: %s", dgst, resp.Status)
+	}
 }
 
 // Put streams data from r, computing a SHA-256 digest, then pushes the blob
@@ -186,16 +250,24 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 		}
 	}
 
-	// Build layer descriptors from output artifacts.
+	// Build layer descriptors from output artifacts. Size is looked up via
+	// Resolve so the manifest carries the full descriptor; without it,
+	// oras-go sets req.ContentLength = 0 on a push, Go's http client falls
+	// back to chunked transfer encoding, and strict registries (e.g. Zot)
+	// reject the monolithic-upload PUT with 400.
 	layers := make([]ocispec.Descriptor, 0, len(result.Outputs))
 	for name, dgst := range result.Outputs {
-		layers = append(layers, ocispec.Descriptor{
+		layer := ocispec.Descriptor{
 			MediaType: MediaTypeMuBlob,
 			Digest:    toOCIDigest(dgst),
 			Annotations: map[string]string{
 				"mu.output.name": name,
 			},
-		})
+		}
+		if resolved, err := s.repo.Resolve(ctx, layer.Digest.String()); err == nil {
+			layer.Size = resolved.Size
+		}
+		layers = append(layers, layer)
 	}
 
 	manifest := ocispec.Manifest{

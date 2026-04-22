@@ -92,8 +92,8 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:         p.Name,
-			Script:       cachedPath,
+			Name:      p.Name,
+			Script:    cachedPath,
 			Toolchain: inferPluginToolchain(cachedPath),
 		},
 		Digest: dgst,
@@ -142,8 +142,8 @@ func (r *PluginResolver) resolveLocalFile(ctx context.Context, p config.PluginDe
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:         p.Name,
-			Script:       cachedPath,
+			Name:      p.Name,
+			Script:    cachedPath,
 			Toolchain: inferPluginToolchain(cachedPath),
 		},
 		Digest: dgst,
@@ -271,9 +271,9 @@ func (r *PluginResolver) bundleDir(ctx context.Context, dirPath string, files []
 
 	for _, e := range entries {
 		hdr := &tar.Header{
-			Name:    e.relPath,
-			Size:    e.info.Size(),
-			Mode:    int64(e.info.Mode() & fs.ModePerm),
+			Name:     e.relPath,
+			Size:     e.info.Size(),
+			Mode:     int64(e.info.Mode() & fs.ModePerm),
 			Typeflag: tar.TypeReg,
 			// Zero timestamps and UIDs for determinism.
 		}
@@ -422,8 +422,8 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 
 	return &ResolvedPlugin{
 		Def: plugin.PluginDef{
-			Name:         p.Name,
-			Script:       cachedPath,
+			Name:      p.Name,
+			Script:    cachedPath,
 			Toolchain: inferPluginToolchain(cachedPath),
 		},
 		Digest: expectedDigest,

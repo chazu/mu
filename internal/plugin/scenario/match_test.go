@@ -7,7 +7,7 @@ import (
 
 func TestMatchShape_LiteralsPass(t *testing.T) {
 	s := &Scenario{Expect: Expect{Match: "shape", Shape: map[string]any{
-		"name": "go",
+		"name":             "go",
 		"protocol_version": 1,
 	}}}
 	err := s.Match(map[string]any{

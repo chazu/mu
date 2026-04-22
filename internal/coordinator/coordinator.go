@@ -54,17 +54,17 @@ type BuildResult struct {
 	Cached     int
 	Failed     int
 	Cancelled  int
-	Graph      *dag.Graph          // the planned action DAG (always populated)
-	ExecResult *dag.ExecuteResult  // per-action detail from execution
-	Targets    []config.Target     // the targets that were built
+	Graph      *dag.Graph         // the planned action DAG (always populated)
+	ExecResult *dag.ExecuteResult // per-action detail from execution
+	Targets    []config.Target    // the targets that were built
 }
 
 // PlanResult holds the planned action graph. Plugins are shut down before
 // Plan() returns — they are only needed during planning, not execution.
 type PlanResult struct {
 	Graph           *dag.Graph
-	Targets         []config.Target                // the resolved targets (for manifest metadata)
-	ResolvedSecrets map[string]map[string]string   // actionID → envName → secret value (never persisted)
+	Targets         []config.Target              // the resolved targets (for manifest metadata)
+	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
 }
 
 // Plan runs the planning pipeline: build toolchains, resolve plugins, start
@@ -190,16 +190,26 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	// 6. Plan each target via its toolchain plugin and resolve actions.
 	graph := dag.NewGraph()
 
+	// Cross-target artifact plumbing: as each target is planned (in
+	// topological order, leaves first), record its declared_outputs so
+	// later dependents receive them via DepInfo.Artifacts, and track
+	// which action produces each output path so Resolve can wire
+	// implicit DependsOn edges across target boundaries.
+	declaredByTarget := make(map[string]map[string]string, len(targets))
+	producerForPath := make(map[string]string)
+
 	for _, t := range targets {
 		var planActions []plugin.ActionSpec
+		var declaredOutputs map[string]string
 
 		if t.Toolchain == "shell" {
 			// Shell targets use the built-in handler — no external plugin needed.
-			actions, _, err := builtin.ShellPlan(t)
+			actions, declared, err := builtin.ShellPlan(t)
 			if err != nil {
 				return nil, fmt.Errorf("coordinator: %w", err)
 			}
 			planActions = actions
+			declaredOutputs = declared
 		} else {
 			ti := plugin.TargetInfo{
 				Name:         t.Name,
@@ -209,12 +219,14 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 				SealedInputs: t.SealedInputs,
 			}
 
-			// For v1 dep artifacts are empty; full wiring comes later.
+			// Thread each dep's declared_outputs (artifact-type → path,
+			// project-relative) into DepInfo.Artifacts so the plugin
+			// can reference them when shaping its own actions.
 			var deps []plugin.DepInfo
 			for _, depName := range t.Deps {
 				deps = append(deps, plugin.DepInfo{
 					Target:    depName,
-					Artifacts: nil,
+					Artifacts: cloneStringMap(declaredByTarget[depName]),
 				})
 			}
 
@@ -226,12 +238,18 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 				return nil, fmt.Errorf("coordinator: plugin error for target %q: %s", t.Name, plan.Error)
 			}
 			planActions = plan.Actions
+			declaredOutputs = plan.Outputs
 		}
 
 		// Prefix action IDs with target name to avoid cross-target collisions.
 		prefixActions(t.Name, planActions)
 
-		resolved, err := Resolve(planActions, c.ProjectRoot)
+		// Snapshot this target's output producers BEFORE Resolve runs:
+		// the target's own actions need to self-reference via {action:id}
+		// for intra-target wiring, not through the cross-target path map.
+		crossTargetProducers := cloneStringMap(producerForPath)
+
+		resolved, err := Resolve(planActions, c.ProjectRoot, crossTargetProducers)
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}
@@ -239,6 +257,14 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		for _, a := range resolved {
 			if err := graph.AddAction(a); err != nil {
 				return nil, fmt.Errorf("coordinator: building DAG: %w", err)
+			}
+		}
+
+		// Register this target's outputs for any later-planned dependents.
+		declaredByTarget[t.Name] = cloneStringMap(declaredOutputs)
+		for _, a := range planActions {
+			for _, outPath := range a.Outputs {
+				producerForPath[outPath] = a.ID
 			}
 		}
 	}
@@ -298,31 +324,14 @@ func (c *Coordinator) bundlePlugins(ctx context.Context, targetNames []string) e
 		return nil
 	}
 
-	// Expand wildcards in target names to get actual target names.
-	index := make(map[string]bool, len(c.Config.Targets))
+	// Expand wildcards in target names to get actual target names. No
+	// error on zero matches here — bundling is a side effect of a
+	// already-validated build invocation.
+	tnames := make([]string, 0, len(c.Config.Targets))
 	for _, t := range c.Config.Targets {
-		index[t.Name] = true
+		tnames = append(tnames, t.Name)
 	}
-	var expanded []string
-	for _, n := range targetNames {
-		if strings.HasSuffix(n, "/...") {
-			prefix := strings.TrimSuffix(n, "...")
-			for tname := range index {
-				if strings.HasPrefix(tname, prefix) {
-					expanded = append(expanded, tname)
-				}
-			}
-		} else if strings.HasSuffix(n, "/*") {
-			prefix := strings.TrimSuffix(n, "*")
-			for tname := range index {
-				if strings.HasPrefix(tname, prefix) && !strings.Contains(strings.TrimPrefix(tname, prefix), "/") {
-					expanded = append(expanded, tname)
-				}
-			}
-		} else {
-			expanded = append(expanded, n)
-		}
-	}
+	expanded, _ := expandTargetWildcards(targetNames, tnames, false)
 
 	// Check which plugin directories had targets built.
 	home, _ := os.UserHomeDir()
@@ -554,6 +563,21 @@ func aggregateKitState(name string, deps []string, results []ObserveResult) Obse
 	}
 }
 
+// cloneStringMap returns a copy of m or nil when m is empty. Used to
+// snapshot per-target state (declared outputs, producer map) so that
+// downstream mutations by plugins or later planning iterations don't
+// reach back into earlier targets.
+func cloneStringMap(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 // prefixActions rewrites action IDs and DependsOn references with a target
 // prefix so that actions from different targets never collide.
 func prefixActions(target string, actions []plugin.ActionSpec) {
@@ -630,45 +654,26 @@ func buildResultFrom(er *dag.ExecuteResult) *BuildResult {
 // resolveTargets returns targets in dependency order (leaves first).
 // It resolves transitive deps and detects cycles.
 //
-// Target names support two wildcard patterns:
+// Target names support the following wildcard patterns:
 //   - "//pkg/..." matches all targets under //pkg/ (recursive)
-//   - "//pkg/*" matches direct children of //pkg/ (one level)
+//   - "*" matches any non-slash run within a single path segment
+//     (e.g. "//plugins/*/build" matches //plugins/go/build,
+//     //plugins/docker/build, etc.; "//plugins/*/*" matches all
+//     two-segment targets under //plugins).
 func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 	index := make(map[string]config.Target, len(c.Config.Targets))
 	for _, t := range c.Config.Targets {
 		index[t.Name] = t
 	}
 
-	// Expand wildcard patterns, then validate.
-	var expanded []string
-	for _, n := range names {
-		if strings.HasSuffix(n, "/...") {
-			prefix := strings.TrimSuffix(n, "...")
-			found := false
-			for tname := range index {
-				if strings.HasPrefix(tname, prefix) {
-					expanded = append(expanded, tname)
-					found = true
-				}
-			}
-			if !found {
-				return nil, fmt.Errorf("pattern %q matched no targets", n)
-			}
-		} else if strings.HasSuffix(n, "/*") {
-			prefix := strings.TrimSuffix(n, "*")
-			found := false
-			for tname := range index {
-				if strings.HasPrefix(tname, prefix) && !strings.Contains(strings.TrimPrefix(tname, prefix), "/") {
-					expanded = append(expanded, tname)
-					found = true
-				}
-			}
-			if !found {
-				return nil, fmt.Errorf("pattern %q matched no targets", n)
-			}
-		} else {
-			expanded = append(expanded, n)
-		}
+	tnames := make([]string, 0, len(index))
+	for n := range index {
+		tnames = append(tnames, n)
+	}
+
+	expanded, err := expandTargetWildcards(names, tnames, true)
+	if err != nil {
+		return nil, err
 	}
 	names = expanded
 

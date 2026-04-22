@@ -538,7 +538,10 @@ Commands:
   ls        List cached action results and toolchains
   inspect   Show details of a cached item
   size      Show total cache disk usage
-  clean     Remove unreachable blobs (GC)`)
+  clean     Remove unreachable blobs (GC)
+  push      Copy cached actions to the remote OCI registry (cache.push)
+  login     Log in to the remote OCI registry (stores in Docker credential chain)
+  logout    Remove stored credentials for the remote OCI registry`)
 		return 2
 	}
 
@@ -551,9 +554,14 @@ Commands:
 		return runCacheSize(args[1:])
 	case "clean":
 		return runCacheClean(args[1:])
+	case "push":
+		return runCachePush(args[1:])
+	case "login":
+		return runCacheLogin(args[1:])
+	case "logout":
+		return runCacheLogout(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "mu cache: unknown command %q\n", args[0])
 		return 2
 	}
 }
-

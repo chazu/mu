@@ -137,11 +137,11 @@ func runVerify(args []string) int {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(map[string]any{
-			"ok":       ok,
-			"corrupt":  corrupt,
-			"missing":  missing,
-			"errors":   errCount,
-			"fixed":    *fix && corrupt > 0,
+			"ok":        ok,
+			"corrupt":   corrupt,
+			"missing":   missing,
+			"errors":    errCount,
+			"fixed":     *fix && corrupt > 0,
 			"corrupted": corrupted,
 		})
 	} else {

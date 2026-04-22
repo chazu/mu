@@ -11,11 +11,11 @@ import (
 
 // PluginDef defines a plugin as declared in mu.json.
 type PluginDef struct {
-	Name      string   `json:"name"`       // logical name, matches target toolchain field
-	Command   []string `json:"command"`     // command to spawn, relative to project root
-	Script    string   `json:"script"`      // CAS-extracted file path (any executable)
-	Toolchain string   `json:"toolchain"`   // runtime toolchain (e.g. "bb"); empty = direct execution
-	WorkDir   string   `json:"work_dir"`    // if set, plugin cwd is this directory (for bundled plugins)
+	Name      string   `json:"name"`      // logical name, matches target toolchain field
+	Command   []string `json:"command"`   // command to spawn, relative to project root
+	Script    string   `json:"script"`    // CAS-extracted file path (any executable)
+	Toolchain string   `json:"toolchain"` // runtime toolchain (e.g. "bb"); empty = direct execution
+	WorkDir   string   `json:"work_dir"`  // if set, plugin cwd is this directory (for bundled plugins)
 }
 
 // Manager manages the lifecycle of plugin processes and routes requests.

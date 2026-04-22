@@ -26,8 +26,8 @@ import (
 
 // Sandbox manages a temporary rootfs for executing a build action.
 type Sandbox struct {
-	rootDir string   // the temp directory serving as our rootfs
-	workDir string   // working directory inside rootfs for the action
+	rootDir string    // the temp directory serving as our rootfs
+	workDir string    // working directory inside rootfs for the action
 	store   cas.Store // CAS for unpacking toolchain blobs
 }
 

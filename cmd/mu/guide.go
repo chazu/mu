@@ -459,6 +459,51 @@ KEY DESIGN PRINCIPLE
   {"path": "...", "content": "..."} — it doesn't know about pudl, CUE,
   or drift reports. It just makes the file match the config. Any mu plugin
   works whether the target came from pudl or a hand-written mu.json.
+
+PUDL AS A BUILD TARGET
+
+  pudl can also run inside the build graph as a consumer of another
+  target's declared outputs. The common case: run terraform (or any
+  toolchain that emits state/artifacts) and feed the result into pudl
+  in a single 'mu build' invocation.
+
+    {
+      "targets": [
+        {
+          "target": "//infra/vpc",
+          "toolchain": "terraform",
+          "sources": ["infra/vpc/*.tf"],
+          "config": {"dir": "infra/vpc"}
+        },
+        {
+          "target": "//pudl/vpc-catalog",
+          "toolchain": "pudl",
+          "deps": ["//infra/vpc"],
+          "config": {"from": "terraform_state"}
+        }
+      ]
+    }
+
+  The terraform plugin declares outputs:
+
+    "declared_outputs": {
+      "terraform_state":   "infra/vpc/state.json",
+      "terraform_outputs": "infra/vpc/outputs.json"
+    }
+
+  mu threads those into the pudl plan request as:
+
+    "deps": [{"target": "//infra/vpc",
+              "artifacts": {"terraform_state": "infra/vpc/state.json",
+                            "terraform_outputs": "infra/vpc/outputs.json"}}]
+
+  A pudl plugin that declares an action with
+  inputs = {"state": "infra/vpc/state.json"} gets an implicit
+  DependsOn edge to the terraform show action, so the DAG runs the
+  producer first and the consumer after.
+
+  See 'mu guide protocol' for the declared_outputs / deps[].artifacts
+  contract and how to consume cross-target artifacts from a plugin.
 `)
 }
 
@@ -731,7 +776,7 @@ METHODS
     Request:  {
       "method": "plan",
       "target": {"name": "//app", "toolchain": "go", "sources": [...], "config": {...}},
-      "deps": [{"target": "//lib", "artifacts": {"binary": "sha256:..."}}],
+      "deps": [{"target": "//lib", "artifacts": {"binary": "lib/libfoo.a"}}],
       "toolchain_artifacts": {"go": "/path/to/go"}
     }
     Response: {
@@ -785,6 +830,21 @@ INTER-ACTION REFERENCES
   Inputs can reference outputs of other actions in the same subgraph:
     "inputs": {"lib.a": "{action:compile-lib}"}
   mu resolves these to the actual output digests after execution.
+
+CROSS-TARGET ARTIFACTS
+
+  A plan request includes "deps", one entry per listed dependency:
+    "deps": [{"target": "//lib/crypto",
+              "artifacts": {"go_library": "lib/crypto/libcrypto.a"}}]
+  The artifacts map comes from each dep's declared_outputs (artifact-type
+  name → project-relative path). To consume one, declare the path as a
+  normal input:
+    "inputs": {"cryptolib": "lib/crypto/libcrypto.a"}
+  mu detects that the path is produced by an already-planned action,
+  defers the input digest, and injects an implicit DependsOn edge to the
+  producing action so the consumer runs after the producer.
+
+  See 'mu guide pudl' for the terraform → pudl ingest end-to-end example.
 `)
 }
 

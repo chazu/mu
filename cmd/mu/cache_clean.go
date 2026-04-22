@@ -65,11 +65,11 @@ func runCacheClean(args []string) int {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(map[string]any{
-			"dry_run":      *dryRun,
-			"removed":      removed,
+			"dry_run":       *dryRun,
+			"removed":       removed,
 			"removed_count": len(removed),
-			"freed_bytes":  totalBytes,
-			"freed":        formatSize(totalBytes),
+			"freed_bytes":   totalBytes,
+			"freed":         formatSize(totalBytes),
 		})
 		return 0
 	}

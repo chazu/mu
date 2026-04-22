@@ -7,6 +7,75 @@ import (
 	"github.com/chau/mu/internal/config"
 )
 
+// TestPlan_CrossTargetArtifact exercises the full cross-target artifact
+// pipeline:
+//  1. A producer target declares an output path AND declared_outputs.
+//  2. A consumer target depends on the producer; its plugin sees the
+//     artifact path via DepInfo.Artifacts and emits an action that uses
+//     the path as an input.
+//  3. The coordinator populates DepInfo.Artifacts, tracks producer paths,
+//     and wires a cross-target DependsOn edge so the consumer's action
+//     runs only after the producer's.
+//
+// The producer's output file never exists on disk during planning, so a
+// correct implementation must defer the input digest (zero placeholder)
+// rather than erroring on a missing file.
+func TestPlan_CrossTargetArtifact(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{
+				{Name: "//producer", Toolchain: "producer"},
+				{Name: "//consumer", Toolchain: "consumer", Deps: []string{"//producer"}},
+			},
+			Plugins: []config.PluginDef{
+				{Name: "producer", Command: mockPluginCommand(t, "mock_plugin_producer.sh")},
+				{Name: "consumer", Command: mockPluginCommand(t, "mock_plugin_consumer.sh")},
+			},
+		},
+		Store:   newTestStore(t),
+		Workers: 1,
+	}
+
+	plan, err := c.Plan(context.Background(), []string{"//consumer"})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Graph == nil {
+		t.Fatal("Plan returned nil Graph")
+	}
+
+	producerID := "//producer:emit"
+	consumerID := "//consumer:ingest"
+
+	producer := plan.Graph.Action(producerID)
+	if producer == nil {
+		t.Fatalf("producer action %q missing from graph", producerID)
+	}
+	consumer := plan.Graph.Action(consumerID)
+	if consumer == nil {
+		t.Fatalf("consumer action %q missing from graph", consumerID)
+	}
+
+	// The consumer must have a DependsOn edge back to the producer —
+	// injected by Resolve when it detected the cross-target path.
+	got := map[string]bool{}
+	for _, d := range consumer.DependsOn {
+		got[d] = true
+	}
+	if !got[producerID] {
+		t.Errorf("consumer.DependsOn missing cross-target edge to %q; got %v",
+			producerID, consumer.DependsOn)
+	}
+
+	// The consumer's "state" input must be a deferred zero-digest
+	// placeholder (file doesn't exist at plan time).
+	if !consumer.Inputs["state"].IsZero() {
+		t.Errorf("consumer input %q should be deferred (zero digest), got %v",
+			"state", consumer.Inputs["state"])
+	}
+}
+
 func TestPlan_SingleTarget(t *testing.T) {
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),

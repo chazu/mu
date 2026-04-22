@@ -217,7 +217,6 @@ func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
 	return nil
 }
 
-
 // loadFile reads and unmarshals a single JSON config file.
 func loadFile(path string) (*ProjectConfig, error) {
 	data, err := os.ReadFile(path)

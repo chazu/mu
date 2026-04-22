@@ -69,10 +69,10 @@ type Preprocessor struct {
 // It declares the entrypoint, optional runtime toolchain, and files to
 // include in the CAS bundle.
 type PluginManifest struct {
-	Entrypoint string   `json:"entrypoint"`           // relative path to the executable within the plugin dir
-	Toolchain  string   `json:"toolchain,omitempty"`   // runtime toolchain (e.g. "bb"); empty = direct execution
-	Files      []string `json:"files,omitempty"`        // files to include in CAS bundle; empty = all files
-	Guide      string   `json:"guide,omitempty"`        // relative path to a guide text file (bundled automatically)
+	Entrypoint string   `json:"entrypoint"`          // relative path to the executable within the plugin dir
+	Toolchain  string   `json:"toolchain,omitempty"` // runtime toolchain (e.g. "bb"); empty = direct execution
+	Files      []string `json:"files,omitempty"`     // files to include in CAS bundle; empty = all files
+	Guide      string   `json:"guide,omitempty"`     // relative path to a guide text file (bundled automatically)
 }
 
 // PluginConfig is the structure of a plugin directory's mu.json.
@@ -88,11 +88,21 @@ type CacheConfig struct {
 	Backends     []CacheBackend `json:"backends,omitempty"`
 	ReadRepair   bool           `json:"read_repair,omitempty"`
 	WriteThrough bool           `json:"write_through,omitempty"`
+	Push         *CachePush     `json:"push,omitempty"`
+}
+
+// CachePush configures the target of `mu cache push`. Registry is the OCI
+// registry host (e.g. "registry.loosh.cloud"); Repository is the repository
+// path within that registry (e.g. "mu-cache"). Both must be set for push to
+// succeed.
+type CachePush struct {
+	Registry   string `json:"registry,omitempty"`
+	Repository string `json:"repository,omitempty"`
 }
 
 // CacheBackend describes a single cache backend (disk or OCI registry).
 type CacheBackend struct {
-	Type     string `json:"type"`              // "disk" or "oci"
+	Type     string `json:"type"`               // "disk" or "oci"
 	Path     string `json:"path,omitempty"`     // for disk
 	Registry string `json:"registry,omitempty"` // for oci
 	MaxSize  string `json:"max_size,omitempty"`

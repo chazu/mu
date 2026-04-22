@@ -13,12 +13,12 @@ import (
 
 // Result reports the outcome of a single scenario.
 type Result struct {
-	Name     string        `json:"name"`
-	Status   string        `json:"status"` // "pass" | "fail" | "skip" | "error"
-	Reason   string        `json:"reason,omitempty"`
-	Elapsed  time.Duration `json:"elapsed_ns"`
-	Request  any           `json:"request,omitempty"`
-	Actual   any           `json:"actual,omitempty"`
+	Name    string        `json:"name"`
+	Status  string        `json:"status"` // "pass" | "fail" | "skip" | "error"
+	Reason  string        `json:"reason,omitempty"`
+	Elapsed time.Duration `json:"elapsed_ns"`
+	Request any           `json:"request,omitempty"`
+	Actual  any           `json:"actual,omitempty"`
 }
 
 // RunOptions tunes the Runner.

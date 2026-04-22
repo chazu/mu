@@ -22,6 +22,11 @@ CONFIG FIELDS
   auto_approve     Include apply step (default: true).
                    When false, only init + plan are run.
   parallelism      Max concurrent Terraform operations (optional).
+  emit_state       Emit terraform state + outputs as JSON (default: true).
+                   Produces state.json via `terraform show -json` and
+                   outputs.json via `terraform output -json`, declared as
+                   artifact types `terraform_state` and `terraform_outputs`
+                   for downstream consumers (e.g. pudl).
 
 EXAMPLES
 
@@ -45,13 +50,24 @@ OBSERVATION (DRIFT DETECTION)
 
 ACTIONS GENERATED
 
-  tf-init     Runs 'terraform init' with backend config.
-  tf-plan     Runs 'terraform plan'. Depends on tf-init.
-              Uses -detailed-exitcode for change detection.
-  tf-apply    Runs 'terraform apply -auto-approve'. Depends on tf-plan.
+  init        Runs 'terraform init' with backend config.
+  plan        Runs 'terraform plan'. Depends on init.
+              Produces tfplan binary plan file.
+  apply       Runs 'terraform apply tfplan'. Depends on plan.
               Only generated when auto_approve is true.
+  show        Runs 'terraform show -json' and 'terraform output -json',
+              writing state.json and outputs.json. Depends on apply
+              (or plan in plan-only mode). Only generated when
+              emit_state is true.
 
 All actions are marked impure and require network access.
+
+DECLARED OUTPUTS (when emit_state is true)
+
+  terraform_state     state.json   Full resource graph from `terraform show -json`
+  terraform_outputs   outputs.json Declared outputs from `terraform output -json`
+
+Downstream targets can depend on these via deps and read the JSON artifacts.
 
 CAPABILITIES
 

@@ -7,17 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
 )
 
 // runPluginStatus reconciles plugins declared in mu.json against plugins
 // materialized under ~/.mu/plugins. Each plugin lands in one of:
 //
-//   ok      — declared with a digest and that digest is present in the cache
-//   missing — declared with a digest but the cache has no matching blob
-//   stale   — cached blob(s) exist for this plugin, but none match the
-//             declared digest (e.g. a digest was bumped in mu.json)
-//   local   — declared as a local script / command / url; no cache check
+//	ok      — declared with a digest and that digest is present in the cache
+//	missing — declared with a digest but the cache has no matching blob
+//	stale   — cached blob(s) exist for this plugin, but none match the
+//	          declared digest (e.g. a digest was bumped in mu.json)
+//	local   — declared as a local script / command / url; no cache check
 func runPluginStatus(args []string) int {
 	fs := flag.NewFlagSet("plugin status", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -38,11 +37,11 @@ func runPluginStatus(args []string) int {
 	pluginsDir := filepath.Join(home, ".mu", "plugins")
 
 	type statusEntry struct {
-		Name          string `json:"name"`
-		Declared      string `json:"declared"`           // digest / script path / url / command
-		DeclaredKind  string `json:"declared_kind"`      // digest | script | url | command
-		CachedDigest  string `json:"cached_digest,omitempty"`
-		State         string `json:"state"`              // ok | missing | stale | local
+		Name         string `json:"name"`
+		Declared     string `json:"declared"`      // digest / script path / url / command
+		DeclaredKind string `json:"declared_kind"` // digest | script | url | command
+		CachedDigest string `json:"cached_digest,omitempty"`
+		State        string `json:"state"` // ok | missing | stale | local
 	}
 
 	var items []statusEntry

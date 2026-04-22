@@ -13,12 +13,12 @@ import (
 
 // fakeStore is an in-memory cas.Store with injectable failure hooks.
 type fakeStore struct {
-	mu        sync.Mutex
-	blobs     map[string][]byte          // "alg:hash" -> bytes
-	actions   map[string]cas.ActionResult // "alg:hash" (from ActionKey) -> result
-	FailGet   error
-	FailPut   error
-	FailHas   error
+	mu         sync.Mutex
+	blobs      map[string][]byte           // "alg:hash" -> bytes
+	actions    map[string]cas.ActionResult // "alg:hash" (from ActionKey) -> result
+	FailGet    error
+	FailPut    error
+	FailHas    error
 	FailAction error // applies to both Get/PutActionResult
 }
 

@@ -54,7 +54,7 @@ type ActionKey struct {
 
 // ActionResult holds the outputs and exit code produced by an action.
 type ActionResult struct {
-	Outputs  map[string]Digest `json:"outputs"`   // output name -> content digest
+	Outputs  map[string]Digest `json:"outputs"` // output name -> content digest
 	ExitCode int               `json:"exit_code"`
 }
 

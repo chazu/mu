@@ -88,7 +88,7 @@ func TestValidate_DuplicateTargetNames(t *testing.T) {
 func TestValidate_MultipleErrors(t *testing.T) {
 	cfg := &ProjectConfig{
 		Targets: []Target{
-			{Name: "", Toolchain: ""},          // two errors: missing name and toolchain
+			{Name: "", Toolchain: ""},           // two errors: missing name and toolchain
 			{Name: "bad-name", Toolchain: "go"}, // one error: no // prefix
 		},
 	}

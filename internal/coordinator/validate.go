@@ -81,7 +81,7 @@ func compileFieldSchema(targetName string, schema map[string]any) (*jsonschema.S
 		}
 		// Strip fields that aren't standard JSON Schema keywords but are
 		// used by the legacy convention.
-		delete(clone, "default")  // compiled schema doesn't need defaults
+		delete(clone, "default") // compiled schema doesn't need defaults
 		reqFlag, _ := clone["required"].(bool)
 		delete(clone, "required") // legacy per-field flag
 

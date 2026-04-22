@@ -10,7 +10,7 @@ const ProtocolVersion = 1
 type Request struct {
 	Method             string            `json:"method"`                        // "discover", "plan", "observe", or "resolve_secret"
 	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan" and "observe"
-	Deps               []DepInfo         `json:"deps,omitempty"`               // set for "plan"
+	Deps               []DepInfo         `json:"deps,omitempty"`                // set for "plan"
 	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan" and "observe"
 	Secrets            map[string]string `json:"secrets,omitempty"`             // set for "observe" — resolved sealed input values
 	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret"
@@ -21,8 +21,8 @@ type DiscoverResponse struct {
 	Name            string         `json:"name"`
 	Version         string         `json:"version"`
 	ProtocolVersion int            `json:"protocol_version"`
-	Consumes        []string       `json:"consumes"`              // artifact types this plugin can consume
-	Produces        []string       `json:"produces"`              // artifact types this plugin can produce
+	Consumes        []string       `json:"consumes"` // artifact types this plugin can consume
+	Produces        []string       `json:"produces"` // artifact types this plugin can produce
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
 	Capabilities    []string       `json:"capabilities,omitempty"` // supported methods, e.g. ["discover","plan","observe"]
 }
@@ -70,8 +70,8 @@ type PlanResponse struct {
 
 // TargetInfo carries the build file declaration for a target.
 type TargetInfo struct {
-	Name         string            `json:"name"`                    // e.g. "//lib/crypto"
-	Toolchain    string            `json:"toolchain"`               // e.g. "go"
+	Name         string            `json:"name"`      // e.g. "//lib/crypto"
+	Toolchain    string            `json:"toolchain"` // e.g. "go"
 	Sources      []string          `json:"sources"`
 	Config       map[string]any    `json:"config,omitempty"`
 	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env var name -> secret reference (e.g. "pass:deploy/token")
@@ -88,14 +88,14 @@ type DepInfo struct {
 type ActionSpec struct {
 	ID           string            `json:"id"`
 	Command      []string          `json:"command"`
-	Inputs       map[string]string `json:"inputs"`                 // name -> file path or "{action:id}" reference
-	Outputs      []string          `json:"outputs"`                // declared output file paths
-	DependsOn    []string          `json:"depends_on,omitempty"`   // intra-subgraph action IDs
+	Inputs       map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
+	Outputs      []string          `json:"outputs"`              // declared output file paths
+	DependsOn    []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
 	Env          map[string]string `json:"env,omitempty"`
 	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env var name -> secret reference (e.g. "pass:deploy/token")
 	Network      bool              `json:"network,omitempty"`
-	WorkDir      string            `json:"work_dir,omitempty"`     // relative to project root (default: project root)
-	Impure       bool              `json:"impure,omitempty"`       // skip CAS cache
+	WorkDir      string            `json:"work_dir,omitempty"` // relative to project root (default: project root)
+	Impure       bool              `json:"impure,omitempty"`   // skip CAS cache
 
 	// TimeoutS is the per-attempt wall-clock timeout in seconds. 0 = no
 	// timeout (legacy). Applies to all actions regardless of Network.

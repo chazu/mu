@@ -455,7 +455,7 @@ func TestBuild_VerifyFailure(t *testing.T) {
 func TestBuild_ManifestPersistsToCAS(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{
 		"bin/persist": "#!/bin/sh\necho persist 1.0\n",
-		"data.txt":   "some data",
+		"data.txt":    "some data",
 	})
 	hash := sha256Hex(archive)
 

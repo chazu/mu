@@ -174,6 +174,8 @@ mu observe --json //home/odroid | pudl ingest-observe
 
 `pudl ingest-observe` reads the JSON array, iterates each target's `current.records`, and stores each record as an individual observe entry. Records with a `_schema` field (e.g. `"linux.host"`) are routed to the corresponding pudl schema (e.g. `pudl/linux.#Host`). Records without `_schema` are stored as `pudl/mu.#ObserveResult`.
 
+Ingest can also run **inside the build graph** as a pudl target that depends on another target's declared outputs — e.g. ingesting a `terraform` target's state in the same `mu build` invocation. See [Cross-target artifacts](#cross-target-artifacts) and [Example: terraform → pudl ingest](#example-terraform--pudl-ingest).
+
 #### Output formats
 
 `--json` preserves target context and is the format pudl expects:
@@ -208,6 +210,94 @@ Targets are declared in `mu.json` and describe what to build:
 ```
 
 Source paths support glob patterns (`*`, `?`, `[...]`). Globs are expanded at config load time relative to the project root, so `cmd/server/*.go` matches all `.go` files in that directory. Literal (non-glob) paths pass through as-is. Recursive `**` patterns are not currently supported.
+
+### Cross-target artifacts
+
+A target can consume artifacts produced by its dependencies. The producing plugin declares what it produces via `declared_outputs` (a map from artifact-type name to a project-relative file path); the consuming plugin sees those entries under `deps[].artifacts` in its plan request and can declare them as inputs.
+
+Producer (`plan` response):
+
+```json
+{
+  "actions": [
+    {"id": "show", "command": ["sh", "-c", "terraform show -json > state.json"],
+     "inputs": {}, "outputs": ["infra/vpc/state.json"], "depends_on": ["apply"]}
+  ],
+  "declared_outputs": {"terraform_state": "infra/vpc/state.json"}
+}
+```
+
+Consumer (`plan` request, received from mu):
+
+```json
+{
+  "method": "plan",
+  "target": {"name": "//pudl/ingest-vpc", "toolchain": "pudl", ...},
+  "deps": [
+    {"target": "//infra/vpc",
+     "artifacts": {"terraform_state": "infra/vpc/state.json"}}
+  ]
+}
+```
+
+Consumer (`plan` response — declare the path as an input):
+
+```json
+{
+  "actions": [
+    {"id": "ingest", "command": ["pudl", "ingest-terraform", "infra/vpc/state.json"],
+     "inputs": {"state": "infra/vpc/state.json"}, "outputs": ["ingested.db"]}
+  ],
+  "declared_outputs": {"catalog": "ingested.db"}
+}
+```
+
+When mu resolves the consumer's actions, it detects that `"infra/vpc/state.json"` is a path produced by `//infra/vpc:show` and:
+
+1. Adds an implicit `DependsOn` edge from `//pudl/ingest-vpc:ingest` to `//infra/vpc:show` so the DAG runs the producer first.
+2. Stores a zero-digest placeholder for that input (the file doesn't exist at plan time).
+3. Runs the producer's action, which materializes `infra/vpc/state.json` on disk.
+4. Runs the consumer's action in the same project root — the file is there, so the command works.
+
+Paths in `declared_outputs` are project-relative. Plugins are free to ignore `deps[].artifacts` entirely if they don't consume upstream outputs.
+
+### Example: terraform → pudl ingest
+
+Build infrastructure with the `terraform` plugin and feed its state into pudl in a single build:
+
+```json
+{
+  "targets": [
+    {
+      "target": "//infra/vpc",
+      "toolchain": "terraform",
+      "sources": ["infra/vpc/*.tf"],
+      "config": {"dir": "infra/vpc", "auto_approve": true}
+    },
+    {
+      "target": "//pudl/vpc-catalog",
+      "toolchain": "pudl",
+      "deps": ["//infra/vpc"],
+      "config": {"from": "terraform_state"}
+    }
+  ]
+}
+```
+
+The `terraform` plugin emits three action types (`init`, `plan`, `apply`) plus a `show` action that writes `state.json` and `outputs.json` via `terraform show -json` and `terraform output -json`. The `show` action declares:
+
+```json
+{
+  "declared_outputs": {
+    "terraform_state":   "infra/vpc/state.json",
+    "terraform_outputs": "infra/vpc/outputs.json"
+  }
+}
+```
+
+A pudl target that depends on `//infra/vpc` receives `{"terraform_state": "infra/vpc/state.json", "terraform_outputs": "infra/vpc/outputs.json"}` in `deps[0].artifacts` and can declare either file as an input. `mu build //pudl/vpc-catalog` will run terraform first and pudl second.
+
+Set `"emit_state": false` in the terraform target config to suppress the `show` action when downstream pudl ingestion isn't wanted. With `"auto_approve": false`, `show` runs after `plan` instead of `apply` (state reflects existing infrastructure rather than newly-applied changes).
 
 ### BRICK Classification
 
@@ -390,14 +480,22 @@ A plugin implements these methods:
 **`plan`** (required) — given a target, returns an action subgraph:
 
 ```json
-← {"method": "plan", "target": {"name": "//cmd/server", "toolchain": "go",
-   "sources": ["main.go"], "config": {"output": "server"}}}
+← {"method": "plan",
+   "target": {"name": "//cmd/server", "toolchain": "go",
+              "sources": ["main.go"], "config": {"output": "server"}},
+   "deps": [
+     {"target": "//lib/crypto",
+      "artifacts": {"go_library": "lib/crypto/libcrypto.a"}}
+   ],
+   "toolchain_artifacts": {"sdk": "sha256:..."}}
 → {"actions": [{"id": "compile", "command": ["go", "build", "-o", "server", "."],
    "inputs": {"src": "main.go"}, "outputs": ["server"], "env": {}}],
    "declared_outputs": {"executable": "server"}}
 ```
 
 The coordinator resolves file paths to content digests, merges subgraphs from all targets into a unified DAG, checks the cache, and executes uncached actions in parallel.
+
+`deps[].artifacts` is a map from artifact-type name → project-relative path, populated from each dep's `declared_outputs`. A plugin that needs a dep's output declares the path as one of its action `inputs` — mu wires an implicit DependsOn edge to the producing action (see [Cross-target artifacts](#cross-target-artifacts)). `toolchain_artifacts` carries the active toolchain's content-addressed artifacts (scratch-built) so the plugin can reference them in commands.
 
 **`observe`** *(optional)* — reports current state of a resource for drift detection:
 

@@ -43,10 +43,10 @@ func DefaultLayerPolicy() LayerPolicy { return LayerPolicy{Read: true, Write: tr
 // Errors from non-layer-0 writes are surfaced via Observer and swallowed —
 // remote pushes are best-effort.
 type Tiered struct {
-	Layers     []Store
-	LayerNames []string // parallel to Layers; index used when missing
-	Policies   []LayerPolicy
-	ReadRepair bool
+	Layers       []Store
+	LayerNames   []string // parallel to Layers; index used when missing
+	Policies     []LayerPolicy
+	ReadRepair   bool
 	WriteThrough bool
 	Observer     func(TieredEvent)
 }
