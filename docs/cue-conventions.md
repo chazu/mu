@@ -1,5 +1,9 @@
 # CUE Conventions for `mu` Build Configs
 
+## Status
+
+The `mu.json` → `mu.cue` migration is complete; CUE is the canonical configuration format.
+
 This document defines the authoring conventions for `mu.cue` project
 configurations. It complements the migration scout report at
 [`scout-cue-migration.md`](scout-cue-migration.md) and is the canonical reference
