@@ -6,7 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // FindProjectRoot walks up from startDir looking for a directory that
@@ -179,10 +182,15 @@ func isGlob(s string) bool {
 }
 
 // expandSourceGlobs expands glob patterns in target source lists. Patterns
-// are matched relative to the project root. Non-glob entries pass through
-// unchanged. A glob that matches no files is kept as-is (the downstream
-// resolve step will report the missing file).
+// are matched relative to the project root and support doublestar (**)
+// semantics (e.g. "src/**/*.go" matches *.go files at any depth under
+// src/). Non-glob entries pass through unchanged. A glob that matches no
+// files is kept as-is (the downstream resolve step will report the
+// missing file). Matches whose path contains any hidden segment (a
+// component beginning with ".") are excluded, mirroring the hidden-dir
+// skipping done during config discovery.
 func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
+	fsys := os.DirFS(projectRoot)
 	for i := range cfg.Targets {
 		t := &cfg.Targets[i]
 		var expanded []string
@@ -191,30 +199,51 @@ func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
 				expanded = append(expanded, src)
 				continue
 			}
-			pattern := filepath.Join(projectRoot, src)
-			matches, err := filepath.Glob(pattern)
+			// doublestar operates on io/fs paths which always use "/".
+			pattern := filepath.ToSlash(src)
+			if !doublestar.ValidatePattern(pattern) {
+				return fmt.Errorf("target %q: invalid glob %q", t.Name, src)
+			}
+			matches, err := doublestar.Glob(fsys, pattern)
 			if err != nil {
 				return fmt.Errorf("target %q: invalid glob %q: %w", t.Name, src, err)
 			}
-			if len(matches) == 0 {
+			// Filter out hidden segments (e.g. .git/foo.go) and sort.
+			filtered := matches[:0]
+			for _, m := range matches {
+				if hasHiddenSegment(m) {
+					continue
+				}
+				filtered = append(filtered, m)
+			}
+			if len(filtered) == 0 {
 				// No matches — keep the literal pattern so the resolve
 				// step can report a clear error about the missing file.
 				expanded = append(expanded, src)
 				continue
 			}
-			// Convert back to project-relative paths.
-			// filepath.Glob returns results in lexical order.
-			for _, m := range matches {
-				rel, err := filepath.Rel(projectRoot, m)
-				if err != nil {
-					rel = m
-				}
-				expanded = append(expanded, rel)
+			sort.Strings(filtered)
+			for _, m := range filtered {
+				expanded = append(expanded, filepath.FromSlash(m))
 			}
 		}
 		t.Sources = expanded
 	}
 	return nil
+}
+
+// hasHiddenSegment reports whether any path component of p (split on "/")
+// starts with a dot, excluding "." and ".." themselves.
+func hasHiddenSegment(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." || seg == "" {
+			continue
+		}
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // loadFile reads and unmarshals a single JSON config file.
