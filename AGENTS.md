@@ -38,3 +38,16 @@ bd sync               # Sync with git
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
+## Build config format
+
+Project build configs are authored in CUE (`mu.cue`). See
+[`docs/cue-conventions.md`](docs/cue-conventions.md) for the full reference.
+
+- Minimum CUE version: **`v0.11.0`** (recommended `>= v0.13.0`).
+- Every project root needs a `cue.mod/module.cue` pinning `language.version`.
+- Scripts live under `mu/scripts/`; shared CUE fragments under `mu/config/`
+  (imported as packages, not `@embed`ed).
+- Use `@embed` only for small (< 1 KB) literal blobs; reference larger content
+  as sibling files so the loader can hash it into the action cache key.
+- Run `cue vet` and `mu validate` before committing config changes.
+
