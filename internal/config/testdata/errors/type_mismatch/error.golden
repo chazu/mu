@@ -1,0 +1,2 @@
+unifying mu.cue with #ProjectConfig:
+  target //foo/bar: field sources: expected list, got int (value 123) at mu.cue:6:14

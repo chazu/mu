@@ -1,0 +1,2 @@
+validating mu.cue against #ProjectConfig:
+  target //foo/bar: field toolchain: missing required field at schema.cue:38:37

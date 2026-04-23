@@ -52,10 +52,10 @@ func (cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
 	}
 	unified := projectDef.Unify(val)
 	if err := unified.Err(); err != nil {
-		return nil, fmt.Errorf("unifying mu.cue with #ProjectConfig: %w", err)
+		return nil, formatCueError("unifying mu.cue with #ProjectConfig", val, err)
 	}
 	if err := unified.Validate(cue.Concrete(true)); err != nil {
-		return nil, fmt.Errorf("validating mu.cue against #ProjectConfig: %w", err)
+		return nil, formatCueError("validating mu.cue against #ProjectConfig", val, err)
 	}
 	var cfg ProjectConfig
 	if err := unified.Decode(&cfg); err != nil {
@@ -78,10 +78,10 @@ func (cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
 	}
 	unified := pluginDef.Unify(val)
 	if err := unified.Err(); err != nil {
-		return nil, fmt.Errorf("unifying mu.cue with #PluginConfig: %w", err)
+		return nil, formatCueError("unifying mu.cue with #PluginConfig", val, err)
 	}
 	if err := unified.Validate(cue.Concrete(true)); err != nil {
-		return nil, fmt.Errorf("validating mu.cue against #PluginConfig: %w", err)
+		return nil, formatCueError("validating mu.cue against #PluginConfig", val, err)
 	}
 	var cfg PluginConfig
 	if err := unified.Decode(&cfg); err != nil {
