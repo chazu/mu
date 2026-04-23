@@ -27,6 +27,8 @@ func main() {
 		os.Exit(runVerify(os.Args[2:]))
 	case "guide":
 		os.Exit(runGuide(os.Args[2:]))
+	case "migrate":
+		os.Exit(runMigrate(os.Args[2:]))
 	case "version":
 		fmt.Println("mu v0.1.0")
 	default:
@@ -47,5 +49,6 @@ Commands:
   observe    Check current state of targets (drift detection)
   verify     Re-hash CAS blobs and report corruption
   guide      Quick-reference guides for mu features
+  migrate    Convert mu.json to mu.cue
   version    Print the mu version`)
 }
