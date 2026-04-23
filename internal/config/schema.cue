@@ -30,7 +30,7 @@ package mu
 
 // #TargetName matches either a fully-qualified label ("//path/to/name")
 // or a bare identifier used inside plugin configs ("build").
-#TargetName: =~"^(//[A-Za-z0-9_][A-Za-z0-9_./-]*|[A-Za-z0-9_][A-Za-z0-9_.-]*)$"
+#TargetName: =~"^(//[A-Za-z0-9_][A-Za-z0-9_.:/-]*|[A-Za-z0-9_][A-Za-z0-9_.-]*)$"
 
 // #Target describes a single build target.
 #Target: {

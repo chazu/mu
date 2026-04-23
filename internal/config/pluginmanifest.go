@@ -16,7 +16,18 @@ import (
 // loadJSONPluginManifest, which is the jsonDecoder implementation of
 // Decoder.DecodePlugin.
 func LoadPluginManifest(pluginDir string) (*PluginConfig, error) {
-	return defaultDecoder().DecodePlugin(pluginDir)
+	name, err := probeConfigFile(pluginDir)
+	if err != nil {
+		return nil, err
+	}
+	switch name {
+	case configFileCUE:
+		return cueDecoder{}.DecodePlugin(pluginDir)
+	case configFileJSON:
+		return jsonDecoder{}.DecodePlugin(pluginDir)
+	default:
+		return nil, fmt.Errorf("reading plugin manifest: no mu.cue or mu.json in %s", pluginDir)
+	}
 }
 
 // loadJSONPluginManifest is the legacy JSON implementation of
