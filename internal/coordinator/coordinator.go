@@ -46,6 +46,11 @@ type Coordinator struct {
 	// VerboseSink receives tagged plugin stderr when Verbose is true.
 	// Defaults to os.Stderr when nil and Verbose is true.
 	VerboseSink io.Writer
+
+	// SubprocessStdout overrides where action subprocess stdout is written.
+	// Nil means os.Stdout. Set to os.Stderr when stdout is reserved for
+	// structured output (e.g. `mu build --emit-manifest`).
+	SubprocessStdout io.Writer
 }
 
 // BuildResult summarises the outcome of a build.
@@ -284,7 +289,7 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	executor := &dag.Executor{Store: c.Store, Workers: workers, ResolvedSecrets: plan.ResolvedSecrets}
+	executor := &dag.Executor{Store: c.Store, Workers: workers, ResolvedSecrets: plan.ResolvedSecrets, SubprocessStdout: c.SubprocessStdout}
 	execResult, err := executor.Execute(ctx, plan.Graph)
 	if err != nil {
 		return nil, fmt.Errorf("coordinator: execution: %w", err)

@@ -67,6 +67,13 @@ func runBuild(args []string) int {
 		Verbose:           cli.Verbose,
 	}
 
+	// When emitting a manifest to stdout, redirect action subprocess
+	// stdout to stderr so colored tofu/terraform logs don't contaminate
+	// the JSON manifest downstream pipelines consume.
+	if *emitManifest {
+		c.SubprocessStdout = os.Stderr
+	}
+
 	if len(cli.Config.Toolchains) > 0 && cli.Store != nil {
 		c.Builder = &scratch.Builder{
 			Store:    cli.Store,

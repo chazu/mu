@@ -27,6 +27,9 @@ CONFIG FIELDS
                    outputs.json via `terraform output -json`, declared as
                    artifact types `terraform_state` and `terraform_outputs`
                    for downstream consumers (e.g. pudl).
+  binary           Override the CLI to invoke. Accepts a command name or
+                   absolute path. If unset, prefers `tofu` (OpenTofu)
+                   when on PATH, else falls back to `terraform`.
 
 EXAMPLES
 

@@ -17,10 +17,22 @@
 ;;                    after apply (or after plan in plan-only mode), capturing
 ;;                    state.json and outputs.json as CAS outputs so downstream
 ;;                    targets (e.g. pudl) can consume them. Default: true.
+;;   binary         - terraform-compatible CLI to invoke. If unset, prefers
+;;                    `tofu` (OpenTofu) when on PATH, else falls back to
+;;                    `terraform`. Accepts any command name or absolute path.
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
+         '[babashka.fs :as fs]
          '[babashka.process :as process])
+
+(defn resolve-bin
+  "Resolve which terraform-compatible CLI to invoke. Config `binary`
+  takes precedence; otherwise prefer `tofu` on PATH, else `terraform`."
+  [config]
+  (or (get config "binary")
+      (when (fs/which "tofu") "tofu")
+      "terraform"))
 
 (defn handle-discover []
   {"name"             "terraform"
@@ -34,12 +46,13 @@
                        "backend_config" {"type" "object"}
                        "auto_approve"   {"type" "boolean" "default" true}
                        "parallelism"    {"type" "integer"}
-                       "emit_state"     {"type" "boolean" "default" true}}})
+                       "emit_state"     {"type" "boolean" "default" true}
+                       "binary"         {"type" "string"}}})
 
 (defn build-init-cmd
   "Build terraform init command with backend config flags."
   [config]
-  (let [cmd ["terraform" "init" "-input=false"]]
+  (let [cmd [(resolve-bin config) "init" "-input=false" "-no-color"]]
     (if-let [bc (get config "backend_config")]
       (into cmd (map (fn [[k v]] (str "-backend-config=" k "=" v)) bc))
       cmd)))
@@ -47,7 +60,7 @@
 (defn build-plan-cmd
   "Build terraform plan command."
   [config]
-  (cond-> ["terraform" "plan" "-input=false" "-out=tfplan"]
+  (cond-> [(resolve-bin config) "plan" "-input=false" "-no-color" "-out=tfplan"]
     (get config "var_file")
     (conj (str "-var-file=" (get config "var_file")))
     (get config "parallelism")
@@ -56,7 +69,7 @@
 (defn build-apply-cmd
   "Build terraform apply command."
   [config]
-  (cond-> ["terraform" "apply" "-input=false" "-auto-approve" "tfplan"]
+  (cond-> [(resolve-bin config) "apply" "-input=false" "-no-color" "-auto-approve" "tfplan"]
     (get config "parallelism")
     (conj (str "-parallelism=" (get config "parallelism")))))
 
@@ -78,7 +91,6 @@
                      "inputs"     {}
                      "outputs"    []
                      "depends_on" []
-                     "env"        {}
                      "network"    true
                      "impure"     true
                      "work_dir"   dir}
@@ -89,7 +101,6 @@
                      "inputs"     inputs
                      "outputs"    [(str dir "/tfplan")]
                      "depends_on" ["init"]
-                     "env"        {}
                      "network"    true
                      "impure"     true
                      "work_dir"   dir}
@@ -100,8 +111,7 @@
                       "inputs"     {}
                       "outputs"    []
                       "depends_on" ["plan"]
-                      "env"        {}
-                      "network"    true
+                       "network"    true
                       "impure"     true
                       "work_dir"   dir}
 
@@ -112,15 +122,16 @@
         ;; are declared, so the file is always present for downstream
         ;; targets to read.
         show-depends (if auto? ["apply"] ["plan"])
+        bin          (resolve-bin config)
         show-action  {"id"         "show"
                       "command"    ["sh" "-c"
-                                    "terraform show -json > state.json && terraform output -json > outputs.json"]
+                                    (str bin " show -json > state.json && "
+                                         bin " output -json > outputs.json")]
                       "inputs"     {}
                       "outputs"    [(str dir "/state.json")
                                     (str dir "/outputs.json")]
                       "depends_on" show-depends
-                      "env"        {}
-                      "network"    true
+                       "network"    true
                       "impure"     true
                       "work_dir"   dir}
 
@@ -149,7 +160,7 @@
           (throw (ex-info "terraform init failed" {:output (:err init-result)}))))
 
       ;; Then run terraform plan -detailed-exitcode
-      (let [plan-cmd (cond-> ["terraform" "plan" "-input=false" "-detailed-exitcode"]
+      (let [plan-cmd (cond-> [(resolve-bin config) "plan" "-input=false" "-no-color" "-detailed-exitcode"]
                        (get config "var_file")
                        (conj (str "-var-file=" (get config "var_file"))))
             result   (process/sh plan-cmd {:dir dir})]

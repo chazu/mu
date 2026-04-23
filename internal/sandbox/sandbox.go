@@ -29,6 +29,18 @@ type Sandbox struct {
 	rootDir string    // the temp directory serving as our rootfs
 	workDir string    // working directory inside rootfs for the action
 	store   cas.Store // CAS for unpacking toolchain blobs
+
+	// Stdout overrides where the sandboxed command's stdout is written.
+	// Nil means os.Stdout.
+	Stdout io.Writer
+}
+
+// stdoutWriter returns the configured stdout target, defaulting to os.Stdout.
+func (s *Sandbox) stdoutWriter() io.Writer {
+	if s.Stdout != nil {
+		return s.Stdout
+	}
+	return os.Stdout
 }
 
 // New creates a Sandbox with a fresh temporary directory.
@@ -149,7 +161,7 @@ func (s *Sandbox) Exec(ctx context.Context, command []string, env map[string]str
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = s.workDir
 	cmd.Env = s.buildEnv(env)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = s.stdoutWriter()
 	cmd.Stderr = os.Stderr
 
 	err := cmd.Run()

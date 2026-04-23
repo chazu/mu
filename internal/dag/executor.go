@@ -41,6 +41,19 @@ type Executor struct {
 	Store           cas.Store
 	Workers         int                          // 0 means runtime.NumCPU()
 	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
+	// SubprocessStdout overrides where action stdout is written. Nil
+	// means os.Stdout. Set to os.Stderr when the caller is using
+	// stdout for structured output (e.g. `mu build --emit-manifest`).
+	SubprocessStdout io.Writer
+}
+
+// subprocessStdout returns the configured stdout target for action
+// subprocesses, defaulting to os.Stdout.
+func (e *Executor) subprocessStdout() io.Writer {
+	if e.SubprocessStdout != nil {
+		return e.SubprocessStdout
+	}
+	return os.Stdout
 }
 
 // Execute runs all actions in the graph, respecting dependencies.
@@ -290,7 +303,7 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 	cmd := exec.CommandContext(ctx, a.Command[0], a.Command[1:]...)
 	cmd.Dir = a.WorkDir
 	cmd.Env = buildEnv(env)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = e.subprocessStdout()
 	cmd.Stderr = os.Stderr
 
 	err := cmd.Run()
@@ -311,6 +324,7 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[stri
 		return -1, fmt.Errorf("create sandbox: %w", err)
 	}
 	defer sb.Cleanup()
+	sb.Stdout = e.SubprocessStdout
 
 	// Unpack toolchain into sandbox rootfs.
 	if err := sb.UnpackToolchain(ctx, a.Toolchain); err != nil {
