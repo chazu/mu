@@ -395,8 +395,11 @@ func hasHiddenSegment(p string) bool {
 	return false
 }
 
-// loadFile reads and unmarshals a single JSON config file.
+// loadFile reads and unmarshals a single JSON config file. Loading any
+// mu.json file emits a one-line deprecation warning to stderr (at most
+// once per process); see warnJSONDeprecated.
 func loadFile(path string) (*ProjectConfig, error) {
+	warnJSONDeprecated()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
