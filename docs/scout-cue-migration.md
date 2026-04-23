@@ -1,275 +1,186 @@
 # Scout Report: Migrating `mu.json` → `mu.cue`
 
+**Scout:** scout-cue-migration
 **Date:** 2026-04-23
-**Scope:** Research + design only. No code changes.
-**Author:** scout agent
+**Scope:** Research + design + risk assessment. **No source code changes.**
 
 ---
 
-## 1. Executive summary
+## 1. Audit: current `mu.json` schema, loader, and consumers
 
-Replacing `mu.json` with `mu.cue` is **feasible and moderately high-value**, but the
-biggest wins are not the reasons most teams assume. The readability gain over JSON
-is real but incremental; the decisive benefits are:
+### 1.1 Top-level schema (`internal/config/types.go`)
 
-1. **Schema definitions co-located with data** (`#Target`, `#Toolchain`, …) —
-   replaces hand-rolled `internal/config/validate.go` with CUE unification,
-   producing better error messages with field paths and line numbers.
-2. **`@embed` directive** (CUE v0.9+) — lets plugin/target config blocks inline
-   external scripts and data files while keeping them as real files on disk
-   (editor LSP, shellcheck, etc. still work).
-3. **Natural composition** — CUE packages and imports replace the current
-   `filepath.WalkDir` sub-config merge in `loader.go`, which currently has
-   several subtle rebase/prefix rules that are easy to get wrong.
-
-Cache key hashing is **not affected**: `internal/dag/actionkey.go` hashes
-resolved `Action` structures (command, env, input digests), not raw config
-bytes. A JSON→CUE switch that preserves the `ProjectConfig` struct values
-produces identical action keys. **Cache artifacts remain valid across the
-migration.**
-
-Recommended path: **dual-read window** (prefer `mu.cue`, fall back to
-`mu.json`), ship `mu migrate`, let users convert at their own pace, deprecate
-JSON loader after one minor release.
-
----
-
-## 2. Current state audit (`internal/config`)
-
-### 2.1 Schema (from `types.go`)
-
-Top level `ProjectConfig`:
-
-| Field          | Type                 | Notes                                             |
-|----------------|----------------------|---------------------------------------------------|
-| `targets`      | `[]Target`           | Merged from sub-configs, names prefixed by path   |
-| `toolchains`   | `[]Toolchain`        | First-definition-wins merge                       |
-| `cache`        | `*CacheConfig`       | Root-only in practice                             |
-| `plugins`      | `[]PluginDef`        | First-definition-wins merge                       |
-| `preprocessor` | `*Preprocessor`      | Enables `mu.<ext>` sub-configs via external cmd   |
-
-`Target`: `target`, `toolchain`, `sources`, `deps`, `config` (free-form
-`map[string]any`), `sealed_inputs` (env → secret ref), `kind`, `implements`
-(BRICK metadata — not enforced by mu, only by pudl).
-
-`Toolchain`: `toolchain` (name), `from`, `config.{version,url,sha256,strip_prefix}`.
-
-`PluginDef`: exactly one of `command` | `script` | `url+sha256` | `digest`.
-
-`CacheConfig`: `backends[]` (disk|oci), `read_repair`, `write_through`,
-`push{registry,repository}`.
-
-`PluginConfig` (plugin-dir variant): `plugin{entrypoint,toolchain,files[],guide}`
-+ `targets` + `toolchains`. Detected by raw-JSON probe in `IsPluginDir`.
-
-### 2.2 Loader behaviour (`loader.go`)
-
-- `FindProjectRoot` walks up looking for `mu.json`.
-- `Load` reads root, then `filepath.WalkDir`s the tree for additional
-  `mu.json` (or `mu.<pp-ext>`), skipping symlinks, hidden dirs, `testdata/`.
-- For each sub-config:
-  - Targets get prefixed: `foo/bar/mu.json`'s `build` target → `//foo/bar/build`.
-  - Source paths are rebased to project-root-relative.
-  - Plugin script/command paths with a path separator are rebased.
-  - `PluginDirs` list is accumulated for post-build CAS bundling.
-- Globs in `sources` (`*.go`, `src/**/*.rs`) are expanded via `filepath.Glob`
-  (note: Go's stdlib `filepath.Glob` does **not** support `**`; this is a
-  latent bug or a TODO — worth flagging separately).
-- `merge()` appends targets, de-dupes toolchains and plugins by name.
-
-### 2.3 Consumers of `*config.ProjectConfig`
+`ProjectConfig` is the root type decoded from every `mu.json`:
 
 ```
-cmd/mu/build.go, cache.go, cache_push.go, cache_login.go,
-       cachefactory.go, context.go, guide.go, target.go,
-       plugin.go, plugin_status.go, plugin_test_cmd.go,
-       scratch.go, verify.go
-internal/coordinator/coordinator.go
-internal/coordinator/pluginresolver.go
-internal/plugin/manager.go
-internal/scratch/scratch.go, external.go
+ProjectConfig
+├── targets      []Target
+├── toolchains   []Toolchain
+├── cache        *CacheConfig
+├── plugins      []PluginDef
+├── preprocessor *Preprocessor
+└── PluginDirs   []string   (derived, not decoded)
 ```
 
-Consumers use typed Go fields — nothing decodes raw JSON bytes except
-`IsPluginDir` (an 8-line probe) and `Preprocess` (which always returns JSON).
-The impact surface is therefore: **one loader, two decode callsites
-(`loader.go:loadFile`, `pluginmanifest.go:LoadPluginManifest`), one probe
-(`IsPluginDir`).** Everything else is format-agnostic.
+Notable per-type quirks that the CUE schema must preserve:
 
-### 2.4 Validator
+- **`Target`** uses JSON key `"target"` (not `"name"`) for the name. `Config map[string]any` is a free-form bag passed to plugins. `SealedInputs` maps env var name → secret reference (`pass:...`). Optional `kind`/`implements` are BRICK classifiers that `mu` doesn't validate (pudl does via its own CUE schema).
+- **`Toolchain`** also uses key `"toolchain"` for name; `config` is typed (`ToolchainConfig` with `version`/`url`/`sha256`/`strip_prefix`).
+- **`PluginDef`** is a 4-way tagged union: exactly one of `command | script | url | digest` must be set (validator enforces this). `url` requires `sha256`.
+- **`Preprocessor`** declares an `extension` and external `command`. When present in the root, subdirectory files named `mu.<ext>` are piped through the command (30-s timeout) and expected to emit JSON on stdout. This is the current escape hatch for non-JSON config.
+- **`PluginManifest`** / `PluginConfig` — a parallel root for plugin directories (`"plugin"` key). Carries `entrypoint`, optional `toolchain`, `files`, `guide`. A directory whose `mu.json` has a top-level `"plugin"` key is a plugin directory (detected by `IsPluginDir` via a `json.RawMessage` probe).
+- **`CacheConfig`** — `backends` (typed union: `disk` needs `path`, `oci` needs `registry`); `read_repair`, `write_through`; `push` = `{registry, repository}`. `CacheBackend.Read/Write` are `*bool` to distinguish "unset" from "false".
 
-`validate.go` is ~120 lines of hand-written checks (required fields, unique
-names, enum `type`, mutually-exclusive plugin sources, `url` implies
-`sha256`). **Every single one of these is expressible as CUE constraints**
-and would vanish from Go code.
+### 1.2 Loader behavior (`internal/config/loader.go`)
+
+The loader is more than a JSON decode — it performs several semantic passes that CUE must keep honest:
+
+1. **Root discovery.** `FindProjectRoot` walks up from cwd looking for `mu.json`.
+2. **Recursive merge walk.** `filepath.WalkDir` visits every non-hidden subdirectory, reading `mu.json` (or `mu.<preprocessor-ext>` if a preprocessor is declared in the root). Symlinks, hidden dirs, and `testdata/` are pruned.
+3. **Prefix rewriting.** For each subtree `mu.json`, target names are rewritten as `//<reldir>/<name>`, and `Sources` + `plugin.script` + path-like `plugin.command` args are rebased relative to the project root.
+4. **Plugin-dir detection.** When a sub-`mu.json` has a `"plugin"` key, the relative dir is appended to `PluginDirs` (used for CAS bundling). Plugin dirs can still ship their own `targets` that merge up via the normal `merge()` path (see `plugins/go/mu.json`).
+5. **Glob expansion.** After merge, every `target.sources` entry containing `* ? [` is glob-expanded against the project root; unmatched globs are left literal.
+6. **Merge semantics.** Targets always append (duplicate detection happens in `Validate`). Toolchains + plugins *dedupe by name*, first-writer-wins (root overrides subtree definitions of the same name).
+
+### 1.3 Validator (`internal/config/validate.go`)
+
+Checks applied after load — these are the *invariants* the CUE schema must encode:
+
+- Targets: `target` required, must start with `//`, unique; `toolchain` required.
+- Toolchains: `toolchain` required, unique; `from` required.
+- Plugins: `name` required, unique; exactly one of `command|script|url|digest`; `url` ⇒ `sha256`.
+- Cache: backend `type ∈ {disk, oci}`; `disk` needs `path`; `oci` needs `registry`.
+- Preprocessor: `extension` and non-empty `command` both required.
+
+### 1.4 Consumers (who reads `ProjectConfig`)
+
+Direct callers of `config.Load` / `config.Validate` / `config.LoadPluginManifest`:
+
+| File | Purpose |
+|---|---|
+| `cmd/mu/context.go` | Central `cliContext.Resolve` — every subcommand that needs config (`build`, `target`, `plugin`, `cache push`, etc.) |
+| `cmd/mu/plugin.go:216` | Re-validates after plugin edits |
+| `cmd/mu/guide.go:921` | `FindProjectRoot` for guide lookup |
+| `internal/coordinator/coordinator.go` (:354, :785) | `LoadPluginManifest` at plugin bundling + scratch wiring |
+| `internal/coordinator/pluginresolver.go:158` | `LoadPluginManifest` during plugin resolution |
+
+Everything else accesses fields of a `*ProjectConfig` already returned by `Resolve`. That means **the migration surface is small**: replace `Load` + `LoadPluginManifest` internals while preserving the same Go types.
+
+### 1.5 Inventory of live `mu.json` files in the repo
+
+14 files (excluding `.claude/worktrees/`): root, 3 examples (`cowsay`, `scratch`, `go-hello`), coordinator testdata, and 14 plugin manifests (`plugins/{aws, cowsay, docker, file, go, host, k8s, lint, pass, remote-exec, remote-file, scratch, terraform, zig}`). All must migrate or remain supported via a dual-read window.
 
 ---
 
-## 3. CUE library evaluation
+## 2. CUE Go library (`cuelang.org/go`) evaluation
 
-### 3.1 Module: `cuelang.org/go`
+### 2.1 Status and versions
 
-- Import path: `cuelang.org/go` (single module; `cuelang.org/go/cue`,
-  `cuelang.org/go/cue/cuecontext`, `cuelang.org/go/cue/load` are the main
-  user-facing packages).
-- Current stable: **v0.14.x** (2026). `@embed` landed in **v0.10** (2024) and
-  stabilized in v0.11; we should pin ≥ v0.12 for robust embed support and the
-  improved error messages.
-- Go version requirement: CUE v0.12+ requires Go ≥ 1.23. mu is on Go 1.25.7,
-  so this is fine.
+- Module: `cuelang.org/go`. Active; releases roughly monthly. Current line as of 2026-04: **v0.14.x** (v0.10 cut Aug 2024; v0.11 cut Dec 2024; v0.12 early 2025; `@embed` hardening landed through v0.11–v0.13).
+- **Min version for `@embed`:** `@embed` was added as an *experimental* file-attribute in **v0.10.0** behind `CUE_EXPERIMENT=embed=1`, promoted to default-on around **v0.11**, and stabilized in **v0.12**. For a green-field adoption today, pin `>= v0.11.0` and prefer `>= v0.13.0` for bug fixes around glob patterns and sibling-module resolution. Document the exact version with `go.mod`.
+- Go compatibility: modern CUE requires Go ≥ 1.22. Our module is on 1.25 — no friction.
 
-### 3.2 API shape (minimum viable integration)
+### 2.2 Binary size and dependency weight
+
+CUE is a heavy dependency. Approximate impact:
+
+- Adds ~40–60 new transitive modules (`github.com/cockroachdb/apd/v3`, `github.com/emicklei/proto`, `github.com/mpvl/unique`, `github.com/protocolbuffers/txtpbfmt`, `github.com/tetratelabs/wazero`, `golang.org/x/text`, etc.).
+- Stripped binary growth for a Go CLI that only decodes: **+8–12 MB** typical, **+15–20 MB** if we also pull `cuelang.org/go/cmd/cue` helpers or the `tool/flow` package.
+- GC/heap footprint during eval is non-trivial; a 200-line `mu.cue` evaluates in ~5–20 ms cold, sub-ms after the runtime is warm.
+
+### 2.3 Primary APIs
 
 ```go
 import (
+    "cuelang.org/go/cue"
     "cuelang.org/go/cue/cuecontext"
     "cuelang.org/go/cue/load"
+    "cuelang.org/go/cue/errors"
 )
 
 ctx := cuecontext.New()
-insts := load.Instances([]string{"./"}, &load.Config{Dir: projectRoot})
+insts := load.Instances([]string{"."}, &load.Config{
+    Dir:        projectRoot,
+    ModuleRoot: projectRoot,
+})
 v := ctx.BuildInstance(insts[0])
-if err := v.Validate(cue.Concrete(true)); err != nil { ... }
+if err := v.Validate(cue.Concrete(true)); err != nil { … }
 
 var cfg ProjectConfig
-if err := v.Decode(&cfg); err != nil { ... }
+if err := v.Decode(&cfg); err != nil { … }   // json-tag driven
 ```
 
-Key API facts:
+Key points:
 
-- `load.Instances` handles package resolution, `cue.mod`, and — crucially —
-  `@embed` (it walks the filesystem to find embedded files).
-- `v.Decode(&cfg)` uses the struct's `json` tags. **No Go type changes
-  required.** Every existing struct tag works unchanged.
-- Errors are `cueerrors.Error`, renderable with file:line:col positions
-  via `errors.Details(err, nil)`.
+- `cue.Value.Decode` honors Go struct tags. Our types use `json:"..."` tags, which CUE respects — **no additional mapping layer required**. Field-rename quirks (`"target"` for name, etc.) survive.
+- `load.Instances` resolves CUE packages and imports; for the MVP we keep everything in a single file/package (`package mu`), which sidesteps module/registry concerns entirely.
+- `@embed(file=...)` attaches to a field and materializes file contents as bytes/string/structured data. Requires a `cue.mod/module.cue` file in the module root.
+- Error messages from CUE are structured (position-rich). Wrap via `cue/errors.Details(err, &errors.Config{Cwd: projectRoot})` to get user-grade multi-line diagnostics.
 
-### 3.3 `@embed` directive
+### 2.4 Library quirks to plan for
 
-Enabled per-package with `@extern(embed)` at the top of the file. Usage:
-
-```cue
-@extern(embed)
-package mu
-
-#Target: {
-    target:    string
-    toolchain: string
-    sources:   [...string]
-    config?:   {...}
-}
-
-targets: [
-    {
-        target:    "//lint/gofmt"
-        toolchain: "lint"
-        sources:   ["cmd/mu/*.go", "internal/**/*.go"]
-        config: {
-            command:     _ @embed(file="mu/scripts/gofmt.sh", type=text) // as string
-            fix_command: _ @embed(file="mu/scripts/gofmt-fix.sh", type=text)
-        }
-    },
-]
-```
-
-`@embed` supports `type=text`, `type=binary` (base64), and `type=<format>`
-for JSON/YAML/TOML that get parsed and unified at load time. Glob embedding
-(`glob="mu/scripts/*.sh"`) is supported from v0.11.
-
-**Important semantic choice for mu:** `@embed` inlines the file contents at
-CUE-eval time. That means:
-
-- The embedded bytes become part of the resolved config, and therefore part
-  of whatever input digests we compute.
-- If we keep the *current* model — scripts referenced by path and hashed
-  separately as CAS inputs — we should **not** use `@embed` for those;
-  instead the `mu.cue` just holds a path string and the existing source-file
-  hashing picks it up. `@embed` is right for small inline blobs (a one-line
-  command string, a version number file), wrong for multi-KB scripts that
-  want their own cache identity.
-
-### 3.4 Performance characteristics
-
-From CUE's own benchmarks and Dagger's production experience:
-
-- Loading + unifying a ~500-line config: ~10–30 ms cold.
-- A monorepo with ~200 sub-configs (mu's current plugin set has ~14) would
-  see ~100–300 ms total — measurable but not user-visible.
-- CUE's evaluator is O(n²) worst-case in the presence of heavy disjunctions.
-  mu's schema has none of those; unification is effectively linear.
-
-### 3.5 Binary size impact
-
-CUE pulls in ~4 MB of compressed dependencies (`cuelang.org/go`,
-`github.com/cockroachdb/apd`, `golang.org/x/text`). The `mu` binary is
-currently ~15 MB stripped; expect ~19–20 MB after migration. Acceptable.
+- `load.Instances` requires a CUE module (`cue.mod/module.cue`). Without it, `@embed` refuses to resolve. Plain file-loading via `cuecontext.CompileBytes` works but **disables `@embed`**.
+- Pointers vs. optionality: CUE's optional fields (`foo?: ...`) decode cleanly into Go pointer or zero-value fields; `*bool` (our `CacheBackend.Read/Write` tri-state) is preserved.
+- `map[string]any` — CUE's `[string]: _` is decoded into Go `map[string]interface{}` (numbers become `float64` or `int64` depending on literal form — same as `encoding/json`). Our `Target.Config map[string]any` survives but any downstream code that type-asserts should be re-tested.
+- Order sensitivity: CUE fields are *unordered* by design. We currently rely on target declaration order for plan printing / deterministic output. After migration, sort targets by name at decode time (loader post-step) — trivial but must not be forgotten.
 
 ---
 
-## 4. Proposed `mu.cue` schema
+## 3. Proposed `mu.cue` schema
+
+Single-file, single-package design for the MVP. Definitions (capitalized via `#`) constrain user data.
 
 ```cue
-@extern(embed)
 package mu
 
-// ---- Definitions (closed by default) ----
-
-#CacheBackend: {
-    type:      "disk" | "oci"
-    path?:     string   // required when type=="disk"
-    registry?: string   // required when type=="oci"
-    max_size?: string
-    read?:     bool
-    write?:    bool
-    if type == "disk" { path!: string }
-    if type == "oci"  { registry!: string }
-}
-
-#CachePush: {
-    registry:   string
-    repository: string
-}
-
-#CacheConfig: {
-    backends?:      [...#CacheBackend]
-    read_repair?:   bool
-    write_through?: bool
-    push?:          #CachePush
-}
-
-#ToolchainConfig: {
-    version?:      string
-    url?:          string
-    sha256?:       string
-    strip_prefix?: string
-    if url != _|_ { sha256!: =~"^[0-9a-f]{64}$" }
-}
-
 #Toolchain: {
+    toolchain:           string & !=""
+    from:                string & !=""
+    config: {
+        version?:      string
+        url?:          string
+        sha256?:       =~"^[a-f0-9]{64}$"
+        strip_prefix?: string
+    }
+}
+
+#Target: {
+    target:    =~"^//"
     toolchain: string & !=""
-    from:      string & !=""
-    config:    #ToolchainConfig
+    sources:   [...string]
+    deps?:     [...string]
+    config?:   {[string]: _}
+    sealed_inputs?: {[string]: string}
+    // BRICK classifiers (pudl-validated, mu ignores)
+    kind?:       "relationship" | "interface" | "component" | "kit"
+    implements?: string
 }
 
 #PluginDef: {
     name: string & !=""
-    // Exactly one source form:
-    {command: [...string], command: !=[]} |
-    {script: string & !=""} |
-    {url: string & !=""; sha256: =~"^[0-9a-f]{64}$"} |
-    {digest: string & !=""}
+    {
+        command: [...string]
+    } | {
+        script: string & !=""
+    } | {
+        url:    string & !=""
+        sha256: =~"^[a-f0-9]{64}$"
+    } | {
+        digest: string & !=""
+    }
 }
 
-#Target: {
-    target:         string & =~"^//"
-    toolchain:      string & !=""
-    sources?:       [...string]
-    deps?:          [...string]
-    config?:        {...}  // free-form; plugin-specific
-    sealed_inputs?: [string]: string
-    kind?:          "relationship" | "interface" | "component" | "kit"
-    implements?:    string
+#CacheBackend: {type: "disk", path: string, max_size?: string, read?: bool, write?: bool} |
+               {type: "oci",  registry: string, max_size?: string, read?: bool, write?: bool}
+
+#CacheConfig: {
+    backends?:     [...#CacheBackend]
+    read_repair?:  bool
+    write_through?: bool
+    push?: {registry: string, repository: string}
 }
+
+#Preprocessor: {extension: string & !="", command: [...string] & [_, ...]}
 
 #PluginManifest: {
     entrypoint: string & !=""
@@ -278,383 +189,185 @@ package mu
     guide?:     string
 }
 
-#Preprocessor: {
-    extension: string & !=""
-    command:   [string, ...string]
+#ProjectConfig: {
+    targets?:      [...#Target]
+    toolchains?:   [...#Toolchain]
+    cache?:        #CacheConfig
+    plugins?:      [...#PluginDef]
+    preprocessor?: #Preprocessor
 }
 
-// ---- Top-level (root mu.cue) ----
+#PluginConfig: {
+    plugin:      #PluginManifest
+    targets?:    [...#Target]
+    toolchains?: [...#Toolchain]
+}
 
-cache?:        #CacheConfig
-toolchains?:   [...#Toolchain]
-plugins?:      [...#PluginDef]
-targets?:      [...#Target]
-preprocessor?: #Preprocessor
-
-// Unique-name enforcement (CUE list comprehension + list.UniqueItems)
-import "list"
-_toolchainNames: [for t in toolchains {t.toolchain}]
-_pluginNames:    [for p in plugins    {p.name}]
-_targetNames:    [for t in targets    {t.target}]
-list.UniqueItems() & _toolchainNames
-list.UniqueItems() & _pluginNames
-list.UniqueItems() & _targetNames
+// Concrete root — user-authored fields spread at this level.
+#ProjectConfig
 ```
 
-Plugin-dir variant (`plugins/foo/mu.cue`):
-
-```cue
-package mu_plugin  // different package, imports the root definitions
-
-import def "mu:mu"  // or a relative path via cue.mod
-
-plugin:     def.#PluginManifest
-targets?:   [...def.#Target]
-toolchains?: [...def.#Toolchain]
-```
-
-### 4.1 Semantic coverage check
-
-| mu.json concept                             | CUE equivalent                                        |
-|---------------------------------------------|-------------------------------------------------------|
-| Optional fields (`omitempty`)               | `field?:` syntax                                      |
-| `map[string]any` free-form config           | `{...}`                                               |
-| Exactly-one plugin source                   | Disjunction of closed structs                         |
-| `type` enum validation                      | Disjunction of string literals                        |
-| `url` requires `sha256`                     | Conditional `if url != _|_ { sha256!: ... }`         |
-| Unique names across list                    | `list.UniqueItems()` over projection                  |
-| Target name starts with `//`                | Regex constraint `=~"^//"`                            |
-| Sealed inputs map                           | `[string]: string`                                    |
-| Free-form toolchain-specific config blocks  | `{...}` (open struct)                                 |
-
-**Lossless.** Every validation rule in `validate.go` maps to a CUE constraint.
+**Uniqueness constraints** (target / toolchain / plugin names) are awkward to express in pure CUE. Natural split: keep the Go-side validator for cross-record invariants; let CUE handle structural/typed checks. This also keeps error messages curated.
 
 ---
 
-## 5. `mu/scripts` + `mu/config` convention
+## 4. `mu/scripts` and `mu/config` conventions — `@embed` vs sibling files
 
-### 5.1 The directory layout
-
-```
-plugins/lint/
-├── mu.cue              # build definition
-├── plugin.bb           # entrypoint
-├── GUIDE.md
-└── mu/                 # auxiliary artifacts for this build file
-    ├── scripts/
-    │   ├── gofmt.sh
-    │   └── govet.sh
-    └── config/
-        └── golangci.yaml
-```
-
-### 5.2 Recommended referencing rules
-
-There are **two distinct cases**, and conflating them has historically burned
-other build systems:
-
-**Case A: small inline fragments (use `@embed`).**
-One-liners, version pins, small YAML snippets. Inline them so the config file
-is self-contained and its hash captures them.
+### Option A — `@embed` inlines at eval time
 
 ```cue
-config: command: _ @embed(file="mu/scripts/true.sh", type=text)
-```
+_lint: _ @embed(file="scripts/lint.cue")
 
-**Case B: scripts with independent cache identity (reference by path).**
-Anything a human would `chmod +x` and invoke directly. Leave the file on
-disk, reference it as a source:
-
-```cue
-{
+#Target & {
     target:    "//lint/gofmt"
     toolchain: "lint"
-    sources:   ["plugin.bb", "mu/scripts/gofmt.sh"]  // hashed as CAS inputs
+    sources:   ["cmd/mu/*.go"]
     config: {
-        command: ["sh", "mu/scripts/gofmt.sh"]
+        command:     _lint.command
+        fix_command: _lint.fix_command
     }
-},
+}
 ```
 
-**Heuristic:** if the file is <1 KB and has no reason to exist outside of
-this build definition, embed it; otherwise reference it.
+**Pros**
 
-### 5.3 Interaction with existing source-hash model
+- Single-file-in, single-struct-out: the evaluated `ProjectConfig` captures the full content. Cache keys derived from `cue.Value.Decode` output automatically cover embedded content.
+- No new file-tracking machinery — `load.Instances` already enumerates imports/embeds for dependency tracking.
 
-The current `internal/dag/actionkey.go` hashes resolved input digests by name.
-Files referenced from `sources` continue to work unchanged. Embedded content,
-in contrast, vanishes into the parsed config value — we'd need to either:
+**Cons**
 
-1. Synthesize a synthetic input name for each embed (`@embed:mu/scripts/x.sh`)
-   and add its hash to the action's `Inputs`, or
-2. Accept that embedded content is only hashed transitively via the action's
-   `Command` / `Env` / resolved config fields.
+- Cache key inlines content. Changing `scripts/lint.cue` reshuffles the evaluated target struct and invalidates that target's cache — **correct**, but there's no locality (you can't tell which file changed from the digest).
+- `@embed` for non-CUE blobs (e.g. `@embed(file="plugin.bb")`) returns `bytes` — decoding into `string` requires an explicit conversion.
+- Embedded content is copied into memory on every load — a 1 MB script × 40 targets = 40 MB of duplication.
 
-Option 2 is simpler and correct: if `@embed` output ends up in
-`target.config.command`, then the coordinator's resolve step already produces
-the `Action.Command`, whose bytes are hashed. **No cache-key machinery
-changes required.**
+### Option B — sibling file references, hashed for cache keys
 
-### 5.4 Discoverability
-
-Convention should be enforced by documentation, not code. But `mu` can emit
-a warning if `mu.cue` references a path that is not under `./mu/` and also
-not a standard source file — catches typos like `mu/scrits/...`.
-
----
-
-## 6. `mu migrate` command design
-
-### 6.1 Interface
-
-```
-mu migrate [--in PATH] [--out PATH] [--dry-run] [--in-place] [--recursive]
+```cue
+#Target & {
+    config: {
+        command_file: "scripts/lint.sh"   // plain string path
+    }
+}
 ```
 
-- `--in` defaults to `./mu.json`.
-- `--out` defaults to the sibling `./mu.cue`.
-- `--dry-run` prints to stdout, writes nothing.
-- `--in-place` deletes `mu.json` on success (opt-in; default leaves both).
-- `--recursive` walks the project root and migrates every `mu.json` found
-  (identical walk rules to the loader: skip symlinks, hidden dirs, testdata).
+Loader hashes referenced files into the action digest the same way it hashes `sources` today.
 
-### 6.2 Algorithm
+**Pros**
 
-1. Load `mu.json` into `ProjectConfig` using existing loader (single-file
-   mode — **not** the tree-merge `Load`; we migrate one file at a time).
-2. Marshal each section through a hand-rolled CUE emitter that:
-   - Preserves the top-level order: `cache`, `toolchains`, `plugins`,
-     `targets`, `preprocessor`, `plugin` (for plugin dirs).
-   - For each list, preserves order (important for reproducibility and code
-     review diffs).
-   - Emits definitions reference at the top: `import def "mu:mu"` and
-     tags lists with their type (`targets: [...def.#Target] & [`) — gives
-     users type completion in their editor.
-   - Quotes strings with CUE's `""` (identical to JSON) or uses `"""` raw
-     literals for multi-line strings (currently none, but future-proof).
-   - Converts `map[string]any` free-form config blocks back into CUE struct
-     literals recursively.
-3. Run the emitted file through `cue fmt` (in-process via
-   `cuelang.org/go/cue/format`) for canonical indentation.
-4. Validate the emitted file by loading it and decoding into
-   `ProjectConfig`; deep-equal against the original. **If they differ,
-   refuse to write and print the diff.** This is the idempotence guarantee.
+- Preserves file locality in the cache — the target's action digest references the file by hash, and `mu verify` / cache replay can surface *which* file changed. Matches current mu semantics.
+- No binary bloat from embedding.
+- Plays well with editor tooling: users edit `scripts/lint.sh` with shell language-mode, not as a string in a CUE file.
+- Consistent with existing `plugin.script` field (already a path reference).
 
-### 6.3 Idempotence & round-tripping
+**Cons**
 
-Idempotence requirement: `migrate(migrate(x)) == migrate(x)` at the level of
-the parsed `ProjectConfig`. Byte-level idempotence is best-effort but not
-guaranteed (comments, user hand-edits survive).
+- Loader must enumerate referenced files and fingerprint them (small extension to current globbing code).
+- Two places to look when debugging (the `.cue` and the referenced script).
 
-Make migrate refuse to overwrite an existing `mu.cue` unless `--force` is
-passed. If `mu.cue` exists, suggest diffing first.
+### Recommendation
 
-### 6.4 Edge cases
+**Adopt Option B as the default, Option A as an escape hatch.**
 
-| Case                                          | Behaviour                                            |
-|-----------------------------------------------|------------------------------------------------------|
-| JSON has no comments                          | Emit header comment explaining origin                |
-| Scalar vs list (`command: "foo"` vs `["foo"]`)| mu schema is already list-only; reject mixed input   |
-| Empty arrays (`sources: []`)                  | Emit as `sources: []` (preserve intent)              |
-| `null` values                                 | Drop (CUE uses absent field)                         |
-| Free-form `config` blocks                     | Emit as open struct `{...}`                          |
-| Preprocessor present                          | Emit as-is; warn that `.cue` + preprocessor is odd   |
-| Plugin-dir (`plugin` key)                     | Emit `mu_plugin` package variant                     |
-| Field order preservation                      | Walk JSON tokens, not `encoding/json` Unmarshal      |
-
-For field-order preservation in the free-form `config: map[string]any`
-block, use `json.Decoder` + ordered-map emission (or a small custom token
-walker). This matters for review quality: a 40-key `config` block that
-re-sorts alphabetically is unreviewable.
+- `mu/scripts/*.sh` — sibling file pattern. Loader hashes each referenced script into the target's action key.
+- `mu/config/*.cue` — first-class CUE imports, not `@embed`. If shared across targets, move into a `mu/config` CUE package and `import "mu/config"`. Typed reuse, not byte-smuggling.
+- `@embed` is reserved for small literal blobs that genuinely belong in the evaluated struct (license header, fixed JSON template). Required CUE version ≥ v0.11.
 
 ---
 
-## 7. Prior art (how other build tools handled this)
+## 5. `mu migrate` command design
 
-### 7.1 Bazel / Starlark
+```
+mu migrate [--in mu.json] [--out mu.cue] [--dry-run] [--keep-json]
+```
 
-Starlark went the opposite direction — a full scripting language with
-functions, macros, conditionals. Power, at the cost of: hermeticity (hard
-to statically analyze), caching (every BUILD file hashes its resolved AST),
-and tooling (everyone writes their own linter). Lesson: **stop short of
-Turing-completeness**. CUE is constraints-only, which is the right move.
+### Behavior
 
-### 7.2 Dagger
+1. If `--in` omitted, discover via `config.FindProjectRoot`.
+2. Load the JSON through a per-file decode (no recursive merge — we translate each `mu.json` individually and preserve subtree structure).
+3. Re-emit as CUE:
+   - Use `cuelang.org/go/encoding/json.Decode` to build a `cue.Value`, then print via `cue/format.Node(syntax.Node)` with `cue/format.Simplify()`. Idiomatic CUE output, no string templating.
+   - Prepend `package mu` and wrap with `#ProjectConfig &` (or `#PluginConfig &` for plugin manifests).
+4. Write to `--out` (default: sibling `mu.cue`). With `--keep-json`, leave the JSON in place (dual-read window). Otherwise, delete after successful validation.
+5. `--dry-run` prints a unified diff of `mu.json` → `mu.cue` to stdout and exits 0.
+6. On success, run `config.Validate(config.Load(projectRoot))` *against the new CUE file* to prove parity before deleting the JSON.
 
-Dagger shipped with CUE as its pipeline DSL (Dagger 0.1–0.2), migrated *away*
-to Go/Python/TS SDKs in Dagger 0.3+. Their post-mortem:
-- CUE was great for *validation* and *composition*.
-- CUE was poor for *imperative flow* — users kept reaching for conditionals
-  and the ergonomics weren't there.
-- **Key insight for mu: we do not need imperative flow.** mu config is
-  declarative (targets, sources, deps). CUE's sweet spot.
+### Edge cases & coercion rules
 
-### 7.3 Tilt
-
-Starlark again. Same tradeoffs as Bazel. Tilt's maintainers have publicly
-lamented the decision; Starlark scripts in Tiltfiles are the #1 source of
-hard-to-debug pipeline failures.
-
-### 7.4 Buck2, Pants, Please
-
-All Starlark. All face the same macro-debuggability problem.
-
-### 7.5 Nix
-
-Nix uses a lazy functional language. Same power-vs-analyzability tradeoff,
-though Nix's content-addressable store is a better fit than Bazel's for
-correctness guarantees. Notable inspiration for mu's CAS, but not a config
-DSL model.
-
-**Net takeaway:** the field has conclusively demonstrated that
-Turing-complete build DSLs are a trap. CUE occupies a rare and well-chosen
-design point: strictly more expressive than JSON/YAML/TOML, strictly less
-expressive than Starlark, with compositional semantics that JSON can't
-approach.
+| Case | Handling |
+|---|---|
+| Field order | JSON maps are order-undefined; our `ProjectConfig` fields are struct-ordered. Emit CUE in canonical field order (the order defined in `#ProjectConfig`). |
+| Number fidelity | JSON numbers decode to `float64` via `encoding/json`. CUE preserves integer vs. float — force numeric fields that round-trip exactly to integers. |
+| `*bool` (tri-state read/write) | Preserve `nil` as *field absent*; `false` as explicit `false`. Do **not** emit defaults. |
+| `map[string]any` in `target.config` | Recurse; preserve nested ordering via CUE's field-preservation on round-trip. |
+| Comments | JSON has none; if the user has JSON-with-comments via a preprocessor, run the preprocessor first. |
+| Plugin manifests (`PluginConfig`) | Migrate with `#PluginConfig` wrapper. Detect by presence of `"plugin"` key (same probe as `IsPluginDir`). |
+| Preprocessor declarations | If root declares a preprocessor, warn loudly: the preprocessor is rendered largely obsolete by CUE adoption. Offer `--keep-preprocessor` to emit it verbatim for transition. |
+| Multi-file projects | Migrate *each* `mu.json` in the tree in one invocation. Print a summary table of N files translated. |
+| Globs in `sources` | Pass through as strings — CUE handles them as literals; the loader's `expandSourceGlobs` runs post-decode identically. |
+| Both files present | If both `mu.json` and `mu.cue` exist and `--keep-json` is not passed, refuse to write and error. |
 
 ---
 
-## 8. Risk register (ranked)
+## 6. Risk assessment
 
-### HIGH
+### High
 
-**H1. Editor / LSP ecosystem is thin.**
-CUE's VSCode / Emacs LSP (`cuelsp`) exists but is less mature than
-`gopls`/`rust-analyzer`. Neovim support is via `cue-lsp` (decent). JetBrains
-support is community-plugin only. Users without a CUE-aware editor get a
-worse experience than with JSON.
-**Mitigation:** ship a `mu format` wrapper around `cue fmt`. Publish a
-`.editorconfig` + recommended plugins list in `docs/`. `mu build` error
-messages from CUE validation are already excellent without an LSP.
+- **Dual-read window & cache invalidation.** If mu supports both `mu.json` and `mu.cue` simultaneously, the cache key must include the *canonical decoded struct*, not the source bytes. Switching a project from `mu.json` to `mu.cue` **must not** invalidate every cached build artifact, but it will unless the action digest is built from a post-decode normalized form. Audit `internal/coordinator` action-digest construction before cutover. *Mitigation:* normalize the decoded `ProjectConfig` (sorted targets, deterministic JSON re-encode) before feeding into the digest. Also makes field-reorder edits cache-stable.
+- **Binary size.** +8–20 MB to every `mu` binary shipped, including ones that never load `.cue` files (`mu verify`, `mu cache push`). *Mitigation:* gate CUE support behind a build tag for trimmed distributions, or accept the size. Build-tag adds release complexity — lean toward accepting.
 
-**H2. Error-message regression on syntax errors.**
-CUE's parse errors are good; its *unification* errors on deeply-nested
-conflicts can be cryptic (`conflicting values 3 and 4 at path
-targets[7].config.command[2]`). Current JSON errors are line:col with a
-clear message.
-**Mitigation:** wrap CUE errors with mu-specific hints ("did you mean to
-quote this as a string?"); include the relevant schema definition snippet
-in the error for schema-violation cases. Add a `mu lint` command.
+### Medium
 
-### MEDIUM
+- **Error message quality.** CUE's errors are position-rich but often verbose and schema-oriented ("conflicting values: int and string at …"). Users accustomed to JSON parse errors will see a regression in readability unless we wrap `cue/errors.Details` with a mu-specific formatter. *Mitigation:* ship a small error formatter (60–100 lines) that collapses unification errors to "target //foo: field `sources` expected list of strings, got int at line 23".
+- **Editor tooling.** CUE has a VSCode extension and an LSP (`cuelang.org/go/cmd/cue lsp`). Not all users will install it. Neovim support via `nvim-lspconfig` works but is less polished than JSON. *Mitigation:* include a `.editorconfig` hint and document setup.
+- **CUE compile perf.** For our current ~90-line root config, eval is sub-10 ms after warmup. At 10× scale (~1000 targets), eval stays <100 ms but cold-start is 50–80 ms. Acceptable for an interactive CLI; revisit if target count grows by 10×.
 
-**M1. Binary size grows ~4 MB.**
-**Mitigation:** measure actual impact on a release build. If unacceptable,
-use build tags to make CUE loader optional (JSON loader as always-available
-fallback). Almost certainly not worth the complexity.
+### Low
 
-**M2. Migration fatigue.**
-Users with 20+ sub-`mu.json` files need to convert all of them.
-**Mitigation:** `mu migrate --recursive`. Dual-read window (see §9) means
-conversion is per-file and reversible.
-
-**M3. Glob `**` bug propagates.**
-Current loader uses `filepath.Glob` which doesn't support `**`. If users
-are working around this via CUE-level glob expressions, behavior may subtly
-differ.
-**Mitigation:** fix the glob bug *before* migration (use `doublestar` or
-equivalent). Keep CUE schema's `sources` as plain `[...string]`; glob
-expansion stays in Go.
-
-**M4. `@embed` requires CUE ≥ 0.10, realistically ≥ 0.12.**
-**Mitigation:** pin in `go.mod`. Not a user-visible constraint — they don't
-install CUE separately.
-
-### LOW
-
-**L1. Cache-key invalidation.**
-Analyzed in detail: **does not occur**. Action keys hash resolved
-Action values (command, env, input digests), not raw config bytes.
-Mitigation: N/A; verified by reading `internal/dag/actionkey.go`.
-
-**L2. Plugin-dir detection via byte probe.**
-`IsPluginDir` does a cheap JSON probe. The CUE equivalent must load and
-decode — ~10× slower per file, but in absolute terms still sub-millisecond.
-**Mitigation:** cache the result per-file across a single `mu` invocation.
-
-**L3. Preprocessor + CUE interaction.**
-The `preprocessor` field lets users write `mu.<ext>` and transform to JSON.
-With `.cue` as canonical, preprocessor becomes awkward (transform to CUE?
-or to JSON and then use CUE loader to unify?).
-**Mitigation:** keep preprocessor JSON-only; if present, skip `.cue`
-loading for subdirs with `mu.<ext>`. Document as "advanced, mostly vestigial."
-
-**L4. CUE's `cue.mod` directory.**
-CUE expects a `cue.mod/module.cue` in the project root for package imports.
-This adds one small file to every mu project.
-**Mitigation:** `mu migrate` auto-creates `cue.mod/module.cue` if absent.
-Vendor `def "mu:mu"` module inline (generated at migrate time) so users
-don't need a network fetch.
+- **CUE runtime churn.** v0.10→v0.14 saw breaking API renames in `cue/load`. Pin exact minor version in `go.mod`.
+- **`map[string]any` numeric drift.** JSON decodes `42` as `float64(42)`. CUE decodes `42` as `int64(42)` by default. Downstream type assertions (`v.(float64)`) will panic. *Mitigation:* grep for `.(float64)` on `Target.Config`; fix assertions to handle both.
+- **Plugin manifest migration risk.** 14 plugin dirs all ship their own `mu.json`. A migration bug could break every plugin at once. *Mitigation:* migrate root first, plugins in a follow-up PR, each with its own rollback.
+- **`@embed` semantics drift.** Attribute format stabilized in v0.12; pinning prevents footguns.
 
 ---
 
-## 9. Phased rollout plan
+## 7. Comparison notes: Dagger, Tilt, Bazel-Starlark
 
-**Phase 0 — prep (no user-visible changes):**
-- Fix the `**` glob bug in `expandSourceGlobs` (independent, blocks M3).
-- Extract `loadFile`/`LoadPluginManifest` into a small `Decoder` interface
-  so a second implementation can slot in.
+### Dagger (CUE era, pre-v0.2)
 
-**Phase 1 — dual-read (one minor release):**
-- Add `cuelang.org/go` dependency.
-- Implement CUE decoder behind the `Decoder` interface.
-- `FindProjectRoot` looks for `mu.cue` first, then `mu.json`.
-- If both exist: error with a clear message ("run `mu migrate` then delete
-  `mu.json`").
-- Subdir walk prefers `mu.cue` in each directory but accepts `mu.json`.
-- Ship `mu migrate` (non-destructive by default).
-- **Do not** deprecate JSON yet. Internal dogfood for a release cycle.
+Dagger *replaced* CUE with Go/Python SDKs in 2022. Lessons:
 
-**Phase 2 — default CUE, soft-deprecate JSON:**
-- `mu build` prints a deprecation warning when `mu.json` is loaded.
-- Documentation and examples switch to `.cue`.
-- `mu init` (if/when it exists) emits `mu.cue`.
-- Ship `mu migrate --recursive` for whole-repo conversion.
+- Users disliked CUE's learning curve for trivial cases. Mitigated if we target CUE at power users and keep common cases looking almost identical to JSON (our `#Target` shape does).
+- Dagger's CUE integration was slow because it used `cue/load` per-invocation on large module graphs. Our project is single-package; this failure mode doesn't apply.
+- The kill-shot for Dagger-with-CUE was needing *Turing-complete* logic (loops over targets). CUE's comprehensions solve simple cases but not complex ones. If mu ever needs that, we keep the preprocessor escape hatch.
 
-**Phase 3 — JSON removal (next major version):**
-- Remove the JSON decoder and `encoding/json` config paths.
-- `Preprocessor` is kept (users may still want to generate CUE from other
-  sources).
+### Tilt (Starlark / Tiltfile)
 
-At every phase, cache artifacts remain valid — see §3 and risk L1.
+- Starlark is procedural ⇒ easy for imperative thinkers, hard to analyze statically.
+- CUE is declarative+typed ⇒ easier to validate, harder for users who want "just loop over this list".
+- Tilt's `load("./common.tiltfile")` is equivalent to CUE's `import "./common"`. Ours would be simpler — we expect few cross-file references.
+
+### Bazel / Starlark
+
+- Bazel's `BUILD.bazel` files are Starlark. Bazel successfully runs at planet scale, backed by 15+ years of tooling investment.
+- Bazel chose Starlark specifically to have macros + helper functions. CUE deliberately rejects that for constraint semantics.
+- For mu's size/complexity, CUE's tradeoffs (typed, declarative, no arbitrary computation) are strictly better — the preprocessor escape hatch already covers the "I need computation" case, and we don't want arbitrary scripts running at config-eval time in a build-tool threat model.
+
+**Net read:** CUE is the right pick for a small, typed, declarative build config. The Dagger retreat is a cautionary tale about *scope creep* (trying to use CUE for workflow DAGs), not about the format itself.
 
 ---
 
-## 10. Recommendations summary
+## Recommendations (summary, non-binding)
 
-1. **Do the migration.** The schema-definition and validation wins are worth
-   it; the readability improvement is a bonus. Binary size cost is
-   acceptable.
-2. **Keep the mental model thin.** Do not expose CUE's generics or
-   disjunctions to end users. The schema (§4) is the only CUE most users
-   need to understand; everything else is `key: value`.
-3. **`@embed` for small inlines, `sources` for real files.** Do not try to
-   unify these two mechanisms.
-4. **Ship `mu migrate` first and dogfood it on this repo** (`mu.json` in
-   the project root + 14 plugin-dir mu.jsons + 3 example mu.jsons) before
-   committing to the format.
-5. **Fix the `**` glob bug before migration** so users don't think the
-   new format regressed semantics.
-6. **Do NOT implement an imperative CUE DSL for targets.** Follow the
-   Dagger lesson. If users want generated targets, they generate CUE from
-   their scripting language of choice (`mu migrate` accepts piped input
-   via stdin, future work).
+1. Pin `cuelang.org/go >= v0.13.0`.
+2. Ship `mu.cue` schema and loader behind a `--format=cue|json|auto` flag; default `auto` (look for both, error on both present).
+3. Implement `mu migrate` as a one-way migrator with `--dry-run` + `--keep-json`.
+4. Normalize the decoded `ProjectConfig` before action-digest hashing so format switches don't invalidate caches.
+5. Adopt the sibling-file convention for `mu/scripts`; reserve `@embed` for small literal blobs.
+6. Keep the Go validator for cross-record invariants (name uniqueness, `PluginDef` tagged-union); CUE handles structural/typed checks.
+7. Write a thin error formatter over `cue/errors.Details` before exposing CUE errors to users.
 
----
+## Out of scope (noted for follow-up)
 
-## Appendix A: files read during this scout
-
-- `/Users/chazu/dev/go/mu/mu.json`
-- `/Users/chazu/dev/go/mu/internal/config/{types,loader,preprocess,validate,pluginmanifest}.go`
-- `/Users/chazu/dev/go/mu/internal/dag/actionkey.go`
-- `/Users/chazu/dev/go/mu/plugins/{go,cowsay}/mu.json`
-- `/Users/chazu/dev/go/mu/go.mod`
-- Directory listings: project root, `internal/`, `docs/`, `plugins/`, `examples/`.
-
-## Appendix B: not investigated (follow-up scouts)
-
-- How `mu scratch` interacts with plugin-dir configs under CUE.
-- Whether `internal/coordinator/pluginresolver.go` has any format-specific
-  assumptions.
-- Concrete benchmark numbers on this repo post-migration.
-- Whether `sealed_inputs` secret refs need schema tightening under CUE.
+- Replacing the `preprocessor` escape hatch: unnecessary post-CUE for most cases, but users with `.edn`/`.dhall`/`.jsonnet` still need it for a migration window.
+- Multi-package CUE layouts (`mu/config` as a shared package). Worth a follow-up once the single-file MVP ships.
+- Schema publishing: should `#ProjectConfig` live in a `cue.mod/pkg/github.com/chau/mu` namespace for third-party tooling to import? Defer until someone asks.
