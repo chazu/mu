@@ -371,3 +371,44 @@ Dagger *replaced* CUE with Go/Python SDKs in 2022. Lessons:
 - Replacing the `preprocessor` escape hatch: unnecessary post-CUE for most cases, but users with `.edn`/`.dhall`/`.jsonnet` still need it for a migration window.
 - Multi-package CUE layouts (`mu/config` as a shared package). Worth a follow-up once the single-file MVP ships.
 - Schema publishing: should `#ProjectConfig` live in a `cue.mod/pkg/github.com/chau/mu` namespace for third-party tooling to import? Defer until someone asks.
+
+---
+
+## Cache-key verification (post-scout audit)
+
+*Added 2026-04-23 in response to Scout v1/v2 disagreement over cache-key impact of a mu.json → mu.cue migration.*
+
+### What is hashed
+
+`internal/dag/actionkey.go:ComputeActionKey` is the single producer of action cache keys. It accepts a `*dag.Action` (the **resolved, structured** form, built by the coordinator in `internal/coordinator/resolve.go:130`) and SHA-256-hashes the following fields in this canonical form:
+
+| Line prefix   | Source field      | Notes                               |
+|---------------|-------------------|-------------------------------------|
+| `cmd:`        | `a.Command`       | original order                      |
+| `env:K=V`     | `a.Env`           | sorted by key                       |
+| `input:N=D`   | `a.Inputs`        | sorted by name; value is CAS digest |
+| `network:`    | `a.Network`       | bool                                |
+| `impure:`     | `a.Impure`        | bool                                |
+| `work_dir:`   | `a.WorkDir`       | omitted when empty                  |
+
+### Do raw config bytes appear anywhere in the digest?
+
+**No.** Searched every call site of `ComputeActionKey` (6 occurrences in `internal/dag/executor.go` + tests). In every case the input is a `*dag.Action` materialized from `ActionSpec` fields by the coordinator — never from unparsed bytes or a formatted config string. `SealedInputs`, `Toolchain`, `TimeoutS`, `Retries`, and `RetryBackoffMs` are all excluded by design (see `timeout_retry_test.go:141` and `actionkey.go:26`).
+
+The `ProjectConfig` struct itself (decoded from mu.json today, mu.cue tomorrow) is **never hashed**. It is consumed by the resolver, which projects its fields into `Action`. As long as two decoders produce semantically-equivalent `ProjectConfig` values that resolve to identical `Action` structs, their cache keys are identical — regardless of whitespace, key order, comment presence, or even file format.
+
+### Verdict: **safe**
+
+Switching mu.json → mu.cue does **not** invalidate cached action artifacts, provided the CUE loader produces `ProjectConfig` values that are semantically equivalent to their JSON counterparts. The scout v2 "HIGH risk" framing appears to have conflated "the config file changed" with "the hashed material changed"; the hashed material is the **resolved action**, which is several layers removed from the source bytes.
+
+Scout v1's recommendation #4 ("Normalize the decoded `ProjectConfig` before action-digest hashing") is therefore **redundant for cache correctness** — we already hash only the post-resolve Action. It still has value as a defence-in-depth measure against future regressions (e.g. if someone ever adds a "config-digest" line to `ComputeActionKey`), but it is not a blocker for the migration.
+
+### Evidence
+
+- Regression test `TestActionKey_ConfigFormatInvariant` in `internal/dag/actionkey_test.go` constructs two `Action` structs with the same semantic content but different map insertion orders and slice aliasing (simulating two different decoders), and asserts identical keys. Passes on current main (`go test ./internal/dag/ -run TestActionKey_ConfigFormatInvariant`).
+- Existing tests `TestActionKey_EnvOrderIndependent` and `TestActionKey_Deterministic` already cover map-iteration-order invariance; the new test extends coverage to the explicit "two loaders, same semantics" scenario.
+
+### Caveats
+
+1. If the CUE loader ever produces subtly different values (e.g. a trailing `/` on `WorkDir`, a `nil` vs empty `Inputs` map difference that propagates to the Action), keys will differ. These are loader-fidelity bugs, not cache-design bugs; treat them as acceptance criteria on the CUE-loader story, not as migration blockers.
+2. No follow-up story required — verdict is **safe**, not **needs-normalization**.
