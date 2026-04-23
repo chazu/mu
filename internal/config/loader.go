@@ -37,7 +37,17 @@ func FindProjectRoot(startDir string) (string, error) {
 // declared in the root mu.json, Load looks for mu.<ext> files (using the
 // preprocessor's extension) and pipes them through the external command.
 // Otherwise it falls back to mu.json.
+//
+// Load is a thin wrapper that dispatches to the decoder returned by
+// defaultDecoder. The actual JSON parsing lives in loadJSONProject, which
+// is the jsonDecoder implementation of Decoder.Decode.
 func Load(projectRoot string) (*ProjectConfig, error) {
+	return defaultDecoder().Decode(projectRoot)
+}
+
+// loadJSONProject is the legacy JSON implementation of project-config
+// loading. It is wired up as jsonDecoder.Decode via the Decoder interface.
+func loadJSONProject(projectRoot string) (*ProjectConfig, error) {
 	rootFile := filepath.Join(projectRoot, "mu.json")
 	cfg, err := loadFile(rootFile)
 	if err != nil {
