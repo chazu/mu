@@ -1,2 +1,2 @@
 unifying mu.cue with #ProjectConfig:
-  targets[0].target: value "!!not-a-valid-label!!" does not match pattern "^(//[A-Za-z0-9_][A-Za-z0-9_./-]*|[A-Za-z0-9_][A-Za-z0-9_.-]*)$" at mu.cue:4:14
+  targets[0].target: value "!!not-a-valid-label!!" does not match pattern "^(//[A-Za-z0-9_][A-Za-z0-9_.:/-]*|[A-Za-z0-9_][A-Za-z0-9_.-]*)$" at mu.cue:4:14

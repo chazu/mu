@@ -162,4 +162,3 @@ func readCredentials(c *cliContext, flagUser, flagPass string, stdinPass bool) (
 	}
 	return user, pass, exitOK, true
 }
-

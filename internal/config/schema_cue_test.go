@@ -63,7 +63,7 @@ func validateAgainst(def, data cue.Value) error {
 }
 
 // repoRoot returns the repository root directory by walking upwards from
-// this test file until it finds a mu.json.
+// this test file until it finds go.mod alongside a mu.cue or mu.json.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -71,9 +71,11 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "mu.json")); err == nil {
-			// Confirm this is the repo root (has go.mod alongside).
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "mu.cue")); err == nil {
+				return dir
+			}
+			if _, err := os.Stat(filepath.Join(dir, "mu.json")); err == nil {
 				return dir
 			}
 		}
@@ -85,19 +87,39 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
+// cueFileValue loads a mu.cue file, evaluates it as a package (ignoring
+// the package clause), and returns the resulting CUE value suitable for
+// schema unification. It is the CUE-native counterpart to jsonValue.
+func cueFileValue(t *testing.T, ctx *cue.Context, path string) cue.Value {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	// Strip the package clause so the file compiles as an anonymous
+	// struct. The schema test only cares about the value, not the
+	// package identity.
+	src := string(data)
+	if idx := strings.Index(src, "package "); idx >= 0 {
+		if nl := strings.IndexByte(src[idx:], '\n'); nl >= 0 {
+			src = src[:idx] + src[idx+nl+1:]
+		}
+	}
+	v := ctx.CompileString(src, cue.Filename(filepath.Base(path)))
+	if err := v.Err(); err != nil {
+		t.Fatalf("compile %s: %v", path, err)
+	}
+	return v
+}
+
 func TestSchemaCUE_ValidProjectConfig(t *testing.T) {
 	_, projectDef, _ := compileSchema(t)
 	ctx := projectDef.Context()
 
 	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "mu.json"))
-	if err != nil {
-		t.Fatalf("read root mu.json: %v", err)
-	}
-
-	val := jsonValue(t, ctx, data)
+	val := cueFileValue(t, ctx, filepath.Join(root, "mu.cue"))
 	if err := validateAgainst(projectDef, val); err != nil {
-		t.Fatalf("root mu.json failed validation: %v", err)
+		t.Fatalf("root mu.cue failed validation: %v", err)
 	}
 }
 
@@ -106,14 +128,9 @@ func TestSchemaCUE_ValidPluginConfig(t *testing.T) {
 	ctx := pluginDef.Context()
 
 	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "plugins", "go", "mu.json"))
-	if err != nil {
-		t.Fatalf("read plugins/go/mu.json: %v", err)
-	}
-
-	val := jsonValue(t, ctx, data)
+	val := cueFileValue(t, ctx, filepath.Join(root, "plugins", "go", "mu.cue"))
 	if err := validateAgainst(pluginDef, val); err != nil {
-		t.Fatalf("plugins/go/mu.json failed validation: %v", err)
+		t.Fatalf("plugins/go/mu.cue failed validation: %v", err)
 	}
 }
 
