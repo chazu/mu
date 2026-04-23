@@ -10,7 +10,19 @@ import (
 // LoadPluginManifest reads a mu.json from a plugin directory and returns
 // the parsed PluginConfig. Returns an error if the file doesn't exist,
 // doesn't contain a "plugin" key, or the entrypoint is empty.
+//
+// LoadPluginManifest is a thin wrapper that dispatches to the decoder
+// returned by defaultDecoder. The actual JSON parsing lives in
+// loadJSONPluginManifest, which is the jsonDecoder implementation of
+// Decoder.DecodePlugin.
 func LoadPluginManifest(pluginDir string) (*PluginConfig, error) {
+	return defaultDecoder().DecodePlugin(pluginDir)
+}
+
+// loadJSONPluginManifest is the legacy JSON implementation of
+// plugin-manifest loading. It is wired up as jsonDecoder.DecodePlugin via
+// the Decoder interface.
+func loadJSONPluginManifest(pluginDir string) (*PluginConfig, error) {
 	path := filepath.Join(pluginDir, "mu.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
