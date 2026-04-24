@@ -136,6 +136,41 @@ func runPluginListRemote(c *cliContext, jsonOut bool) int {
 	return exitOK
 }
 
+// mergedRow represents one plugin row in a merged local+remote view. The
+// `Cached` flag indicates whether the plugin name (regardless of version) is
+// present in the local cache. Local-only plugins (in cache but not in any
+// remote backend) are NOT included — those surface via `mu plugin list
+// --cached` instead.
+type mergedRow struct {
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	Location string `json:"location"`
+	Cached   bool   `json:"cached"`
+	Digest   string `json:"digest,omitempty"`
+}
+
+// mergeLocalRemote produces a row per remote plugin, marking Cached=true when
+// the plugin name appears in localNames. Local-only plugins are deliberately
+// omitted; the caller is expected to merge with `--cached` output separately
+// if it wants the full union.
+func mergeLocalRemote(remote []remotePlugin, localNames []string) []mergedRow {
+	localSet := make(map[string]bool, len(localNames))
+	for _, n := range localNames {
+		localSet[n] = true
+	}
+	out := make([]mergedRow, 0, len(remote))
+	for _, r := range remote {
+		out = append(out, mergedRow{
+			Name:     r.Name,
+			Version:  r.Version,
+			Location: r.Location,
+			Cached:   localSet[r.Name],
+			Digest:   r.Digest,
+		})
+	}
+	return out
+}
+
 // resolveRemoteBackendRefs collects "<registry>/<repository>" backend refs
 // from MU_CACHE_BACKENDS and (if c is non-nil and a project config loaded)
 // from cache.backends + cache.push. Deduplicated, in encounter order.

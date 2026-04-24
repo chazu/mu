@@ -102,3 +102,64 @@ func TestResolveRemoteBackendRefsDeduplicates(t *testing.T) {
 		t.Fatalf("dedup failed: %v", refs)
 	}
 }
+
+func TestMergeLocalAndRemote(t *testing.T) {
+	remote := []remotePlugin{
+		{Name: "fmt", Version: "sha256-abc", Location: "registry.example/mu", Digest: "sha256:abc"},
+		{Name: "lint", Version: "sha256-def", Location: "registry.example/mu", Digest: "sha256:def"},
+	}
+	local := []string{"fmt"} // fmt is cached locally; lint is not
+
+	rows := mergeLocalRemote(remote, local)
+
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+
+	var fmtRow, lintRow *mergedRow
+	for i := range rows {
+		switch rows[i].Name {
+		case "fmt":
+			fmtRow = &rows[i]
+		case "lint":
+			lintRow = &rows[i]
+		}
+	}
+	if fmtRow == nil {
+		t.Fatal("missing fmt row")
+	}
+	if !fmtRow.Cached {
+		t.Errorf("fmt should be cached: %+v", *fmtRow)
+	}
+	if fmtRow.Version != "sha256-abc" {
+		t.Errorf("fmt Version: got %q", fmtRow.Version)
+	}
+	if fmtRow.Digest != "sha256:abc" {
+		t.Errorf("fmt Digest: got %q", fmtRow.Digest)
+	}
+
+	if lintRow == nil {
+		t.Fatal("missing lint row")
+	}
+	if lintRow.Cached {
+		t.Errorf("lint should NOT be cached: %+v", *lintRow)
+	}
+}
+
+func TestMergeLocalAndRemoteEmptyInputs(t *testing.T) {
+	// Both empty.
+	if rows := mergeLocalRemote(nil, nil); len(rows) != 0 {
+		t.Fatalf("expected 0 rows for empty inputs, got %d", len(rows))
+	}
+	// Remote empty, local non-empty: still 0 rows (we only merge into the
+	// remote view; local-only plugins surface via `--cached`, not here).
+	if rows := mergeLocalRemote(nil, []string{"only-local"}); len(rows) != 0 {
+		t.Fatalf("expected 0 rows when remote is empty, got %d", len(rows))
+	}
+	// Remote non-empty, local empty: every row is uncached.
+	rows := mergeLocalRemote(
+		[]remotePlugin{{Name: "x", Version: "v", Location: "l", Digest: "d"}}, nil)
+	if len(rows) != 1 || rows[0].Cached {
+		t.Fatalf("expected 1 uncached row, got %+v", rows)
+	}
+}
