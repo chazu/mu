@@ -121,6 +121,13 @@ func runPluginList(args []string) int {
 		return exitUsage
 	}
 
+	// --remote --cached: show remote plugins annotated with local cache status.
+	// Must be checked before the individual --cached and --remote branches.
+	if *remote && *cached && !*discover {
+		_, _ = cli.Resolve(resolveOpts{NeedConfig: true})
+		return runPluginListRemoteCached(cli, cli.JSON)
+	}
+
 	// --cached (without --discover) scans ~/.mu/plugins/ and needs no project config,
 	// so it works outside any mu project — which is the point of discovery.
 	if *cached && !*discover {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/chau/mu/internal/cas/oci"
@@ -80,20 +81,18 @@ func listFromBackend(ctx context.Context, backend string, indexRepo oci.Registry
 	return rows, nil
 }
 
-// runPluginListRemote is the CLI entry point for `mu plugin list --remote`.
-// Prints rows for plugins discovered across all configured remote backends.
-func runPluginListRemote(c *cliContext, jsonOut bool) int {
-	ctx := context.Background()
-
+// gatherRemotePlugins iterates configured backends and returns all discovered
+// plugins. Errors against individual backends are written to stderr and the
+// scan continues.
+func gatherRemotePlugins(ctx context.Context, c *cliContext) []remotePlugin {
 	refs := resolveRemoteBackendRefs(c)
 	if len(refs) == 0 {
 		fmt.Fprintln(os.Stderr,
 			`no remote backends configured. Either:
   - run from a project with cache.backends (oci type) configured, or
   - set MU_CACHE_BACKENDS="<registry>/<repository>[,<registry>/<repository>...]"`)
-		return exitUsage
+		return nil
 	}
-
 	var all []remotePlugin
 	for _, ref := range refs {
 		indexRepoRef := ref + "/" + oci.PluginIndexRef
@@ -112,16 +111,28 @@ func runPluginListRemote(c *cliContext, jsonOut bool) int {
 		}
 		all = append(all, rows...)
 	}
+	return all
+}
+
+// runPluginListRemote is the CLI entry point for `mu plugin list --remote`.
+// Prints rows for plugins discovered across all configured remote backends.
+func runPluginListRemote(c *cliContext, jsonOut bool) int {
+	ctx := context.Background()
+	all := gatherRemotePlugins(ctx, c)
 
 	if jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(all)
+		if err := enc.Encode(all); err != nil {
+			fmt.Fprintf(os.Stderr, "encode JSON: %v\n", err)
+			return exitFail
+		}
 		return exitOK
 	}
 
 	if len(all) == 0 {
-		fmt.Println("No plugins found in remote caches.")
+		// Either backends weren't configured (gatherRemotePlugins printed) or
+		// no plugins were found. Print a benign message in the latter case.
 		return exitOK
 	}
 
@@ -134,6 +145,75 @@ func runPluginListRemote(c *cliContext, jsonOut bool) int {
 		fmt.Printf("%-20s %-25s %-40s %s\n", r.Name, r.Version, r.Location, dig)
 	}
 	return exitOK
+}
+
+// runPluginListRemoteCached prints remote plugins annotated with whether each
+// is also present in the local cache. This is the union of `--remote` (rows)
+// and `--cached` (cached column), focused on the remote view since local-only
+// plugins are already discoverable via `--cached` alone.
+func runPluginListRemoteCached(c *cliContext, jsonOut bool) int {
+	ctx := context.Background()
+	remote := gatherRemotePlugins(ctx, c)
+	local := localPluginNames()
+	rows := mergeLocalRemote(remote, local)
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rows); err != nil {
+			fmt.Fprintf(os.Stderr, "encode JSON: %v\n", err)
+			return exitFail
+		}
+		return exitOK
+	}
+
+	if len(rows) == 0 {
+		return exitOK
+	}
+
+	fmt.Printf("%-20s %-25s %-40s %-7s %s\n", "PLUGIN", "VERSION", "LOCATION", "CACHED", "DIGEST")
+	for _, r := range rows {
+		dig := r.Digest
+		if len(dig) > 23 {
+			dig = dig[:23] + "..."
+		}
+		cached := "no"
+		if r.Cached {
+			cached = "yes"
+		}
+		fmt.Printf("%-20s %-25s %-40s %-7s %s\n", r.Name, r.Version, r.Location, cached, dig)
+	}
+	return exitOK
+}
+
+// localPluginNames returns the names of plugins extracted under
+// ~/.mu/plugins/. Mirrors the directory walk in pluginListCached but returns
+// only names, not digests.
+func localPluginNames() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	pluginsDir := filepath.Join(home, ".mu", "plugins")
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		// Has at least one bundle-* or plugin-* artifact?
+		sub, _ := os.ReadDir(filepath.Join(pluginsDir, e.Name()))
+		for _, s := range sub {
+			if strings.HasPrefix(s.Name(), "bundle-") || strings.HasPrefix(s.Name(), "plugin-") {
+				names = append(names, e.Name())
+				break
+			}
+		}
+	}
+	return names
 }
 
 // mergedRow represents one plugin row in a merged local+remote view. The

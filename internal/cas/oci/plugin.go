@@ -52,6 +52,13 @@ const (
 // PluginConfig is the JSON payload of a plugin artifact's config blob.
 // It mirrors config.PluginManifest but is self-contained so the artifact
 // is interpretable without the source project.
+//
+// As of this revision: Name and Digest are read by `mu plugin list --remote`
+// to enumerate plugins. Entrypoint, Toolchain, Files, Guide, and Source are
+// written but not yet consumed by any read path — they are reserved for a
+// forthcoming `mu plugin install` command that will fetch a discovered plugin
+// back into the local CAS and project config. Don't drop them; future
+// installs depend on this contract.
 type PluginConfig struct {
 	Name       string   `json:"name"`
 	Entrypoint string   `json:"entrypoint"`

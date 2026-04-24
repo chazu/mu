@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -161,5 +164,44 @@ func TestMergeLocalAndRemoteEmptyInputs(t *testing.T) {
 		[]remotePlugin{{Name: "x", Version: "v", Location: "l", Digest: "d"}}, nil)
 	if len(rows) != 1 || rows[0].Cached {
 		t.Fatalf("expected 1 uncached row, got %+v", rows)
+	}
+}
+
+func TestLocalPluginNamesEmpty(t *testing.T) {
+	// Empty HOME → no plugins dir → empty result, no error.
+	t.Setenv("HOME", t.TempDir())
+	if got := localPluginNames(); len(got) != 0 {
+		t.Fatalf("expected no local plugins in empty HOME, got %v", got)
+	}
+}
+
+func TestLocalPluginNamesFindsExtractedPlugins(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	pluginsDir := filepath.Join(tmp, ".mu", "plugins")
+	// fmt has a single-file extraction.
+	if err := os.MkdirAll(filepath.Join(pluginsDir, "fmt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginsDir, "fmt", "plugin-deadbeef.bb"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// lint has a bundle.
+	bundle := filepath.Join(pluginsDir, "lint", "bundle-feedface")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundle, "main.bb"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// empty-dir is ignored (no artifacts).
+	if err := os.MkdirAll(filepath.Join(pluginsDir, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := localPluginNames()
+	sort.Strings(got)
+	if len(got) != 2 || got[0] != "fmt" || got[1] != "lint" {
+		t.Fatalf("got %v, want [fmt lint]", got)
 	}
 }
