@@ -27,6 +27,7 @@ func runPlugin(args []string) int {
 Commands:
   list      List registered plugins
   add       Add a plugin from cache by building its //plugins/<name> target
+  push      Publish a plugin to the configured OCI cache
   status    Reconcile declared plugins against the local cache
   test      Run scenarios against a plugin (bundled + testdata/*.yaml)`)
 		return 2
@@ -37,6 +38,8 @@ Commands:
 		return runPluginList(args[1:])
 	case "add":
 		return runPluginAdd(args[1:])
+	case "push":
+		return runPluginPush(args[1:])
 	case "status":
 		return runPluginStatus(args[1:])
 	case "test":
@@ -113,9 +116,32 @@ func runPluginList(args []string) int {
 	cli := newCLIContext("plugin list", fs)
 	discover := fs.Bool("discover", false, "start plugins and run discover to show capabilities")
 	cached := fs.Bool("cached", false, "show all //plugins/* targets with their CAS digests")
+	remote := fs.Bool("remote", false, "list plugins available in configured remote OCI caches")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
+
+	// --remote --cached: show remote plugins annotated with local cache status.
+	// Must be checked before the individual --cached and --remote branches.
+	if *remote && *cached && !*discover {
+		_, _ = cli.Resolve(resolveOpts{NeedConfig: true})
+		return runPluginListRemoteCached(cli, cli.JSON)
+	}
+
+	// --cached (without --discover) scans ~/.mu/plugins/ and needs no project config,
+	// so it works outside any mu project — which is the point of discovery.
+	if *cached && !*discover {
+		return pluginListCached(nil, "", cli.JSON)
+	}
+
+	// --remote works outside a project too: env var MU_CACHE_BACKENDS suffices.
+	// We still try to load config so cache.backends can contribute, but a
+	// missing project is not fatal.
+	if *remote {
+		_, _ = cli.Resolve(resolveOpts{NeedConfig: true})
+		return runPluginListRemote(cli, cli.JSON)
+	}
+
 	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true}); !ok {
 		return code
 	}
@@ -125,10 +151,6 @@ func runPluginList(args []string) int {
 
 	if *cached && *discover {
 		return pluginListCachedDiscover(cfg, projectRoot, *jsonOut)
-	}
-
-	if *cached {
-		return pluginListCached(cfg, projectRoot, *jsonOut)
 	}
 
 	if len(cfg.Plugins) == 0 {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -103,6 +104,22 @@ func (r *testRegistry) Resolve(_ context.Context, reference string) (ocispec.Des
 		return ocispec.Descriptor{}, errdef.ErrNotFound
 	}
 	return desc, nil
+}
+
+func (r *testRegistry) Tags(_ context.Context, last string, fn func([]string) error) error {
+	r.mu.Lock()
+	names := make([]string, 0, len(r.tags))
+	for name := range r.tags {
+		if last == "" || name > last {
+			names = append(names, name)
+		}
+	}
+	r.mu.Unlock()
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+	return fn(names)
 }
 
 func newTestStore(t *testing.T) (*oci.OCIStore, *testRegistry) {
@@ -269,4 +286,39 @@ func TestGetActionResultMiss(t *testing.T) {
 func TestStoreImplementsInterface(t *testing.T) {
 	reg := newTestRegistry()
 	var _ cas.Store = oci.New(reg)
+}
+
+// stubRegistryWithTags is a compile-time check that the Registry interface
+// includes Tags. If the assertion below fails to compile, Tags is missing
+// from the interface.
+type stubRegistryWithTags struct{}
+
+func (s *stubRegistryWithTags) Push(context.Context, ocispec.Descriptor, io.Reader) error {
+	return nil
+}
+func (s *stubRegistryWithTags) Fetch(context.Context, ocispec.Descriptor) (io.ReadCloser, error) {
+	return nil, nil
+}
+func (s *stubRegistryWithTags) Exists(context.Context, ocispec.Descriptor) (bool, error) {
+	return false, nil
+}
+func (s *stubRegistryWithTags) Delete(context.Context, ocispec.Descriptor) error { return nil }
+func (s *stubRegistryWithTags) Tag(context.Context, ocispec.Descriptor, string) error { return nil }
+func (s *stubRegistryWithTags) Resolve(context.Context, string) (ocispec.Descriptor, error) {
+	return ocispec.Descriptor{}, nil
+}
+func (s *stubRegistryWithTags) Tags(context.Context, string, func([]string) error) error {
+	return nil
+}
+
+// callTagsViaInterface ensures Tags is part of the Registry interface.
+// This function will not compile if Registry does not declare Tags.
+func callTagsViaInterface(r oci.Registry) error {
+	return r.Tags(context.Background(), "", func([]string) error { return nil })
+}
+
+func TestRegistryInterfaceHasTags(t *testing.T) {
+	var _ oci.Registry = (*stubRegistryWithTags)(nil)
+	// Ensure the interface-based call compiles.
+	_ = callTagsViaInterface
 }
