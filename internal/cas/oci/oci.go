@@ -46,6 +46,12 @@ type Registry interface {
 	Delete(ctx context.Context, target ocispec.Descriptor) error
 	Tag(ctx context.Context, desc ocispec.Descriptor, reference string) error
 	Resolve(ctx context.Context, reference string) (ocispec.Descriptor, error)
+	// Tags enumerates tag names in lexical order, calling fn for each page.
+	// last is the tag to start after (empty = from the beginning). Backends
+	// without /v2/<name>/tags/list support may return an error; callers
+	// should treat that as "no plugins discoverable here," not as a fatal
+	// failure of the whole list operation.
+	Tags(ctx context.Context, last string, fn func(tags []string) error) error
 }
 
 // OCIStore is a CAS backend that stores blobs and action results in an OCI registry.
