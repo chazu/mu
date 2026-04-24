@@ -1,5 +1,12 @@
 package oci
 
+import "strings"
+
+// pluginTagDigestLen is the number of leading hex chars retained in a
+// plugin tag. 12 hex chars = 48 bits, well past birthday-collision risk
+// at any plausible plugin count per registry.
+const pluginTagDigestLen = 12
+
 const (
 	// MediaTypePluginConfig is the config blob media type for a mu plugin artifact.
 	MediaTypePluginConfig = "application/vnd.mu.plugin.v1+json"
@@ -37,7 +44,11 @@ type PluginConfig struct {
 	Toolchain  string   `json:"toolchain,omitempty"`
 	Files      []string `json:"files,omitempty"`
 	Guide      string   `json:"guide,omitempty"`
-	Digest     string   `json:"digest,omitempty"`
+	// Digest is the CAS content digest of the plugin's primary artifact (the
+	// bundle for multi-file plugins, the entrypoint script for single-file
+	// plugins). Format: "sha256:<hex>". Used to derive the OCI tag via PluginTag
+	// and to round-trip the plugin back to the local CAS on install.
+	Digest string `json:"digest,omitempty"`
 	Source     string   `json:"source,omitempty"`
 }
 
@@ -50,11 +61,14 @@ type PluginIndex struct {
 }
 
 // PluginTag returns the OCI tag used for a plugin artifact given its sha256
-// hex digest. We use the first 12 hex chars so tags are short, stable, and
-// don't collide with future semver-tagging schemes.
+// hex digest. A leading "sha256:" prefix is stripped if present, so callers
+// can pass either the bare hex string or a full digest reference. We use the
+// first 12 hex chars so tags are short, stable, and don't collide with future
+// semver-tagging schemes (which would not start with "sha256-").
 func PluginTag(sha256Hex string) string {
-	if len(sha256Hex) > 12 {
-		sha256Hex = sha256Hex[:12]
+	sha256Hex = strings.TrimPrefix(sha256Hex, "sha256:")
+	if len(sha256Hex) > pluginTagDigestLen {
+		sha256Hex = sha256Hex[:pluginTagDigestLen]
 	}
 	return "sha256-" + sha256Hex
 }

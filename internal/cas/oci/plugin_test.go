@@ -2,6 +2,7 @@ package oci
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -23,11 +24,10 @@ func TestPluginConfigRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// Compare field-by-field since slices aren't comparable with ==.
 	if got.Name != src.Name || got.Entrypoint != src.Entrypoint ||
 		got.Toolchain != src.Toolchain || got.Guide != src.Guide ||
 		got.Digest != src.Digest || got.Source != src.Source ||
-		len(got.Files) != len(src.Files) || got.Files[0] != src.Files[0] {
+		!slices.Equal(got.Files, src.Files) {
 		t.Fatalf("round-trip mismatch:\n got: %+v\nwant: %+v", got, src)
 	}
 }
@@ -45,8 +45,16 @@ func TestPluginIndexRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.SchemaVersion != 1 || len(got.Plugins) != 3 {
+	if got.SchemaVersion != 1 || !slices.Equal(got.Plugins, src.Plugins) {
 		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+}
+
+func TestPluginTagStripsSha256Prefix(t *testing.T) {
+	full := "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	want := "sha256-0123456789ab"
+	if got := PluginTag(full); got != want {
+		t.Fatalf("PluginTag(%q) = %q, want %q", full, got, want)
 	}
 }
 
