@@ -249,3 +249,80 @@ func TestPushPluginIsIdempotent(t *testing.T) {
 		t.Fatalf("idempotent push produced different manifest digests: %s vs %s", d1.Digest, d2.Digest)
 	}
 }
+
+func TestFetchPluginIndexEmpty(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+
+	got, err := FetchPluginIndex(ctx, store)
+	if err != nil {
+		t.Fatalf("FetchPluginIndex on empty store: %v (want nil + empty index)", err)
+	}
+	if len(got.Plugins) != 0 {
+		t.Fatalf("expected empty index, got %+v", got)
+	}
+}
+
+func TestUpdatePluginIndex(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+
+	if err := UpdatePluginIndex(ctx, store, "fmt"); err != nil {
+		t.Fatalf("UpdatePluginIndex fmt: %v", err)
+	}
+	if err := UpdatePluginIndex(ctx, store, "lint"); err != nil {
+		t.Fatalf("UpdatePluginIndex lint: %v", err)
+	}
+	// Duplicate insert is a no-op.
+	if err := UpdatePluginIndex(ctx, store, "fmt"); err != nil {
+		t.Fatalf("UpdatePluginIndex duplicate fmt: %v", err)
+	}
+	idx, err := FetchPluginIndex(ctx, store)
+	if err != nil {
+		t.Fatalf("FetchPluginIndex: %v", err)
+	}
+	if !slices.Equal(idx.Plugins, []string{"fmt", "lint"}) {
+		t.Fatalf("index plugins: got %v, want [fmt lint]", idx.Plugins)
+	}
+	if idx.SchemaVersion != 1 {
+		t.Fatalf("SchemaVersion: got %d, want 1", idx.SchemaVersion)
+	}
+}
+
+func TestFetchPluginIndexRejectsWrongMediaType(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+
+	// Tag a non-mu manifest at the index ref.
+	badConfig := []byte(`{}`)
+	badDesc := ocispec.Descriptor{
+		MediaType: "application/vnd.oci.image.config.v1+json",
+		Digest:    godigest.FromBytes(badConfig),
+		Size:      int64(len(badConfig)),
+	}
+	if err := store.Push(ctx, badDesc, bytes.NewReader(badConfig)); err != nil {
+		t.Fatalf("push bad config: %v", err)
+	}
+	m := ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config:    badDesc,
+	}
+	mb, _ := json.Marshal(&m)
+	mdesc := ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageManifest,
+		Digest:    godigest.FromBytes(mb),
+		Size:      int64(len(mb)),
+	}
+	if err := store.Push(ctx, mdesc, bytes.NewReader(mb)); err != nil {
+		t.Fatalf("push bad manifest: %v", err)
+	}
+	if err := store.Tag(ctx, mdesc, PluginIndexTag); err != nil {
+		t.Fatalf("tag: %v", err)
+	}
+
+	_, err := FetchPluginIndex(ctx, store)
+	if err == nil {
+		t.Fatal("expected error for non-mu artifact at index ref")
+	}
+}

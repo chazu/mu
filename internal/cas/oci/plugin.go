@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	godigest "github.com/opencontainers/go-digest"
@@ -205,6 +206,112 @@ func FetchPluginConfig(ctx context.Context, repo Registry, ref string) (PluginCo
 		return PluginConfig{}, fmt.Errorf("decode plugin config: %w", err)
 	}
 	return cfg, nil
+}
+
+// FetchPluginIndex returns the plugin index stored at PluginIndexTag. If the
+// tag does not exist, returns an empty (SchemaVersion=1) index and a nil error
+// — a registry without an index simply has no discoverable mu plugins yet,
+// not a failure. Other errors (manifest decode, wrong media type) are returned.
+func FetchPluginIndex(ctx context.Context, repo Registry) (PluginIndex, error) {
+	mdesc, err := repo.Resolve(ctx, PluginIndexTag)
+	if err != nil {
+		if errors.Is(err, errdef.ErrNotFound) {
+			return PluginIndex{SchemaVersion: 1}, nil
+		}
+		return PluginIndex{}, fmt.Errorf("resolve plugin index: %w", err)
+	}
+	mrc, err := repo.Fetch(ctx, mdesc)
+	if err != nil {
+		return PluginIndex{}, fmt.Errorf("fetch plugin index manifest: %w", err)
+	}
+	mb, err := io.ReadAll(mrc)
+	mrc.Close()
+	if err != nil {
+		return PluginIndex{}, err
+	}
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(mb, &manifest); err != nil {
+		return PluginIndex{}, fmt.Errorf("decode plugin index manifest: %w", err)
+	}
+	if manifest.Config.MediaType != MediaTypePluginIndexConfig {
+		return PluginIndex{}, fmt.Errorf("plugin index ref %q has config media type %q (want %q) — not a mu index",
+			PluginIndexTag, manifest.Config.MediaType, MediaTypePluginIndexConfig)
+	}
+	crc, err := repo.Fetch(ctx, manifest.Config)
+	if err != nil {
+		return PluginIndex{}, fmt.Errorf("fetch plugin index config: %w", err)
+	}
+	cb, err := io.ReadAll(crc)
+	crc.Close()
+	if err != nil {
+		return PluginIndex{}, err
+	}
+	var idx PluginIndex
+	if err := json.Unmarshal(cb, &idx); err != nil {
+		return PluginIndex{}, fmt.Errorf("decode plugin index: %w", err)
+	}
+	return idx, nil
+}
+
+// UpdatePluginIndex fetches the current index, inserts name (if absent),
+// sorts the resulting list, and re-publishes the index artifact at
+// PluginIndexTag. Idempotent — a duplicate insert is a no-op (no extra
+// blob is written).
+//
+// Concurrency: the read-modify-write is not atomic. Concurrent callers from
+// different processes will race; last-writer-wins. Acceptable for a plugin
+// publish path where pushes are infrequent and a missed name self-heals on
+// the next push.
+func UpdatePluginIndex(ctx context.Context, repo Registry, name string) error {
+	idx, err := FetchPluginIndex(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if idx.SchemaVersion == 0 {
+		idx.SchemaVersion = 1
+	}
+	for _, p := range idx.Plugins {
+		if p == name {
+			return nil
+		}
+	}
+	idx.Plugins = append(idx.Plugins, name)
+	sort.Strings(idx.Plugins)
+
+	cfgBytes, err := json.Marshal(&idx)
+	if err != nil {
+		return fmt.Errorf("marshal plugin index: %w", err)
+	}
+	cfgDesc := ocispec.Descriptor{
+		MediaType: MediaTypePluginIndexConfig,
+		Digest:    godigest.FromBytes(cfgBytes),
+		Size:      int64(len(cfgBytes)),
+	}
+	if err := pushIfAbsent(ctx, repo, cfgDesc, cfgBytes); err != nil {
+		return fmt.Errorf("push plugin index config: %w", err)
+	}
+
+	manifest := ocispec.Manifest{
+		Versioned:    specs.Versioned{SchemaVersion: 2},
+		MediaType:    ocispec.MediaTypeImageManifest,
+		ArtifactType: ArtifactTypePluginIndex,
+		Config:       cfgDesc,
+		Layers:       []ocispec.Descriptor{},
+	}
+	mb, err := json.Marshal(&manifest)
+	if err != nil {
+		return fmt.Errorf("marshal plugin index manifest: %w", err)
+	}
+	mdesc := ocispec.Descriptor{
+		MediaType:    ocispec.MediaTypeImageManifest,
+		ArtifactType: ArtifactTypePluginIndex,
+		Digest:       godigest.FromBytes(mb),
+		Size:         int64(len(mb)),
+	}
+	if err := pushIfAbsent(ctx, repo, mdesc, mb); err != nil {
+		return fmt.Errorf("push plugin index manifest: %w", err)
+	}
+	return repo.Tag(ctx, mdesc, PluginIndexTag)
 }
 
 // pushIfAbsent skips the push if desc already exists in repo. Real registries
