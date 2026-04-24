@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -117,6 +118,7 @@ func (r *testRegistry) Tags(_ context.Context, last string, fn func([]string) er
 	if len(names) == 0 {
 		return nil
 	}
+	sort.Strings(names)
 	return fn(names)
 }
 
