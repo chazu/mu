@@ -12,7 +12,6 @@ import (
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2/content/memory"
 )
 
 func TestPluginConfigRoundTrip(t *testing.T) {
@@ -79,18 +78,6 @@ func TestPluginTagShortensDigest(t *testing.T) {
 		t.Fatalf("PluginTag(short) = %q, want sha256-abc", got)
 	}
 }
-
-// memStore wraps memory.Store and adds stub Delete/Tags to satisfy Registry.
-type memStore struct {
-	*memory.Store
-}
-
-func (m *memStore) Delete(_ context.Context, _ ocispec.Descriptor) error { return nil }
-func (m *memStore) Tags(_ context.Context, last string, fn func([]string) error) error {
-	return nil
-}
-
-func newMemStore() *memStore { return &memStore{Store: memory.New()} }
 
 func TestPushAndFetchPlugin(t *testing.T) {
 	ctx := context.Background()
@@ -235,5 +222,30 @@ func TestPushPluginErrorsOnMissingFile(t *testing.T) {
 	_, err := PushPlugin(ctx, store, "broken", cfg, files)
 	if err == nil {
 		t.Fatal("expected error for file in cfg.Files but missing in files map, got nil")
+	}
+}
+
+func TestPushPluginIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+
+	cfg := PluginConfig{
+		Name:       "fmt",
+		Entrypoint: "fmt.bb",
+		Files:      []string{"fmt.bb"},
+		Digest:     "sha256:" + strings.Repeat("a", 64),
+	}
+	files := map[string][]byte{"fmt.bb": []byte("(println :hi)")}
+
+	d1, err := PushPlugin(ctx, store, "fmt", cfg, files)
+	if err != nil {
+		t.Fatalf("first push: %v", err)
+	}
+	d2, err := PushPlugin(ctx, store, "fmt", cfg, files)
+	if err != nil {
+		t.Fatalf("second push: %v", err)
+	}
+	if d1.Digest != d2.Digest {
+		t.Fatalf("idempotent push produced different manifest digests: %s vs %s", d1.Digest, d2.Digest)
 	}
 }

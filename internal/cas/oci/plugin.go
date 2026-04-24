@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/errdef"
 )
 
 // pluginTagDigestLen is the number of leading hex chars retained in a
@@ -60,7 +62,7 @@ type PluginConfig struct {
 	// plugins). Format: "sha256:<hex>". Used to derive the OCI tag via PluginTag
 	// and to round-trip the plugin back to the local CAS on install.
 	Digest string `json:"digest,omitempty"`
-	Source     string   `json:"source,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 // PluginIndex is the JSON payload of the plugin-index artifact's config blob.
@@ -140,7 +142,6 @@ func PushPlugin(ctx context.Context, repo Registry, name string, cfg PluginConfi
 		Layers:       layers,
 		Annotations: map[string]string{
 			ocispec.AnnotationTitle: name,
-			"vnd.mu.plugin.digest":  cfg.Digest,
 		},
 	}
 	mb, err := json.Marshal(&manifest)
@@ -217,5 +218,11 @@ func pushIfAbsent(ctx context.Context, repo Registry, desc ocispec.Descriptor, c
 	if ok {
 		return nil
 	}
-	return repo.Push(ctx, desc, bytes.NewReader(content))
+	// Race window: another writer may have pushed between our Exists check
+	// and Push. Real registries return errdef.ErrAlreadyExists; treat that
+	// as success so PushPlugin remains idempotent under concurrent callers.
+	if err := repo.Push(ctx, desc, bytes.NewReader(content)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+		return err
+	}
+	return nil
 }
