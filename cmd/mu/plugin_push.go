@@ -61,7 +61,7 @@ func runPluginPush(args []string) int {
 		return c.fail(exitFail, "%v", err)
 	}
 
-	files, isBundle, err := collectPluginFiles(name)
+	files, isBundle, err := collectPluginFiles(name, entrypoint)
 	if err != nil {
 		return c.fail(exitFail, "%v", err)
 	}
@@ -134,9 +134,10 @@ func pushPluginToRegistry(ctx context.Context, pluginRepo, indexRepo oci.Registr
 //   - Bundle: ~/.mu/plugins/<name>/bundle-<hash>/<files...>
 //   - Single file: ~/.mu/plugins/<name>/plugin-<hash>.<ext>
 //
-// For single-file plugins the cache filename is mangled (plugin-<hash>.<ext>),
-// so the destination key is reconstructed as <name><ext>.
-func collectPluginFiles(name string) (map[string][]byte, bool, error) {
+// For single-file plugins, entrypoint is used as the destination key when
+// provided. If entrypoint is empty, the key falls back to <name><ext> derived
+// from the cache filename.
+func collectPluginFiles(name, entrypoint string) (map[string][]byte, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, err
@@ -182,8 +183,12 @@ func collectPluginFiles(name string) (map[string][]byte, bool, error) {
 			if rerr != nil {
 				return nil, false, rerr
 			}
-			ext := filepath.Ext(e.Name())
-			out[name+ext] = b
+			key := entrypoint
+			if key == "" {
+				// Fallback when entrypoint isn't known: <name><ext> from cache filename.
+				key = name + filepath.Ext(e.Name())
+			}
+			out[key] = b
 		}
 	}
 	if len(out) == 0 {

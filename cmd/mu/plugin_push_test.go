@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -175,4 +177,39 @@ func TestPluginDispatchIncludesPush(t *testing.T) {
 	if got := runPluginPush(nil); got != exitUsage {
 		t.Fatalf("runPluginPush(nil) = %d, want %d", got, exitUsage)
 	}
+}
+
+func TestCollectPluginFilesUsesEntrypointForSingleFile(t *testing.T) {
+	// Stage a fake ~/.mu/plugins/fmt/plugin-deadbeef.bb under a temp HOME.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	dir := filepath.Join(tmp, ".mu", "plugins", "fmt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin-deadbeef.bb"), []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, isBundle, err := collectPluginFiles("fmt", "format.bb")
+	if err != nil {
+		t.Fatalf("collectPluginFiles: %v", err)
+	}
+	if isBundle {
+		t.Fatal("expected single-file, got bundle")
+	}
+	if _, ok := files["format.bb"]; !ok {
+		t.Fatalf("expected key %q, got keys %v", "format.bb", keysOf(files))
+	}
+	if _, ok := files["fmt.bb"]; ok {
+		t.Fatal("did not expect mangled key fmt.bb")
+	}
+}
+
+func keysOf(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
