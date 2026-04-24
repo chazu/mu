@@ -27,6 +27,7 @@ func runPlugin(args []string) int {
 Commands:
   list      List registered plugins
   add       Add a plugin from cache by building its //plugins/<name> target
+  push      Publish a plugin to the configured OCI cache
   status    Reconcile declared plugins against the local cache
   test      Run scenarios against a plugin (bundled + testdata/*.yaml)`)
 		return 2
@@ -37,6 +38,8 @@ Commands:
 		return runPluginList(args[1:])
 	case "add":
 		return runPluginAdd(args[1:])
+	case "push":
+		return runPluginPush(args[1:])
 	case "status":
 		return runPluginStatus(args[1:])
 	case "test":
