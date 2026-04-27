@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +16,7 @@ func runGuide(args []string) int {
 	}
 
 	switch args[0] {
-	case "mu.json":
+	case "mu.cue":
 		printGuideMuJSON()
 	case "plugins":
 		printGuidePlugins()
@@ -56,7 +55,7 @@ func printGuideIndex() {
 
 Topics:
 
-  mu guide mu.json       How to write and structure mu.json config files
+  mu guide mu.cue       How to write and structure mu.cue config files
   mu guide build         Building targets: flags, plan mode, manifests
   mu guide plugins       Writing, loading, and distributing plugins
   mu guide protocol      The NDJSON plugin protocol (discover, plan, observe)
@@ -71,10 +70,10 @@ Topics:
 }
 
 func printGuideMuJSON() {
-	fmt.Print(`mu guide mu.json — configuration file reference
+	fmt.Print(`mu guide mu.cue — configuration file reference
 
-mu.json is the project configuration file. mu discovers it by walking up
-from the current directory. Subdirectories may contain their own mu.json
+mu.cue is the project configuration file. mu discovers it by walking up
+from the current directory. Subdirectories may contain their own mu.cue
 files — they are merged automatically.
 
 MINIMAL EXAMPLE
@@ -115,12 +114,12 @@ TARGET FIELDS
 TARGET NAMING
 
   Targets are named "//path/name". Subdirectory targets are auto-prefixed:
-  a target "mylib" in foo/mu.json becomes "//foo/mylib".
+  a target "mylib" in foo/mu.cue becomes "//foo/mylib".
 
 CONFIG MERGING
 
-  mu walks up to find the project root mu.json, then recursively discovers
-  mu.json files in subdirectories. Targets from subdirectories are merged
+  mu walks up to find the project root mu.cue, then recursively discovers
+  mu.cue files in subdirectories. Targets from subdirectories are merged
   with paths rebased relative to the project root. Globs in sources are
   expanded. Hidden directories (.git, .claude, etc.) and testdata/ are skipped.
 
@@ -167,7 +166,7 @@ FLAGS
   --emit-manifest   Emit a build manifest to stdout (for pudl's ACUTE loop).
   --no-cache        Skip cache reads — rebuild everything.
   --jobs N          Max parallel actions (default: NumCPU).
-  --config PATH     Path to mu.json (default: discover by walking up).
+  --config PATH     Path to mu.cue (default: discover by walking up).
   --verbose         Show plugin I/O.
 
 EXAMPLES
@@ -215,7 +214,7 @@ LOADING PLUGINS
   1. Local script (preferred for development):
      {"name": "file", "script": "plugins/file/plugin.bb"}
 
-     Also works with a directory containing mu.json with a "plugin" key:
+     Also works with a directory containing mu.cue with a "plugin" key:
      {"name": "go", "script": "plugins/go"}
 
   2. Remote URL with SHA256 verification:
@@ -269,11 +268,11 @@ PLUGIN DIRECTORY STRUCTURE
   For bundling and distribution, plugins use this layout:
 
     plugins/myplugin/
-      mu.json        Declares plugin metadata and build target.
+      mu.cue        Declares plugin metadata and build target.
       plugin.bb      The plugin script.
       GUIDE.md       Optional guide text (shown by 'mu guide plugin myplugin').
 
-  The mu.json has a "plugin" key:
+  The mu.cue has a "plugin" key:
 
     {
       "plugin": {
@@ -295,10 +294,10 @@ PLUGIN DIRECTORY STRUCTURE
 BUILDING AND DISTRIBUTING PLUGINS
 
   mu plugin add <name>    Build //plugins/<name> and register its CAS digest
-                          in mu.json. After this, the plugin can be referenced
+                          in mu.cue. After this, the plugin can be referenced
                           by digest for reproducible builds.
 
-  mu plugin list                 List plugins defined in mu.json.
+  mu plugin list                 List plugins defined in mu.cue.
   mu plugin list --discover      Start plugins and show capabilities.
   mu plugin list --cached        Show all plugins stored in ~/.mu/plugins/.
   mu plugin list --json          Output as JSON.
@@ -337,7 +336,7 @@ FLAGS
 
   --json      Output as JSON array of ObserveResult objects.
   --ndjson    Output flattened records, one per line (for piping to pudl).
-  --config    Path to mu.json.
+  --config    Path to mu.cue.
   --verbose   Show plugin I/O.
 
 EXAMPLES
@@ -348,7 +347,7 @@ EXAMPLES
 
 HOW IT WORKS
 
-  1. mu loads the target from mu.json.
+  1. mu loads the target from mu.cue.
   2. If the target has sealed_inputs, secrets are resolved first.
   3. mu sends an "observe" request to the target's plugin with:
      - target info (name, toolchain, config)
@@ -392,7 +391,7 @@ WRITING AN OBSERVE PLUGIN
 func printGuidePudl() {
 	fmt.Print(`mu guide pudl — how mu and pudl work together
 
-mu and pudl are decoupled tools that communicate through mu.json.
+mu and pudl are decoupled tools that communicate through mu.cue.
 
   pudl: defines desired state (CUE), observes actual state, computes drift.
   mu:   takes desired-state targets and converges them using plugins.
@@ -419,7 +418,7 @@ WORKFLOW
 
      pudl export-actions --definition nginx_conf > converge.json
 
-     This produces a mu.json with desired-state targets:
+     This produces a mu.cue with desired-state targets:
      {
        "targets": [{
          "target": "//nginx_conf",
@@ -458,7 +457,7 @@ KEY DESIGN PRINCIPLE
   pudl emits desired state, not drift diffs. The file plugin receives
   {"path": "...", "content": "..."} — it doesn't know about pudl, CUE,
   or drift reports. It just makes the file match the config. Any mu plugin
-  works whether the target came from pudl or a hand-written mu.json.
+  works whether the target came from pudl or a hand-written mu.cue.
 
 PUDL AS A BUILD TARGET
 
@@ -568,7 +567,7 @@ without exposing them in the build graph, cache, or logs.
 
 DECLARING SEALED INPUTS
 
-  In mu.json targets:
+  In mu.cue targets:
 
   {
     "target": "//deploy/app",
@@ -628,7 +627,7 @@ from scratch, ensuring hermetic builds with known-good tool versions.
 
 DECLARING A TOOLCHAIN
 
-  In mu.json:
+  In mu.cue:
 
   {
     "toolchains": [
@@ -877,7 +876,7 @@ func printGuideForPlugin(name string) int {
 	fmt.Fprintf(os.Stderr, "\nTo add a guide, create a GUIDE.md file in the plugin directory\n")
 	fmt.Fprintf(os.Stderr, "and set \"guide\": \"GUIDE.md\" in the plugin manifest:\n\n")
 	fmt.Fprintf(os.Stderr, "  plugins/%s/GUIDE.md\n", name)
-	fmt.Fprintf(os.Stderr, "  plugins/%s/mu.json → {\"plugin\": {\"guide\": \"GUIDE.md\", ...}}\n", name)
+	fmt.Fprintf(os.Stderr, "  plugins/%s/mu.cue → {\"plugin\": {\"guide\": \"GUIDE.md\", ...}}\n", name)
 	return 1
 }
 
@@ -885,19 +884,10 @@ func printGuideForPlugin(name string) int {
 // It checks the manifest first (for the declared guide path), then
 // falls back to conventional filenames.
 func findGuideInDir(dir string) string {
-	// Try manifest-declared guide path.
-	manifestPath := filepath.Join(dir, "mu.json")
-	if data, err := os.ReadFile(manifestPath); err == nil {
-		var manifest struct {
-			Plugin *struct {
-				Guide string `json:"guide"`
-			} `json:"plugin"`
-		}
-		if json.Unmarshal(data, &manifest) == nil && manifest.Plugin != nil && manifest.Plugin.Guide != "" {
-			guidePath := filepath.Join(dir, manifest.Plugin.Guide)
-			if _, err := os.Stat(guidePath); err == nil {
-				return guidePath
-			}
+	if cfg, err := config.LoadPluginManifest(dir); err == nil && cfg.Plugin != nil && cfg.Plugin.Guide != "" {
+		guidePath := filepath.Join(dir, cfg.Plugin.Guide)
+		if _, err := os.Stat(guidePath); err == nil {
+			return guidePath
 		}
 	}
 

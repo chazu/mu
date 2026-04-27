@@ -12,7 +12,7 @@ func runTarget(args []string) int {
 		fmt.Fprintln(os.Stderr, `usage: mu target <command>
 
 Commands:
-  list      List targets defined in mu.json`)
+  list      List targets defined in mu.cue`)
 		return exitUsage
 	}
 

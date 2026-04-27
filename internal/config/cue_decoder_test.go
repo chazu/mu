@@ -3,53 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-// TestCueDecoder_ValidProjectConfig loads testdata/mu.cue and compares
-// against the jsonDecoder's output from the paired testdata/mu.json.
-// The fixture is intentionally shaped to avoid numeric drift in
-// Target.Config (only strings and bools) so deep-equals is meaningful.
-func TestCueDecoder_ValidProjectConfig(t *testing.T) {
-	dir := "testdata"
-
-	cueCfg, err := cueDecoder{}.Decode(dir)
-	if err != nil {
-		t.Fatalf("cueDecoder.Decode: %v", err)
-	}
-	jsonCfg, err := jsonDecoder{}.Decode(dir)
-	if err != nil {
-		t.Fatalf("jsonDecoder.Decode: %v", err)
-	}
-
-	// jsonDecoder preserves declaration order. Sort its targets the same
-	// way cueDecoder does so deep-equals is valid.
-	sortTargetsByName(jsonCfg.Targets)
-	// jsonDecoder populates PluginDirs via the subdir walk; cueDecoder
-	// does not (out of scope for this story). Clear it so the comparison
-	// focuses on what cueDecoder is responsible for.
-	jsonCfg.PluginDirs = nil
-
-	// jsonDecoder runs expandSourceGlobs, which rewrites an empty
-	// Sources []string{} to nil as a side effect of its accumulator
-	// pattern. The cueDecoder does not expand globs (out of scope for
-	// this story), so align empty-slice shape before deep-equals.
-	normalizeEmptySlices := func(ts []Target) {
-		for i := range ts {
-			if len(ts[i].Sources) == 0 {
-				ts[i].Sources = nil
-			}
-		}
-	}
-	normalizeEmptySlices(cueCfg.Targets)
-	normalizeEmptySlices(jsonCfg.Targets)
-
-	if !reflect.DeepEqual(cueCfg, jsonCfg) {
-		t.Fatalf("cueDecoder output differs from jsonDecoder:\ncue:  %#v\njson: %#v", cueCfg, jsonCfg)
-	}
-}
 
 // TestCueDecoder_TargetsSorted asserts that CUE's unordered struct
 // fields are normalized to sorted order on the Target slice. The fixture

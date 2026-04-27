@@ -302,7 +302,7 @@ func (s *stubRegistryWithTags) Fetch(context.Context, ocispec.Descriptor) (io.Re
 func (s *stubRegistryWithTags) Exists(context.Context, ocispec.Descriptor) (bool, error) {
 	return false, nil
 }
-func (s *stubRegistryWithTags) Delete(context.Context, ocispec.Descriptor) error { return nil }
+func (s *stubRegistryWithTags) Delete(context.Context, ocispec.Descriptor) error      { return nil }
 func (s *stubRegistryWithTags) Tag(context.Context, ocispec.Descriptor, string) error { return nil }
 func (s *stubRegistryWithTags) Resolve(context.Context, string) (ocispec.Descriptor, error) {
 	return ocispec.Descriptor{}, nil

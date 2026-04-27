@@ -21,7 +21,7 @@ import (
 
 // runCachePush copies every cached action manifest (and all its referenced
 // blobs) from the local OCI layout at ~/.mu/cache to the remote OCI registry
-// configured under cache.push in mu.json. Blobs already present remotely are
+// configured under cache.push in mu.cue. Blobs already present remotely are
 // skipped by oras.Copy.
 func runCachePush(args []string) int {
 	fs := flag.NewFlagSet("cache push", flag.ContinueOnError)
@@ -112,17 +112,17 @@ func runCachePush(args []string) int {
 func resolvePushRef(c *cliContext) (string, int, bool) {
 	if c.Config == nil || c.Config.Cache == nil || c.Config.Cache.Push == nil {
 		return "", c.fail(exitUsage,
-			`cache.push is not configured in mu.json — add:
+			`cache.push is not configured in mu.cue — add:
   "cache": { "push": { "registry": "<host>", "repository": "<repo>" } }`), false
 	}
 	p := c.Config.Cache.Push
 	if p.Registry == "" {
 		return "", c.fail(exitUsage,
-			`cache.push.registry is not set in mu.json — set it to the OCI registry host (e.g. "registry.loosh.cloud")`), false
+			`cache.push.registry is not set in mu.cue — set it to the OCI registry host (e.g. "registry.loosh.cloud")`), false
 	}
 	if p.Repository == "" {
 		return "", c.fail(exitUsage,
-			`cache.push.repository is not set in mu.json — add it under cache.push (e.g. "repository": "mu-cache")`), false
+			`cache.push.repository is not set in mu.cue — add it under cache.push (e.g. "repository": "mu-cache")`), false
 	}
 	return p.Registry + "/" + p.Repository, exitOK, true
 }

@@ -1,6 +1,6 @@
 package config
 
-// ProjectConfig is the top-level configuration loaded from mu.json.
+// ProjectConfig is the top-level configuration loaded from mu.cue.
 type ProjectConfig struct {
 	Targets      []Target      `json:"targets,omitempty"`
 	Toolchains   []Toolchain   `json:"toolchains,omitempty"`
@@ -9,7 +9,7 @@ type ProjectConfig struct {
 	Preprocessor *Preprocessor `json:"preprocessor,omitempty"`
 
 	// PluginDirs is populated by the loader — directories (relative to
-	// project root) whose mu.json contains a "plugin" key. These are
+	// project root) whose mu.cue contains a "plugin" key. These are
 	// bundled into CAS after their build targets complete.
 	PluginDirs []string `json:"-"`
 }
@@ -65,7 +65,7 @@ type Preprocessor struct {
 	Command   []string `json:"command"`
 }
 
-// PluginManifest is the "plugin" key in a plugin directory's mu.json.
+// PluginManifest is the "plugin" key in a plugin directory's mu.cue.
 // It declares the entrypoint, optional runtime toolchain, and files to
 // include in the CAS bundle.
 type PluginManifest struct {
@@ -75,7 +75,7 @@ type PluginManifest struct {
 	Guide      string   `json:"guide,omitempty"`     // relative path to a guide text file (bundled automatically)
 }
 
-// PluginConfig is the structure of a plugin directory's mu.json.
+// PluginConfig is the structure of a plugin directory's mu.cue.
 // It extends the normal project config with a Plugin field.
 type PluginConfig struct {
 	Plugin     *PluginManifest `json:"plugin,omitempty"`

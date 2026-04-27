@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// PluginDef defines a plugin as declared in mu.json.
+// PluginDef defines a plugin as declared in mu.cue.
 type PluginDef struct {
 	Name      string   `json:"name"`      // logical name, matches target toolchain field
 	Command   []string `json:"command"`   // command to spawn, relative to project root

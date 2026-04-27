@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,109 +11,51 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// Config-file basenames recognized by FindProjectRoot, Load, and the
-// subdirectory walker. mu.cue is preferred over mu.json; the two MUST NOT
-// coexist in the same directory — if they do, callers get a clear error
-// pointing at `mu migrate`.
-const (
-	configFileCUE  = "mu.cue"
-	configFileJSON = "mu.json"
-)
+// configFileCUE is the basename of the project / per-package config file.
+const configFileCUE = "mu.cue"
 
-// probeConfigFile reports which of {mu.cue, mu.json} is present in dir.
-//
-// Returns (configFileCUE, nil) if only mu.cue is a regular file,
-// (configFileJSON, nil) if only mu.json is a regular file, and
-// ("", nil) if neither is present.
-//
-// Returns a non-nil error if BOTH are present in the same directory; the
-// error message points the user at `mu migrate` so they can consolidate.
-//
-// Symlinked config files are treated as absent (not present). This keeps
-// the symlink-safety invariant that the walker already honors for
-// subdirectories — a symlinked mu.json or mu.cue inside the project tree
-// can escape the root, so we pretend it isn't there.
-func probeConfigFile(dir string) (string, error) {
-	hasRegular := func(path string) bool {
-		info, err := os.Lstat(path)
-		if err != nil {
-			return false
-		}
-		return info.Mode().IsRegular()
+// hasMuCue reports whether dir contains a regular mu.cue file. Symlinked
+// config files are treated as absent so a symlink inside the project tree
+// cannot escape the root.
+func hasMuCue(dir string) bool {
+	info, err := os.Lstat(filepath.Join(dir, configFileCUE))
+	if err != nil {
+		return false
 	}
-	hasCue := hasRegular(filepath.Join(dir, configFileCUE))
-	hasJSON := hasRegular(filepath.Join(dir, configFileJSON))
-	if hasCue && hasJSON {
-		return "", fmt.Errorf("both mu.cue and mu.json present in %s; run `mu migrate` to consolidate on one format", dir)
-	}
-	if hasCue {
-		return configFileCUE, nil
-	}
-	if hasJSON {
-		return configFileJSON, nil
-	}
-	return "", nil
+	return info.Mode().IsRegular()
 }
 
 // FindProjectRoot walks up from startDir looking for a directory that
-// contains a project config file (mu.cue preferred, mu.json legacy). It
-// returns the absolute path to that directory.
-//
-// If both mu.cue and mu.json are present in the same directory, an error
-// is returned immediately pointing at `mu migrate`.
+// contains a mu.cue. It returns the absolute path to that directory.
 func FindProjectRoot(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", fmt.Errorf("resolving start directory: %w", err)
 	}
-
 	for {
-		name, err := probeConfigFile(dir)
-		if err != nil {
-			return "", err
-		}
-		if name != "" {
+		if hasMuCue(dir) {
 			return dir, nil
 		}
-
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Reached filesystem root without finding a config file.
-			return "", fmt.Errorf("mu.cue or mu.json not found in %s or any parent directory", startDir)
+			return "", fmt.Errorf("mu.cue not found in %s or any parent directory", startDir)
 		}
 		dir = parent
 	}
 }
 
-// Load reads the project configuration rooted at projectRoot. It probes
-// projectRoot for mu.cue (preferred) or mu.json (legacy) and dispatches
-// to the appropriate decoder. It then walks subdirectories and merges
-// any per-package config files it finds — mu.cue or mu.json — per the
-// existing prefix-and-rebase rules. If both coexist in the same
-// directory, Load errors with a `mu migrate` hint.
+// Load reads the project configuration rooted at projectRoot. It loads
+// mu.cue at the root, then walks subdirectories merging any per-package
+// mu.cue files it finds (or the preprocessor extension when configured).
 func Load(projectRoot string) (*ProjectConfig, error) {
-	name, err := probeConfigFile(projectRoot)
-	if err != nil {
-		return nil, err
+	if !hasMuCue(projectRoot) {
+		return nil, fmt.Errorf("no mu.cue in %s", projectRoot)
 	}
-	switch name {
-	case configFileCUE:
-		return loadCUEProject(projectRoot)
-	case configFileJSON:
-		return loadJSONProject(projectRoot)
-	default:
-		return nil, fmt.Errorf("no mu.cue or mu.json in %s", projectRoot)
-	}
-}
-
-// loadCUEProject loads the root mu.cue via cueDecoder, then walks
-// subdirectories merging per-package configs (mu.cue or mu.json).
-func loadCUEProject(projectRoot string) (*ProjectConfig, error) {
 	cfg, err := cueDecoder{}.Decode(projectRoot)
 	if err != nil {
 		return nil, err
 	}
-	if err := mergeSubdirConfigs(cfg, projectRoot, true); err != nil {
+	if err := mergeSubdirConfigs(cfg, projectRoot); err != nil {
 		return nil, err
 	}
 	if err := expandSourceGlobs(cfg, projectRoot); err != nil {
@@ -123,35 +64,12 @@ func loadCUEProject(projectRoot string) (*ProjectConfig, error) {
 	return cfg, nil
 }
 
-// loadJSONProject is the legacy JSON implementation of project-config
-// loading. It is wired up as jsonDecoder.Decode via the Decoder interface.
-func loadJSONProject(projectRoot string) (*ProjectConfig, error) {
-	rootFile := filepath.Join(projectRoot, configFileJSON)
-	cfg, err := loadFile(rootFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading %s: %w", rootFile, err)
-	}
-	if err := mergeSubdirConfigs(cfg, projectRoot, false); err != nil {
-		return nil, err
-	}
-	if err := expandSourceGlobs(cfg, projectRoot); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
-// mergeSubdirConfigs walks projectRoot looking for per-package config
+// mergeSubdirConfigs walks projectRoot looking for per-package mu.cue
 // files and merges each one into cfg.
 //
-// Within a given subdirectory the walker probes for mu.cue and mu.json:
-//   - exactly one present → decode via the matching decoder;
-//   - both present → error with `mu migrate` hint;
-//   - neither present → skip the directory.
-//
 // When the root config declares a preprocessor, the walker uses the
-// preprocessor's extension (mu.<ext>) exclusively and ignores mu.cue /
-// mu.json in subdirectories. This preserves the existing preprocessor
-// contract.
+// preprocessor's extension (mu.<ext>) exclusively and ignores mu.cue in
+// subdirectories. This preserves the existing preprocessor contract.
 //
 // WalkDir (unlike Walk) does not follow symlinks, preventing infinite
 // loops from cyclic symlinks and config injection from outside the
@@ -160,16 +78,9 @@ func loadJSONProject(projectRoot string) (*ProjectConfig, error) {
 //   - hidden directories (name starts with "."); and
 //   - testdata directories (Go convention for test fixtures).
 //
-// Symlinked config files inside otherwise-real subdirectories are
-// filtered out by probeConfigFile via Lstat + Mode().IsRegular().
-//
-// When loadCue is false the walker only loads mu.json partials in
-// subdirectories (legacy JSON-root behavior), but it still probes each
-// subdir and reports the "both mu.cue and mu.json present" error so
-// migration conflicts are surfaced uniformly. When loadCue is true
-// (CUE-root projects) both mu.cue and mu.json subdir configs are loaded
-// — this is the "mixed tree" path required by the mcm roadmap.
-func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) error {
+// Symlinked mu.cue files inside otherwise-real subdirectories are
+// filtered out via Lstat + Mode().IsRegular().
+func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string) error {
 	usePP := cfg.Preprocessor != nil && cfg.Preprocessor.Extension != "" && len(cfg.Preprocessor.Command) > 0
 	var ppFileName string
 	if usePP {
@@ -180,31 +91,21 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 		if walkErr != nil {
 			return walkErr
 		}
-		// Skip symlinks entirely — both directories and files.
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
 		if !d.IsDir() {
 			return nil
 		}
-
-		// Root was already loaded by the caller; don't re-probe or
-		// re-load it. This also avoids re-flagging a legitimate
-		// "both mu.cue and mu.json present" situation that the caller
-		// (Load) already surfaced — and lets callers that bypass Load
-		// (e.g. jsonDecoder{}.Decode on a fixture directory that
-		// happens to contain both) still function.
 		if path == projectRoot {
 			return nil
 		}
 
-		// Skip hidden directories and testdata (Go test convention).
 		name := d.Name()
 		if strings.HasPrefix(name, ".") || name == "testdata" {
 			return filepath.SkipDir
 		}
 
-		// Determine what file (if any) to load from this directory.
 		var subFile, kind string
 		if usePP {
 			pp := filepath.Join(path, ppFileName)
@@ -212,22 +113,9 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 				subFile = pp
 				kind = "pp"
 			}
-		} else {
-			probed, err := probeConfigFile(path)
-			if err != nil {
-				return err // both mu.cue and mu.json present
-			}
-			switch probed {
-			case configFileJSON:
-				subFile = filepath.Join(path, probed)
-				kind = probed
-			case configFileCUE:
-				if loadCue {
-					subFile = filepath.Join(path, probed)
-					kind = probed
-				}
-				// else: JSON-root project, skip cue-only subdirs.
-			}
+		} else if hasMuCue(path) {
+			subFile = filepath.Join(path, configFileCUE)
+			kind = configFileCUE
 		}
 		if subFile == "" {
 			return nil
@@ -238,8 +126,6 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 		switch kind {
 		case "pp":
 			partial, err = Preprocess(cfg.Preprocessor, subFile)
-		case configFileJSON:
-			partial, err = loadFile(subFile)
 		case configFileCUE:
 			partial, err = cueDecoder{}.Decode(path)
 		}
@@ -247,21 +133,12 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 			return fmt.Errorf("loading %s: %w", subFile, err)
 		}
 
-		// Compute the package path relative to project root. A config at
-		// projectRoot/foo/bar/ produces the prefix "//foo/bar".
 		relDir, err := filepath.Rel(projectRoot, path)
 		if err != nil {
 			return fmt.Errorf("computing relative path for %s: %w", subFile, err)
 		}
 
-		// Track plugin directories for post-build CAS bundling.
-		switch kind {
-		case configFileJSON:
-			raw, _ := os.ReadFile(subFile)
-			if IsPluginDir(raw) {
-				cfg.PluginDirs = append(cfg.PluginDirs, relDir)
-			}
-		case configFileCUE:
+		if kind == configFileCUE {
 			raw, _ := os.ReadFile(subFile)
 			if IsCuePluginDir(raw) {
 				cfg.PluginDirs = append(cfg.PluginDirs, relDir)
@@ -269,13 +146,10 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 		}
 
 		prefix := "//" + filepath.ToSlash(relDir)
-		// Normalise the root case: "//."->"//".
 		prefix = strings.TrimSuffix(prefix, "/.")
 
 		subDir := path
 
-		// Prefix target names and rebase source paths so they are
-		// absolute within the project.
 		for i := range partial.Targets {
 			t := &partial.Targets[i]
 			if !strings.HasPrefix(t.Name, "//") {
@@ -285,7 +159,6 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 					t.Name = prefix + "/" + t.Name
 				}
 			}
-			// Rebase source file paths relative to the subdirectory.
 			for j := range t.Sources {
 				if !filepath.IsAbs(t.Sources[j]) {
 					abs := filepath.Join(subDir, t.Sources[j])
@@ -296,7 +169,6 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 			}
 		}
 
-		// Rebase plugin paths relative to the subdirectory.
 		for i := range partial.Plugins {
 			p := &partial.Plugins[i]
 			if p.Script != "" && !filepath.IsAbs(p.Script) {
@@ -306,9 +178,6 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, loadCue bool) er
 					p.Script = rel
 				}
 			}
-			// Only rebase command args that look like relative paths
-			// (contain a path separator). Bare command names like "bb"
-			// should not be rebased.
 			for j := range p.Command {
 				arg := p.Command[j]
 				if !filepath.IsAbs(arg) && strings.ContainsAny(arg, "/\\") {
@@ -348,7 +217,6 @@ func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
 				expanded = append(expanded, src)
 				continue
 			}
-			// doublestar operates on io/fs paths which always use "/".
 			pattern := filepath.ToSlash(src)
 			if !doublestar.ValidatePattern(pattern) {
 				return fmt.Errorf("target %q: invalid glob %q", t.Name, src)
@@ -357,7 +225,6 @@ func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
 			if err != nil {
 				return fmt.Errorf("target %q: invalid glob %q: %w", t.Name, src, err)
 			}
-			// Filter out hidden segments (e.g. .git/foo.go) and sort.
 			filtered := matches[:0]
 			for _, m := range matches {
 				if hasHiddenSegment(m) {
@@ -366,8 +233,6 @@ func expandSourceGlobs(cfg *ProjectConfig, projectRoot string) error {
 				filtered = append(filtered, m)
 			}
 			if len(filtered) == 0 {
-				// No matches — keep the literal pattern so the resolve
-				// step can report a clear error about the missing file.
 				expanded = append(expanded, src)
 				continue
 			}
@@ -393,22 +258,6 @@ func hasHiddenSegment(p string) bool {
 		}
 	}
 	return false
-}
-
-// loadFile reads and unmarshals a single JSON config file. Loading any
-// mu.json file emits a one-line deprecation warning to stderr (at most
-// once per process); see warnJSONDeprecated.
-func loadFile(path string) (*ProjectConfig, error) {
-	warnJSONDeprecated()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cfg ProjectConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing JSON: %w", err)
-	}
-	return &cfg, nil
 }
 
 // merge appends targets, toolchains, and plugins from src into dst.

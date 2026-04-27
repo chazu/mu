@@ -13,7 +13,7 @@ import (
 	_ "github.com/chau/mu/internal/cas/oci"
 )
 
-// buildCacheStore constructs the CAS store from mu.json cache config. When
+// buildCacheStore constructs the CAS store from mu.cue cache config. When
 // no cache block is configured, falls back to a single local disk store
 // at ~/.mu/cache. Multiple backends compose into a cas.Tiered.
 func buildCacheStore(cacheCfg *config.CacheConfig, verbose bool) (cas.Store, error) {

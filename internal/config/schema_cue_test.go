@@ -63,7 +63,7 @@ func validateAgainst(def, data cue.Value) error {
 }
 
 // repoRoot returns the repository root directory by walking upwards from
-// this test file until it finds go.mod alongside a mu.cue or mu.json.
+// this test file until it finds go.mod alongside a mu.cue.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -73,9 +73,6 @@ func repoRoot(t *testing.T) string {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			if _, err := os.Stat(filepath.Join(dir, "mu.cue")); err == nil {
-				return dir
-			}
-			if _, err := os.Stat(filepath.Join(dir, "mu.json")); err == nil {
 				return dir
 			}
 		}

@@ -19,6 +19,8 @@ func main() {
 		os.Exit(runCache(os.Args[2:]))
 	case "target":
 		os.Exit(runTarget(os.Args[2:]))
+	case "graph":
+		os.Exit(runGraph(os.Args[2:]))
 	case "plugin":
 		os.Exit(runPlugin(os.Args[2:]))
 	case "observe":
@@ -27,8 +29,6 @@ func main() {
 		os.Exit(runVerify(os.Args[2:]))
 	case "guide":
 		os.Exit(runGuide(os.Args[2:]))
-	case "migrate":
-		os.Exit(runMigrate(os.Args[2:]))
 	case "version":
 		fmt.Println("mu v0.1.0")
 	default:
@@ -45,10 +45,10 @@ Commands:
   scratch    Build toolchains from scratch (override with MU_SCRATCH)
   cache      Inspect the local CAS cache
   target     List and inspect targets
+  graph      Show the dependency chain of a target
   plugin     List and inspect plugins
   observe    Check current state of targets (drift detection)
   verify     Re-hash CAS blobs and report corruption
   guide      Quick-reference guides for mu features
-  migrate    Convert mu.json to mu.cue
   version    Print the mu version`)
 }

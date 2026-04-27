@@ -1,0 +1,14 @@
+plugin: {
+	entrypoint: "plugin.sh"
+}
+targets: [
+	{
+		target:    "build"
+		toolchain: "shell"
+		sources: ["plugin.sh", "helper.txt"]
+		config: {
+			command: ["true"]
+			impure: false
+		}
+	},
+]

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,17 +19,15 @@ func writeFile(t *testing.T, path, data string) {
 	}
 }
 
-// loadSources writes a mu.json declaring a single target with the given
+// loadSources writes a mu.cue declaring a single target with the given
 // sources, runs Load, and returns the resulting (expanded) sources slice.
 func loadSources(t *testing.T, root string, sources []string) []string {
 	t.Helper()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{
-		Targets: []Target{{
-			Name:      "t",
-			Toolchain: "noop",
-			Sources:   sources,
-		}},
-	})
+	cue := fmt.Sprintf(`
+toolchains: [{toolchain: "noop", from: "scratch"}]
+targets: [{target: "t", toolchain: "noop", sources: %s}]
+`, cueStringList(sources))
+	writeFile(t, filepath.Join(root, "mu.cue"), cue)
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -76,8 +75,6 @@ func TestExpandSourceGlobs_SingleStar(t *testing.T) {
 
 func TestExpandSourceGlobs_UnmatchedLiteral(t *testing.T) {
 	root := t.TempDir()
-	// No .go files exist.
-
 	got := loadSources(t, root, []string{"missing/*.go"})
 	want := []string{"missing/*.go"}
 	if !equalSlices(got, want) {

@@ -9,13 +9,13 @@ import (
 	"strings"
 )
 
-// runPluginStatus reconciles plugins declared in mu.json against plugins
+// runPluginStatus reconciles plugins declared in mu.cue against plugins
 // materialized under ~/.mu/plugins. Each plugin lands in one of:
 //
 //	ok      — declared with a digest and that digest is present in the cache
 //	missing — declared with a digest but the cache has no matching blob
 //	stale   — cached blob(s) exist for this plugin, but none match the
-//	          declared digest (e.g. a digest was bumped in mu.json)
+//	          declared digest (e.g. a digest was bumped in mu.cue)
 //	local   — declared as a local script / command / url; no cache check
 func runPluginStatus(args []string) int {
 	fs := flag.NewFlagSet("plugin status", flag.ContinueOnError)

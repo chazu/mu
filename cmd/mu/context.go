@@ -61,7 +61,7 @@ type resolveOpts struct {
 func newCLIContext(name string, fs *flag.FlagSet) *cliContext {
 	c := &cliContext{
 		Name:        name,
-		flagConfig:  fs.String("config", "", "path to mu.json (default: discover by walking up)"),
+		flagConfig:  fs.String("config", "", "path to mu.cue (default: discover by walking up)"),
 		flagJSON:    fs.Bool("json", false, "output as JSON"),
 		flagVerbose: fs.Bool("verbose", false, "verbose output"),
 		flagNoColor: fs.Bool("no-color", false, "disable ANSI color output"),

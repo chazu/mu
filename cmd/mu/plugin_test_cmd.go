@@ -15,7 +15,7 @@ import (
 
 // runPluginTest implements `mu plugin test <plugin-path> [flags]`.
 //
-// <plugin-path> is a directory containing plugin.bb / mu.json (the
+// <plugin-path> is a directory containing plugin.bb / mu.cue (the
 // typical plugin layout). The command spawns the plugin, runs bundled
 // generic scenarios plus any scenarios under <path>/testdata/, and
 // reports pass/fail per scenario.

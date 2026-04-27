@@ -30,14 +30,16 @@ func TestRegistersSharedFlags(t *testing.T) {
 
 func TestResolveProjectRoot_FromConfigFlag(t *testing.T) {
 	dir := t.TempDir()
-	muJSON := filepath.Join(dir, "mu.json")
-	if err := os.WriteFile(muJSON, []byte(`{"project":"x"}`), 0o644); err != nil {
+	muCue := filepath.Join(dir, "mu.cue")
+	if err := os.WriteFile(muCue, []byte(`toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "//x", toolchain: "go", sources: ["main.go"]}]
+`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	ctx := newCLIContext("test", fs)
-	if err := fs.Parse([]string{"--config", muJSON}); err != nil {
+	if err := fs.Parse([]string{"--config", muCue}); err != nil {
 		t.Fatal(err)
 	}
 	if code, ok := ctx.Resolve(resolveOpts{NeedConfig: true}); !ok {
@@ -52,7 +54,7 @@ func TestResolveProjectRoot_FromConfigFlag(t *testing.T) {
 }
 
 func TestResolveProjectRoot_DiscoveryFailureReturnsUsage(t *testing.T) {
-	// Run from a temp dir with no mu.json anywhere upward.
+	// Run from a temp dir with no mu.cue anywhere upward.
 	t.Chdir(t.TempDir())
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)

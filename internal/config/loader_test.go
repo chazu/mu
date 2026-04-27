@@ -1,15 +1,28 @@
 package config
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
+// minimalCueRoot returns a minimal valid #ProjectConfig mu.cue body that
+// satisfies schema.cue and yields the given target name.
+func minimalCueRoot(targetName string) string {
+	return `toolchains: [
+  {toolchain: "go", from: "scratch"},
+]
+targets: [
+  {target: "` + targetName + `", toolchain: "go", sources: ["main.go"]},
+]
+`
+}
+
 func TestFindProjectRoot_Direct(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, filepath.Join(dir, "mu.json"), ProjectConfig{})
+	writeFile(t, filepath.Join(dir, "mu.cue"), minimalCueRoot("//app"))
 
 	root, err := FindProjectRoot(dir)
 	if err != nil {
@@ -22,7 +35,7 @@ func TestFindProjectRoot_Direct(t *testing.T) {
 
 func TestFindProjectRoot_WalkUp(t *testing.T) {
 	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//app"))
 
 	child := filepath.Join(root, "a", "b", "c")
 	if err := os.MkdirAll(child, 0o755); err != nil {
@@ -39,25 +52,37 @@ func TestFindProjectRoot_WalkUp(t *testing.T) {
 }
 
 func TestFindProjectRoot_NotFound(t *testing.T) {
-	dir := t.TempDir() // no mu.json here
+	dir := t.TempDir() // no mu.cue here
 	_, err := FindProjectRoot(dir)
 	if err == nil {
-		t.Fatal("expected error when mu.json is absent")
+		t.Fatal("expected error when mu.cue is absent")
 	}
 }
 
-func TestLoad_BasicMuJSON(t *testing.T) {
-	root := t.TempDir()
+// targetCue returns a CUE struct literal for one target with the given
+// fields. Sources are rendered as a CUE list.
+func targetCue(name, toolchain string, sources []string) string {
+	return fmt.Sprintf(`{target: %q, toolchain: %q, sources: %s}`, name, toolchain, cueStringList(sources))
+}
 
-	proj := ProjectConfig{
-		Targets: []Target{
-			{Name: "//app", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-		Plugins: []PluginDef{
-			{Name: "go", Command: []string{"mu-plugin-go"}},
-		},
+func cueStringList(xs []string) string {
+	if len(xs) == 0 {
+		return "[]"
 	}
-	writeJSON(t, filepath.Join(root, "mu.json"), proj)
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = fmt.Sprintf("%q", x)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func TestLoad_Basic(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+plugins: [{name: "go", command: ["mu-plugin-go"]}]
+targets: [{target: "//app", toolchain: "go", sources: ["*.go"]}]
+`)
 
 	cfg, err := Load(root)
 	if err != nil {
@@ -74,26 +99,18 @@ func TestLoad_BasicMuJSON(t *testing.T) {
 	}
 }
 
-func TestLoad_MergeSubdirMuJSON(t *testing.T) {
+func TestLoad_MergeSubdir(t *testing.T) {
 	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root-target"))
 
-	// Root mu.json with one target.
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "//root-target", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
-
-	// mu.json in a subdirectory adds another target.
 	sub := filepath.Join(root, "pkg", "web")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "server", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
+	writeFile(t, filepath.Join(sub, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "server", toolchain: "go", sources: ["*.go"]}]
+`)
 
 	cfg, err := Load(root)
 	if err != nil {
@@ -103,7 +120,6 @@ func TestLoad_MergeSubdirMuJSON(t *testing.T) {
 		t.Fatalf("expected 2 targets, got %d", len(cfg.Targets))
 	}
 
-	// The subdirectory mu.json target should have been prefixed.
 	var found bool
 	for _, tgt := range cfg.Targets {
 		if tgt.Name == "//pkg/web/server" {
@@ -119,70 +135,72 @@ func TestLoad_MergeSubdirMuJSON(t *testing.T) {
 	}
 }
 
-func TestLoad_MultipleSubdirMuJSON(t *testing.T) {
+func TestLoad_MultipleSubdir(t *testing.T) {
 	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root-target"))
 
 	for _, pkg := range []string{"alpha", "beta", "gamma"} {
 		dir := filepath.Join(root, pkg)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		writeJSON(t, filepath.Join(dir, "mu.json"), ProjectConfig{
-			Targets: []Target{
-				{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
-			},
-		})
+		writeFile(t, filepath.Join(dir, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "lib", toolchain: "go", sources: ["*.go"]}]
+`)
 	}
 
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.Targets) != 3 {
-		t.Fatalf("expected 3 targets, got %d", len(cfg.Targets))
+	// Root target + 3 subdir targets.
+	if len(cfg.Targets) != 4 {
+		t.Fatalf("expected 4 targets, got %d", len(cfg.Targets))
 	}
 }
 
 func TestLoad_AlreadyPrefixedTarget(t *testing.T) {
 	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
 
 	sub := filepath.Join(root, "pkg")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "//explicit/name", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
+	writeFile(t, filepath.Join(sub, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "//explicit/name", toolchain: "go", sources: ["*.go"]}]
+`)
 
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Targets[0].Name != "//explicit/name" {
-		t.Fatalf("already-prefixed target should not be modified, got %s", cfg.Targets[0].Name)
+	var found bool
+	for _, tgt := range cfg.Targets {
+		if tgt.Name == "//explicit/name" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("already-prefixed target should not be modified, targets=%+v", cfg.Targets)
 	}
 }
 
 func TestLoad_SkipsSymlinks(t *testing.T) {
 	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
 
-	// Create a real subdirectory with a mu.json.
 	real := filepath.Join(root, "real")
 	if err := os.MkdirAll(real, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(real, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
+	writeFile(t, filepath.Join(real, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "lib", toolchain: "go", sources: ["*.go"]}]
+`)
 
-	// Create a symlinked directory pointing back to real -- should be skipped.
 	symDir := filepath.Join(root, "linked")
 	if err := os.Symlink(real, symDir); err != nil {
 		t.Skipf("symlinks not supported: %v", err)
@@ -192,30 +210,27 @@ func TestLoad_SkipsSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	// Only the target from the real directory should be loaded, not the symlink.
-	if len(cfg.Targets) != 1 {
-		t.Fatalf("expected 1 target (symlinked dir should be skipped), got %d", len(cfg.Targets))
+	// Root target + lib in real (symlinked dir is skipped).
+	if len(cfg.Targets) != 2 {
+		t.Fatalf("expected 2 targets (symlinked dir should be skipped), got %d", len(cfg.Targets))
 	}
 }
 
 func TestLoad_SkipsSymlinkedFile(t *testing.T) {
 	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
 
-	// Create a mu.json outside the project tree.
 	outside := t.TempDir()
-	writeJSON(t, filepath.Join(outside, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "injected", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
+	writeFile(t, filepath.Join(outside, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "injected", toolchain: "go", sources: ["*.go"]}]
+`)
 
-	// Symlink to the outside mu.json inside the project -- should be skipped.
 	sub := filepath.Join(root, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(outside, "mu.json"), filepath.Join(sub, "mu.json")); err != nil {
+	if err := os.Symlink(filepath.Join(outside, "mu.cue"), filepath.Join(sub, "mu.cue")); err != nil {
 		t.Skipf("symlinks not supported: %v", err)
 	}
 
@@ -223,19 +238,24 @@ func TestLoad_SkipsSymlinkedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.Targets) != 0 {
-		t.Fatalf("expected 0 targets (symlinked file should be skipped), got %d", len(cfg.Targets))
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target (symlinked file should be skipped), got %d", len(cfg.Targets))
 	}
 }
 
-// writeJSON is a test helper that marshals v to path.
-func writeJSON(t *testing.T, path string, v any) {
-	t.Helper()
-	data, err := json.MarshalIndent(v, "", "  ")
+func TestLoad_SkipsHiddenAndTestdata(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+
+	bad := `targets: [{target: "!not-a-label!"}]`
+	writeFile(t, filepath.Join(root, ".hidden", "mu.cue"), bad)
+	writeFile(t, filepath.Join(root, "testdata", "mu.cue"), bad)
+
+	cfg, err := Load(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Load: %v — walker likely descended into hidden/testdata", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target (root only), got %d", len(cfg.Targets))
 	}
 }

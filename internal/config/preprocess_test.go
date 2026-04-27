@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,19 @@ func writeScript(t *testing.T, path, body string) {
 	}
 }
 
+// writeJSONFile writes v as indented JSON to path. Used for fixture files
+// fed to a preprocessor (which receives non-CUE inputs and emits JSON).
+func writeJSONFile(t *testing.T, path string, v any) {
+	t.Helper()
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPreprocess_Success(t *testing.T) {
 	dir := t.TempDir()
 
@@ -29,7 +43,7 @@ func TestPreprocess_Success(t *testing.T) {
 
 	// Write a mu.star file that is actually JSON.
 	buildFile := filepath.Join(dir, "mu.star")
-	writeJSON(t, buildFile, ProjectConfig{
+	writeJSONFile(t, buildFile, ProjectConfig{
 		Targets: []Target{
 			{Name: "//app", Toolchain: "go", Sources: []string{"*.go"}},
 		},
@@ -122,8 +136,9 @@ func TestPreprocess_EmptyCommand(t *testing.T) {
 	}
 }
 
-// TestLoad_WithPreprocessor verifies the full integration: mu.json declares a
-// preprocessor, and Load finds mu.<ext> files instead of mu.json.
+// TestLoad_WithPreprocessor verifies the full integration: mu.cue declares
+// a preprocessor, and Load finds mu.<ext> files instead of mu.cue in
+// subdirectories.
 func TestLoad_WithPreprocessor(t *testing.T) {
 	root := t.TempDir()
 
@@ -131,36 +146,36 @@ func TestLoad_WithPreprocessor(t *testing.T) {
 	script := filepath.Join(root, "pp.sh")
 	writeScript(t, script, `cat "$1"`)
 
-	// mu.json with preprocessor configured.
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{
-		Preprocessor: &Preprocessor{
-			Extension: "star",
-			Command:   []string{script},
-		},
-	})
+	// Root mu.cue declaring the preprocessor.
+	rootCue := `
+preprocessor: {
+	extension: "star"
+	command: ["` + script + `"]
+}
+`
+	writeFile(t, filepath.Join(root, "mu.cue"), rootCue)
 
 	// A mu.star in a subdirectory (should be found).
 	sub := filepath.Join(root, "pkg", "lib")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(sub, "mu.star"), ProjectConfig{
+	writeJSONFile(t, filepath.Join(sub, "mu.star"), ProjectConfig{
 		Targets: []Target{
 			{Name: "mylib", Toolchain: "go", Sources: []string{"*.go"}},
 		},
 	})
 
-	// A mu.json in a different subdirectory (should be ignored when
+	// A mu.cue in a different subdirectory (should be ignored when
 	// preprocessor is active — only mu.<ext> files are discovered).
 	other := filepath.Join(root, "pkg", "other")
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(other, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "ignored", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
+	writeFile(t, filepath.Join(other, "mu.cue"), `
+toolchains: [{toolchain: "go", from: "scratch"}]
+targets: [{target: "ignored", toolchain: "go", sources: ["*.go"]}]
+`)
 
 	cfg, err := Load(root)
 	if err != nil {
@@ -175,32 +190,6 @@ func TestLoad_WithPreprocessor(t *testing.T) {
 	}
 }
 
-// TestLoad_NoPreprocessor_FallsThrough ensures that without a preprocessor,
-// Load still finds mu.json in subdirectories.
-func TestLoad_NoPreprocessor_FallsThrough(t *testing.T) {
-	root := t.TempDir()
-
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{})
-
-	sub := filepath.Join(root, "pkg")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeJSON(t, filepath.Join(sub, "mu.json"), ProjectConfig{
-		Targets: []Target{
-			{Name: "lib", Toolchain: "go", Sources: []string{"*.go"}},
-		},
-	})
-
-	cfg, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(cfg.Targets) != 1 {
-		t.Fatalf("expected 1 target, got %d", len(cfg.Targets))
-	}
-}
-
 // TestLoad_PreprocessorError verifies that preprocessor failures propagate.
 func TestLoad_PreprocessorError(t *testing.T) {
 	root := t.TempDir()
@@ -208,12 +197,13 @@ func TestLoad_PreprocessorError(t *testing.T) {
 	script := filepath.Join(root, "fail.sh")
 	writeScript(t, script, `echo "build failed" >&2; exit 1`)
 
-	writeJSON(t, filepath.Join(root, "mu.json"), ProjectConfig{
-		Preprocessor: &Preprocessor{
-			Extension: "star",
-			Command:   []string{script},
-		},
-	})
+	rootCue := `
+preprocessor: {
+	extension: "star"
+	command: ["` + script + `"]
+}
+`
+	writeFile(t, filepath.Join(root, "mu.cue"), rootCue)
 
 	sub := filepath.Join(root, "pkg")
 	if err := os.MkdirAll(sub, 0o755); err != nil {

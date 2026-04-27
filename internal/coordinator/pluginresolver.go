@@ -101,7 +101,7 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 }
 
 // resolveLocal handles a local plugin path — either a single file or a
-// directory containing a plugin manifest (mu.json with a "plugin" key).
+// directory containing a plugin manifest (mu.cue with a "plugin" key).
 func (r *PluginResolver) resolveLocal(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
 	scriptPath := p.Script
 	if !filepath.IsAbs(scriptPath) {

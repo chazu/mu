@@ -54,9 +54,9 @@ func TestResolveLocalDir(t *testing.T) {
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "mu.json"), []byte(`{
-		"plugin": {"entrypoint": "run.sh", "runtime": "none"}
-	}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "mu.cue"), []byte(`
+plugin: {entrypoint: "run.sh"}
+`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(pluginDir, "run.sh"), []byte("#!/bin/bash\necho ok"), 0o755); err != nil {
@@ -104,7 +104,7 @@ func TestResolveLocalDir_MissingManifest(t *testing.T) {
 	cacheDir := t.TempDir()
 	projectRoot := t.TempDir()
 
-	// Directory without mu.json.
+	// Directory without mu.cue.
 	pluginDir := filepath.Join(projectRoot, "plugins", "bad")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -132,9 +132,9 @@ func TestResolveLocalDir_MissingEntrypoint(t *testing.T) {
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "mu.json"), []byte(`{
-		"plugin": {"entrypoint": "nonexistent.sh"}
-	}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "mu.cue"), []byte(`
+plugin: {entrypoint: "nonexistent.sh"}
+`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

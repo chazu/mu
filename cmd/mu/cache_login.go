@@ -21,7 +21,7 @@ import (
 // credential helper binary (e.g. `docker-credential-desktop`) which is not
 // installed on most hosts. Reads still fall back to the Docker chain, so
 // existing `docker login` / `oras login` sessions keep working.
-// The registry defaults to cache.push.registry from mu.json; an explicit
+// The registry defaults to cache.push.registry from mu.cue; an explicit
 // positional argument overrides it.
 func runCacheLogin(args []string) int {
 	fs := flag.NewFlagSet("cache login", flag.ContinueOnError)
@@ -46,7 +46,7 @@ func runCacheLogin(args []string) int {
 	}
 	if registry == "" {
 		return c.fail(exitUsage,
-			`no registry given — pass one as an argument (mu cache login <host>) or set cache.push.registry in mu.json`)
+			`no registry given — pass one as an argument (mu cache login <host>) or set cache.push.registry in mu.cue`)
 	}
 
 	user, pass, code, ok := readCredentials(c, *username, *password, *passwordStdin)
@@ -102,7 +102,7 @@ func runCacheLogout(args []string) int {
 	}
 	if registry == "" {
 		return c.fail(exitUsage,
-			`no registry given — pass one as an argument (mu cache logout <host>) or set cache.push.registry in mu.json`)
+			`no registry given — pass one as an argument (mu cache logout <host>) or set cache.push.registry in mu.cue`)
 	}
 
 	store, err := openCredentialStore()

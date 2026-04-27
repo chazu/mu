@@ -12,6 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"cuelang.org/go/cue/ast"
+	"cuelang.org/go/cue/format"
+	"cuelang.org/go/cue/parser"
+	"cuelang.org/go/cue/token"
+
 	"github.com/chau/mu/internal/cas"
 	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/config"
@@ -100,8 +105,8 @@ func runPluginAdd(args []string) int {
 		return 1
 	}
 
-	// Update mu.json with the digest-based plugin entry.
-	if err := updateMuJSONPlugin(projectRoot, pluginName, dgst.String()); err != nil {
+	// Update mu.cue with the digest-based plugin entry.
+	if err := updateMuCuePlugin(projectRoot, pluginName, dgst.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin add: %v\n", err)
 		return 1
 	}
@@ -642,100 +647,145 @@ func extractPluginDigest(result *coordinator.BuildResult, targetName string) (ca
 	return cas.Digest{}, fmt.Errorf("no plugin output found for target %s", targetName)
 }
 
-// updateMuJSONPlugin edits the root mu.json to add or replace a plugin entry
-// with the given digest. It does surgical text replacement to preserve the
-// existing key ordering and formatting.
-func updateMuJSONPlugin(projectRoot, pluginName, digest string) error {
-	path := filepath.Join(projectRoot, "mu.json")
+// updateMuCuePlugin edits the root mu.cue to add or replace a plugin
+// entry with the given digest. The edit operates on the CUE AST: if a
+// `plugins` list field exists with an entry whose `name` matches, its
+// `digest` field is set (replacing any prior value); otherwise a new
+// entry is appended. If no `plugins` field exists yet, one is created.
+func updateMuCuePlugin(projectRoot, pluginName, digest string) error {
+	path := filepath.Join(projectRoot, "mu.cue")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("reading mu.json: %w", err)
+		return fmt.Errorf("reading mu.cue: %w", err)
 	}
 
-	text := string(data)
-
-	// Format the new entry to match hand-written style.
-	newEntry := fmt.Sprintf(`{"name": %q, "digest": %q}`, pluginName, digest)
-
-	// Try to find and replace an existing plugin entry with this name.
-	// Look for {"name": "<pluginName>", ...} or {"name": "<pluginName>"} patterns.
-	// We search for the opening { of the entry containing the name.
-	replaced := false
-	namePattern := fmt.Sprintf(`"name": %q`, pluginName)
-	nameAlt := fmt.Sprintf(`"name":%q`, pluginName) // no space variant
-
-	// Find the plugin entry by locating the name field, then finding the
-	// enclosing {} braces.
-	for _, pat := range []string{namePattern, nameAlt} {
-		idx := strings.Index(text, pat)
-		if idx < 0 {
-			continue
-		}
-		// Walk backward to find the opening {.
-		start := strings.LastIndex(text[:idx], "{")
-		if start < 0 {
-			continue
-		}
-		// Walk forward to find the closing }.
-		end := strings.Index(text[idx:], "}")
-		if end < 0 {
-			continue
-		}
-		end += idx + 1 // absolute position past the }
-
-		text = text[:start] + newEntry + text[end:]
-		replaced = true
-		break
+	file, err := parser.ParseFile(path, data, parser.ParseComments)
+	if err != nil {
+		return fmt.Errorf("parsing mu.cue: %w", err)
 	}
 
-	if !replaced {
-		// Append to the plugins array. Find the closing ] of "plugins": [...].
-		pluginsIdx := strings.Index(text, `"plugins"`)
-		if pluginsIdx < 0 {
-			return fmt.Errorf("no \"plugins\" key found in mu.json")
-		}
-		// Find the [ after "plugins":
-		bracketStart := strings.Index(text[pluginsIdx:], "[")
-		if bracketStart < 0 {
-			return fmt.Errorf("no plugins array found in mu.json")
-		}
-		bracketStart += pluginsIdx
+	pluginsField := findTopField(file, "plugins")
+	newEntry := pluginEntryStruct(pluginName, digest)
 
-		// Find the matching ].
-		depth := 0
-		bracketEnd := -1
-		for i := bracketStart; i < len(text); i++ {
-			switch text[i] {
-			case '[':
-				depth++
-			case ']':
-				depth--
-				if depth == 0 {
-					bracketEnd = i
-					break
-				}
+	if pluginsField == nil {
+		// Append a fresh `plugins: [...]` declaration at file end.
+		file.Decls = append(file.Decls, &ast.Field{
+			Label: ast.NewIdent("plugins"),
+			Value: &ast.ListLit{Elts: []ast.Expr{newEntry}},
+		})
+	} else {
+		list, ok := pluginsField.Value.(*ast.ListLit)
+		if !ok {
+			return fmt.Errorf("mu.cue: top-level `plugins` is not a list literal")
+		}
+		replaced := false
+		for i, elt := range list.Elts {
+			s, ok := elt.(*ast.StructLit)
+			if !ok {
+				continue
 			}
-			if bracketEnd >= 0 {
-				break
+			if cueFieldStringValue(s, "name") != pluginName {
+				continue
 			}
+			list.Elts[i] = mergeDigestField(s, digest)
+			replaced = true
+			break
 		}
-		if bracketEnd < 0 {
-			return fmt.Errorf("unterminated plugins array in mu.json")
+		if !replaced {
+			list.Elts = append(list.Elts, newEntry)
 		}
-
-		// Insert before the ]. Walk back past any whitespace/newlines to
-		// find the last real content before the ].
-		insertAt := bracketEnd
-		for insertAt > bracketStart && (text[insertAt-1] == ' ' || text[insertAt-1] == '\n' || text[insertAt-1] == '\r' || text[insertAt-1] == '\t') {
-			insertAt--
-		}
-		insertion := ",\n    " + newEntry + "\n  "
-		text = text[:insertAt] + insertion + text[bracketEnd:]
 	}
 
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		return fmt.Errorf("writing mu.json: %w", err)
+	out, err := format.Node(file, format.Simplify())
+	if err != nil {
+		return fmt.Errorf("formatting mu.cue: %w", err)
 	}
-
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return fmt.Errorf("writing mu.cue: %w", err)
+	}
 	return nil
+}
+
+// findTopField returns the first top-level *ast.Field with the given
+// identifier label, or nil if none exists.
+func findTopField(file *ast.File, name string) *ast.Field {
+	for _, d := range file.Decls {
+		f, ok := d.(*ast.Field)
+		if !ok {
+			continue
+		}
+		if id, ok := f.Label.(*ast.Ident); ok && id.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// cueFieldStringValue returns the string-literal value of the named field
+// inside s, or "" if it is missing or not a basic string literal.
+func cueFieldStringValue(s *ast.StructLit, name string) string {
+	for _, e := range s.Elts {
+		f, ok := e.(*ast.Field)
+		if !ok {
+			continue
+		}
+		var label string
+		switch lbl := f.Label.(type) {
+		case *ast.Ident:
+			label = lbl.Name
+		case *ast.BasicLit:
+			if lbl.Kind == token.STRING {
+				label = strings.Trim(lbl.Value, `"`)
+			}
+		}
+		if label != name {
+			continue
+		}
+		if lit, ok := f.Value.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			return strings.Trim(lit.Value, `"`)
+		}
+	}
+	return ""
+}
+
+// pluginEntryStruct builds an AST struct literal {name: <name>, digest: <digest>}.
+func pluginEntryStruct(name, digest string) *ast.StructLit {
+	return &ast.StructLit{
+		Elts: []ast.Decl{
+			&ast.Field{
+				Label: ast.NewIdent("name"),
+				Value: ast.NewString(name),
+			},
+			&ast.Field{
+				Label: ast.NewIdent("digest"),
+				Value: ast.NewString(digest),
+			},
+		},
+	}
+}
+
+// mergeDigestField returns a copy of s with its `digest` field set to the
+// given value. An existing `digest` field is replaced in place; otherwise
+// a new one is appended.
+func mergeDigestField(s *ast.StructLit, digest string) *ast.StructLit {
+	for i, e := range s.Elts {
+		f, ok := e.(*ast.Field)
+		if !ok {
+			continue
+		}
+		id, ok := f.Label.(*ast.Ident)
+		if !ok || id.Name != "digest" {
+			continue
+		}
+		s.Elts[i] = &ast.Field{
+			Label: ast.NewIdent("digest"),
+			Value: ast.NewString(digest),
+		}
+		return s
+	}
+	s.Elts = append(s.Elts, &ast.Field{
+		Label: ast.NewIdent("digest"),
+		Value: ast.NewString(digest),
+	})
+	return s
 }
