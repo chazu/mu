@@ -171,8 +171,15 @@ func (r *Runner) send(ctx context.Context, req plugin.Request, out *any) error {
 		}
 		*out = map[string]any{"value": val}
 		return nil
+	case "store_secret":
+		if err := r.Proc.StoreSecret(ctx, req.SecretRef, req.SecretValue, req.SecretMode); err != nil {
+			*out = map[string]any{"error": err.Error()}
+			return nil
+		}
+		*out = map[string]any{}
+		return nil
 	default:
-		return fmt.Errorf("unknown method %q (supported: discover, plan, observe, resolve_secret)", req.Method)
+		return fmt.Errorf("unknown method %q (supported: discover, plan, observe, resolve_secret, store_secret)", req.Method)
 	}
 }
 
@@ -202,6 +209,12 @@ func buildRequest(m map[string]any) plugin.Request {
 	}
 	if ref, ok := m["secret_ref"].(string); ok {
 		req.SecretRef = ref
+	}
+	if v, ok := m["secret_value"].(string); ok {
+		req.SecretValue = v
+	}
+	if mode, ok := m["secret_mode"].(string); ok {
+		req.SecretMode = mode
 	}
 	if deps, ok := m["deps"].([]any); ok {
 		for _, d := range deps {

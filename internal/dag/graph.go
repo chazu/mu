@@ -29,11 +29,35 @@ type Action struct {
 	// RetryBackoffMs is the sleep between attempts in milliseconds.
 	RetryBackoffMs int
 
-	// SealedInputs maps env var names to secret references (e.g. "pass:deploy/token").
-	// These are resolved to actual values by the coordinator before execution and
-	// injected into the action's environment. Sealed inputs are deliberately excluded
-	// from cache key computation, build manifests, and verbose logging.
+	// SealedInputs maps names to secret references (e.g. "pass:deploy/token").
+	// These are resolved to actual values by the coordinator before execution
+	// and delivered to the action per SealedInputModes. Sealed input *values*
+	// are deliberately excluded from cache key computation, build manifests,
+	// and verbose logging; the *refs* and *modes* are part of the cache key.
 	SealedInputs map[string]string
+
+	// SealedInputModes selects how each sealed input is delivered to the
+	// action: "env" (default) exports it as $NAME; "file" writes the value
+	// to a 0600 temp file under a per-action directory and exports the
+	// path as $NAME. Modes are part of the cache key (changing delivery
+	// can change observable behavior).
+	SealedInputModes map[string]string
+
+	// SealedOutputs maps file names to secret references. Before exec, the
+	// executor creates a per-action temp directory and exposes its path via
+	// $MU_SEALED_OUT_DIR. The action is expected to write each declared
+	// name as a file in that directory; on success, the executor reads each
+	// file and routes its contents through the secret-provider plugin's
+	// store_secret method, then deletes the temp directory. Values never
+	// touch stdout, the action cache, or build manifests. Refs (not values)
+	// are part of the cache key. Actions with non-empty SealedOutputs are
+	// always treated as impure — caching would skip the write side-effect.
+	SealedOutputs map[string]string
+
+	// SealedOutputModes optionally selects the store mode per sealed-output
+	// name: "create" | "overwrite" | "create_if_absent". Empty/missing
+	// defaults to "overwrite" (always set).
+	SealedOutputModes map[string]string
 
 	// Toolchain is the set of artifacts (relative path → CAS digest) that
 	// constitute the hermetic build environment for this action. When set,

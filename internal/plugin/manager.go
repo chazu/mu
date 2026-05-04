@@ -276,6 +276,29 @@ func (m *Manager) ResolveSecret(ctx context.Context, pluginName string, ref stri
 	return entry.process.ResolveSecret(ctx, ref)
 }
 
+// StoreSecret sends a store_secret request to the named plugin.
+// Returns an error if the plugin is not registered or does not declare the
+// "store_secret" capability. The value bytes must never be logged or
+// cached by the caller.
+func (m *Manager) StoreSecret(ctx context.Context, pluginName, ref, value, mode string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	entry, ok := m.plugins[pluginName]
+	if !ok {
+		return fmt.Errorf("no plugin registered for secret scheme %q", pluginName)
+	}
+	if entry.process == nil {
+		return fmt.Errorf("plugin %q: not started", pluginName)
+	}
+
+	if entry.discover != nil && !entry.discover.HasCapability("store_secret") {
+		return fmt.Errorf("plugin %q does not support store_secret", pluginName)
+	}
+
+	return entry.process.StoreSecret(ctx, ref, value, mode)
+}
+
 // DiscoverInfo returns a copy of the discover response for a plugin, or nil if not found.
 func (m *Manager) DiscoverInfo(name string) *DiscoverResponse {
 	m.mu.RLock()

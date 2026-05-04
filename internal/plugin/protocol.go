@@ -8,12 +8,14 @@ const ProtocolVersion = 1
 // Request is the unified envelope sent to plugins via NDJSON.
 // Plugins dispatch on the Method field.
 type Request struct {
-	Method             string            `json:"method"`                        // "discover", "plan", "observe", or "resolve_secret"
+	Method             string            `json:"method"`                        // "discover", "plan", "observe", "resolve_secret", or "store_secret"
 	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan" and "observe"
 	Deps               []DepInfo         `json:"deps,omitempty"`                // set for "plan"
 	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan" and "observe"
 	Secrets            map[string]string `json:"secrets,omitempty"`             // set for "observe" — resolved sealed input values
-	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret"
+	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret" and "store_secret"
+	SecretValue        string            `json:"secret_value,omitempty"`        // set for "store_secret" — bytes to persist
+	SecretMode         string            `json:"secret_mode,omitempty"`         // set for "store_secret" — "create" | "overwrite" | "create_if_absent"
 }
 
 // DiscoverResponse is returned by plugins for method "discover".
@@ -70,11 +72,13 @@ type PlanResponse struct {
 
 // TargetInfo carries the build file declaration for a target.
 type TargetInfo struct {
-	Name         string            `json:"name"`      // e.g. "//lib/crypto"
-	Toolchain    string            `json:"toolchain"` // e.g. "go"
-	Sources      []string          `json:"sources"`
-	Config       map[string]any    `json:"config,omitempty"`
-	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env var name -> secret reference (e.g. "pass:deploy/token")
+	Name             string            `json:"name"`      // e.g. "//lib/crypto"
+	Toolchain        string            `json:"toolchain"` // e.g. "go"
+	Sources          []string          `json:"sources"`
+	Config           map[string]any    `json:"config,omitempty"`
+	SealedInputs     map[string]string `json:"sealed_inputs,omitempty"`      // name -> secret reference (e.g. "pass:deploy/token")
+	SealedInputModes map[string]string `json:"sealed_input_modes,omitempty"` // name -> delivery mode: "env" (default) or "file"
+	SealedOutputs    map[string]string `json:"sealed_outputs,omitempty"`     // file name -> secret reference; action writes to $MU_SEALED_OUT_DIR/<name>
 }
 
 // DepInfo carries what a dependency produced.
@@ -92,8 +96,11 @@ type ActionSpec struct {
 	Outputs      []string          `json:"outputs"`              // declared output file paths
 	DependsOn    []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
 	Env          map[string]string `json:"env,omitempty"`
-	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env var name -> secret reference (e.g. "pass:deploy/token")
-	Network      bool              `json:"network,omitempty"`
+	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name -> secret reference (e.g. "pass:deploy/token")
+	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name -> delivery mode: "env" (default) or "file"
+	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name -> secret reference; written via $MU_SEALED_OUT_DIR
+	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"` // file name -> store mode ("create" | "overwrite" | "create_if_absent"); default "overwrite"
+	Network           bool              `json:"network,omitempty"`
 	WorkDir      string            `json:"work_dir,omitempty"` // relative to project root (default: project root)
 	Impure       bool              `json:"impure,omitempty"`   // skip CAS cache
 
@@ -118,6 +125,34 @@ type ActionSpec struct {
 type ResolveSecretResponse struct {
 	Value string `json:"value"`
 	Error string `json:"error,omitempty"`
+}
+
+// StoreSecretMode values for NewStoreSecretRequest.
+const (
+	StoreSecretModeCreate         = "create"
+	StoreSecretModeOverwrite      = "overwrite"
+	StoreSecretModeCreateIfAbsent = "create_if_absent"
+)
+
+// StoreSecretResponse is returned by plugins for method "store_secret".
+// The response carries no value back; the runner must not surface or log
+// the stored bytes.
+type StoreSecretResponse struct {
+	Error string `json:"error,omitempty"`
+}
+
+// NewStoreSecretRequest returns a Request for the "store_secret" method.
+// The ref is the secret path with the scheme prefix stripped (e.g.
+// "deploy/token", not "pass:deploy/token"). Mode must be one of the
+// StoreSecretMode* constants; an empty mode is treated as "overwrite"
+// by convention but plugins should reject empty modes explicitly.
+func NewStoreSecretRequest(ref, value, mode string) Request {
+	return Request{
+		Method:      "store_secret",
+		SecretRef:   ref,
+		SecretValue: value,
+		SecretMode:  mode,
+	}
 }
 
 // NewDiscoverRequest returns a Request for the "discover" method.

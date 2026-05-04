@@ -70,6 +70,18 @@ type PlanResult struct {
 	Graph           *dag.Graph
 	Targets         []config.Target              // the resolved targets (for manifest metadata)
 	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
+
+	// SealedOutputProviders is the set of resolved plugin definitions
+	// needed at execute time to satisfy sealed_outputs writes. Empty if
+	// no action in the graph declares sealed_outputs. Populated even
+	// after the planning manager is shut down so Execute can spin up
+	// a provider-only manager.
+	SealedOutputProviders []config.PluginDef
+
+	// SecretWritePolicy is the project's writable-ref allow-list,
+	// enforced at write time as a defense-in-depth check on top of
+	// the plan-time enforcement. Nil means no allow-list configured.
+	SecretWritePolicy *secretWritePolicy
 }
 
 // Plan runs the planning pipeline: build toolchains, resolve plugins, start
@@ -181,7 +193,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 
 	// 5. Validate target configs against plugin schemas.
 	for _, t := range targets {
-		if t.Toolchain == "shell" {
+		if t.Toolchain == "shell" || t.Toolchain == "secret-gen" {
 			continue
 		}
 		info := mgr.DiscoverInfo(t.Toolchain)
@@ -215,13 +227,24 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 			planActions = actions
 			declaredOutputs = declared
+		} else if t.Toolchain == "secret-gen" {
+			// secret-gen targets are built-in: derive a value, route it
+			// through the configured secret provider via sealed_outputs.
+			actions, declared, err := builtin.SecretGenPlan(t)
+			if err != nil {
+				return nil, fmt.Errorf("coordinator: %w", err)
+			}
+			planActions = actions
+			declaredOutputs = declared
 		} else {
 			ti := plugin.TargetInfo{
-				Name:         t.Name,
-				Toolchain:    t.Toolchain,
-				Sources:      t.Sources,
-				Config:       t.Config,
-				SealedInputs: t.SealedInputs,
+				Name:             t.Name,
+				Toolchain:        t.Toolchain,
+				Sources:          t.Sources,
+				Config:           t.Config,
+				SealedInputs:     t.SealedInputs,
+				SealedInputModes: t.SealedInputModes,
+				SealedOutputs:    t.SealedOutputs,
 			}
 
 			// Thread each dep's declared_outputs (artifact-type → path,
@@ -244,6 +267,26 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 			planActions = plan.Actions
 			declaredOutputs = plan.Outputs
+		}
+
+		// Apply target-level sealed_outputs as a convenience: if the target
+		// declares them and no plan action set its own, attach them to the
+		// single action in the plan. Multi-action plans must have the
+		// plugin route sealed_outputs to the correct action explicitly.
+		if len(t.SealedOutputs) > 0 {
+			anyExplicit := false
+			for _, a := range planActions {
+				if len(a.SealedOutputs) > 0 {
+					anyExplicit = true
+					break
+				}
+			}
+			if !anyExplicit {
+				if len(planActions) != 1 {
+					return nil, fmt.Errorf("coordinator: target %q: sealed_outputs declared at target level but plan has %d actions; route them explicitly via the plugin", t.Name, len(planActions))
+				}
+				planActions[0].SealedOutputs = cloneStringMap(t.SealedOutputs)
+			}
 		}
 
 		// Prefix action IDs with target name to avoid cross-target collisions.
@@ -280,7 +323,104 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
-	return &PlanResult{Graph: graph, Targets: targets, ResolvedSecrets: resolvedSecrets}, nil
+	// 8. Identify provider plugins needed at execute time for any
+	//    sealed_outputs writes. We collect schemes from the graph and
+	//    capture the plugin defs so Execute can start a provider-only
+	//    manager after this Plan() returns.
+	providerDefs := collectSealedOutputProviders(graph, c.Config.Plugins)
+
+	// 9. Enforce the secret write-policy at plan time. We check every
+	//    sealed_output ref in the graph against the configured allow-list
+	//    so that a forbidden ref aborts before any execute-time work
+	//    happens (and never spins up the provider manager).
+	policy, err := newSecretWritePolicy(c.Config.Secrets)
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
+	if policy != nil {
+		for _, a := range graph.Actions() {
+			for _, ref := range a.SealedOutputs {
+				if !policy.Allow(ref) {
+					return nil, fmt.Errorf("coordinator: action %q: sealed_output ref %q is not allowed by secrets.writable_refs (%s)", a.ID, ref, policy.Description())
+				}
+			}
+		}
+	}
+
+	return &PlanResult{
+		Graph:                 graph,
+		Targets:               targets,
+		ResolvedSecrets:       resolvedSecrets,
+		SealedOutputProviders: providerDefs,
+		SecretWritePolicy:     policy,
+	}, nil
+}
+
+// collectSealedOutputProviders walks the graph for actions with non-empty
+// SealedOutputs, parses the scheme from each ref, and returns the plugin
+// definitions whose names match those schemes.
+func collectSealedOutputProviders(graph *dag.Graph, plugins []config.PluginDef) []config.PluginDef {
+	schemes := make(map[string]struct{})
+	for _, a := range graph.Actions() {
+		for _, ref := range a.SealedOutputs {
+			scheme, _, ok := parseSecretRef(ref)
+			if !ok {
+				continue
+			}
+			schemes[scheme] = struct{}{}
+		}
+	}
+	if len(schemes) == 0 {
+		return nil
+	}
+	out := make([]config.PluginDef, 0, len(schemes))
+	for _, p := range plugins {
+		if _, want := schemes[p.Name]; want {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// startSealedOutputManager spins up a provider-only plugin manager for
+// satisfying sealed_outputs writes during Execute. The manager is the
+// caller's responsibility to Close.
+func (c *Coordinator) startSealedOutputManager(ctx context.Context, defs []config.PluginDef) (*plugin.Manager, error) {
+	home, _ := os.UserHomeDir()
+	resolver := &PluginResolver{
+		Store:       c.Store,
+		ProjectRoot: c.ProjectRoot,
+		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+	}
+	resolved, err := resolver.Resolve(ctx, defs)
+	if err != nil {
+		return nil, err
+	}
+
+	mgr := plugin.NewManager(c.ProjectRoot)
+	if c.Verbose {
+		sink := c.VerboseSink
+		if sink == nil {
+			sink = os.Stderr
+		}
+		mgr.SetVerbose(sink)
+	}
+	if needsScriptRuntime(defs, c.ProjectRoot) {
+		bbPath, err := c.resolveScriptRuntime(ctx, c.ToolchainRegistry)
+		if err != nil {
+			return nil, err
+		}
+		mgr.SetScriptRuntime(bbPath)
+	}
+	for _, rp := range resolved {
+		if err := mgr.Register(rp.Def); err != nil {
+			return nil, fmt.Errorf("register provider plugin %q: %w", rp.Def.Name, err)
+		}
+	}
+	if err := mgr.Start(ctx); err != nil {
+		return nil, fmt.Errorf("starting provider plugins: %w", err)
+	}
+	return mgr, nil
 }
 
 // Execute runs a previously planned DAG.
@@ -289,7 +429,40 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	executor := &dag.Executor{Store: c.Store, Workers: workers, ResolvedSecrets: plan.ResolvedSecrets, SubprocessStdout: c.SubprocessStdout}
+
+	// If any action declares sealed_outputs, start a provider-only plugin
+	// manager for the schemes referenced in the graph. The manager lives
+	// only for the duration of Execute and is closed before we return.
+	var writer dag.SealedOutputWriter
+	if len(plan.SealedOutputProviders) > 0 {
+		pmgr, err := c.startSealedOutputManager(ctx, plan.SealedOutputProviders)
+		if err != nil {
+			return nil, fmt.Errorf("coordinator: starting sealed-output providers: %w", err)
+		}
+		defer pmgr.Close()
+		policy := plan.SecretWritePolicy
+		writer = func(ctx context.Context, ref, value, mode string) error {
+			if !policy.Allow(ref) {
+				return fmt.Errorf("sealed-output ref %q is not allowed by secrets.writable_refs (%s)", ref, policy.Description())
+			}
+			scheme, path, ok := parseSecretRef(ref)
+			if !ok {
+				return fmt.Errorf("invalid sealed-output ref %q (expected scheme:path)", ref)
+			}
+			if mode == "" {
+				mode = plugin.StoreSecretModeOverwrite
+			}
+			return pmgr.StoreSecret(ctx, scheme, path, value, mode)
+		}
+	}
+
+	executor := &dag.Executor{
+		Store:              c.Store,
+		Workers:            workers,
+		ResolvedSecrets:    plan.ResolvedSecrets,
+		SubprocessStdout:   c.SubprocessStdout,
+		SealedOutputWriter: writer,
+	}
 	execResult, err := executor.Execute(ctx, plan.Graph)
 	if err != nil {
 		return nil, fmt.Errorf("coordinator: execution: %w", err)

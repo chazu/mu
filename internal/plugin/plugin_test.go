@@ -518,6 +518,99 @@ func TestManagerResolveSecretUnknownPlugin(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// StoreSecret tests
+// ---------------------------------------------------------------------------
+
+func TestNewStoreSecretRequest(t *testing.T) {
+	req := plugin.NewStoreSecretRequest("deploy/token", "hunter2", plugin.StoreSecretModeCreateIfAbsent)
+	if req.Method != "store_secret" {
+		t.Errorf("Method = %q, want store_secret", req.Method)
+	}
+	if req.SecretRef != "deploy/token" {
+		t.Errorf("SecretRef = %q, want deploy/token", req.SecretRef)
+	}
+	if req.SecretValue != "hunter2" {
+		t.Errorf("SecretValue = %q, want hunter2", req.SecretValue)
+	}
+	if req.SecretMode != "create_if_absent" {
+		t.Errorf("SecretMode = %q, want create_if_absent", req.SecretMode)
+	}
+}
+
+func TestProcessStoreSecretAndReadBack(t *testing.T) {
+	p := startTestPlugin(t, "mock_secret_plugin.sh")
+	if _, err := p.Discover(context.Background()); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if err := p.StoreSecret(context.Background(), "ephemeral/x", "abc123", plugin.StoreSecretModeOverwrite); err != nil {
+		t.Fatalf("StoreSecret: %v", err)
+	}
+
+	value, err := p.ResolveSecret(context.Background(), "stored/last")
+	if err != nil {
+		t.Fatalf("ResolveSecret(stored/last): %v", err)
+	}
+	if value != "abc123" {
+		t.Errorf("value = %q, want abc123", value)
+	}
+}
+
+func TestManagerStoreSecret(t *testing.T) {
+	m := plugin.NewManager(".")
+	err := m.Register(plugin.PluginDef{
+		Name:    "mock-secrets",
+		Command: []string{"bash", testdataPath("mock_secret_plugin.sh")},
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Close()
+
+	if err := m.StoreSecret(ctx, "mock-secrets", "deploy/admin", "hunter2", plugin.StoreSecretModeOverwrite); err != nil {
+		t.Fatalf("StoreSecret: %v", err)
+	}
+
+	value, err := m.ResolveSecret(ctx, "mock-secrets", "stored/last")
+	if err != nil {
+		t.Fatalf("ResolveSecret(stored/last): %v", err)
+	}
+	if value != "hunter2" {
+		t.Errorf("value = %q, want hunter2", value)
+	}
+}
+
+func TestManagerStoreSecretNoCapability(t *testing.T) {
+	m := plugin.NewManager(".")
+	err := m.Register(plugin.PluginDef{
+		Name:    "mock",
+		Command: []string{"bash", testdataPath("mock_plugin.sh")},
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Close()
+
+	err = m.StoreSecret(ctx, "mock", "some/ref", "v", plugin.StoreSecretModeOverwrite)
+	if err == nil {
+		t.Fatal("expected error for missing capability, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support store_secret") {
+		t.Errorf("error = %q, want it to contain 'does not support store_secret'", err)
+	}
+}
+
 func TestManagerResolveSecretNoCapability(t *testing.T) {
 	// The regular mock_plugin.sh does not declare resolve_secret capability.
 	m := plugin.NewManager(".")

@@ -277,6 +277,10 @@ func (p *Process) Plan(ctx context.Context, target TargetInfo, deps []DepInfo, t
 // Kept short since secret resolution should be fast (local keyring, vault call, etc).
 const DefaultResolveSecretTimeout = 30 * time.Second
 
+// DefaultStoreSecretTimeout is the default timeout for store_secret requests.
+// Symmetric with resolve_secret — backends should respond quickly.
+const DefaultStoreSecretTimeout = 30 * time.Second
+
 // DefaultObserveTimeout is the default timeout for observe requests.
 const DefaultObserveTimeout = 5 * time.Minute
 
@@ -316,6 +320,25 @@ func (p *Process) ResolveSecret(ctx context.Context, ref string) (string, error)
 	}
 
 	return resp.Value, nil
+}
+
+// StoreSecret sends a store_secret request to persist a value at the
+// given ref. The value bytes must never be logged or cached by the
+// caller; this method does not log them.
+func (p *Process) StoreSecret(ctx context.Context, ref, value, mode string) error {
+	ctx, cancel := context.WithTimeout(ctx, DefaultStoreSecretTimeout)
+	defer cancel()
+
+	var resp StoreSecretResponse
+	if err := p.send(ctx, NewStoreSecretRequest(ref, value, mode), &resp); err != nil {
+		return err
+	}
+
+	if resp.Error != "" {
+		return fmt.Errorf("plugin %q: store_secret error: %s", p.name, resp.Error)
+	}
+
+	return nil
 }
 
 // Close gracefully shuts down the plugin process.

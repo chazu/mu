@@ -2,16 +2,35 @@ package config
 
 // ProjectConfig is the top-level configuration loaded from mu.cue.
 type ProjectConfig struct {
-	Targets      []Target      `json:"targets,omitempty"`
-	Toolchains   []Toolchain   `json:"toolchains,omitempty"`
-	Cache        *CacheConfig  `json:"cache,omitempty"`
-	Plugins      []PluginDef   `json:"plugins,omitempty"`
-	Preprocessor *Preprocessor `json:"preprocessor,omitempty"`
+	Targets      []Target       `json:"targets,omitempty"`
+	Toolchains   []Toolchain    `json:"toolchains,omitempty"`
+	Cache        *CacheConfig   `json:"cache,omitempty"`
+	Plugins      []PluginDef    `json:"plugins,omitempty"`
+	Preprocessor *Preprocessor  `json:"preprocessor,omitempty"`
+	Secrets      *SecretsConfig `json:"secrets,omitempty"`
 
 	// PluginDirs is populated by the loader — directories (relative to
 	// project root) whose mu.cue contains a "plugin" key. These are
 	// bundled into CAS after their build targets complete.
 	PluginDirs []string `json:"-"`
+}
+
+// SecretsConfig holds project-wide policy for the secret subsystem.
+//
+// WritableRefs, if non-nil, gates which refs may be written to via
+// sealed_outputs / secret-gen / store_secret. Each pattern is matched
+// against the full ref (including scheme) using path.Match semantics:
+// "*" matches any run of characters except "/", literal text matches
+// literally. A nil slice means "no allow-list configured" (writes are
+// permitted, current behavior). An empty slice ([]) means "deny all
+// writes" — an explicit project-wide lockdown.
+//
+// Examples:
+//   - "pass:registry/*"        — only single-segment refs under pass:registry/
+//   - "pass:loosh/*/key"       — anything matching that shape
+//   - "pass:secrets/admin"     — exactly that ref
+type SecretsConfig struct {
+	WritableRefs []string `json:"writable_refs,omitempty"`
 }
 
 // Target describes a build target.
@@ -21,7 +40,9 @@ type Target struct {
 	Sources      []string          `json:"sources"`
 	Deps         []string          `json:"deps,omitempty"`
 	Config       map[string]any    `json:"config,omitempty"`
-	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // env name → secret ref (e.g. "pass:deploy/token")
+	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name → secret ref (e.g. "pass:deploy/token")
+	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name → delivery mode: "env" (default) or "file"
+	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name → secret ref; action writes to $MU_SEALED_OUT_DIR/<name>
 	// BRICK classification (optional, set by pudl export-actions).
 	// mu does not validate these — pudl enforces BRICK constraints via CUE.
 	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"

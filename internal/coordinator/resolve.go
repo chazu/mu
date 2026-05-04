@@ -98,6 +98,43 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string, crossTargetProducers
 				sealedInputs[k] = v
 			}
 		}
+		var sealedInputModes map[string]string
+		if spec.SealedInputModes != nil {
+			sealedInputModes = make(map[string]string, len(spec.SealedInputModes))
+			for k, v := range spec.SealedInputModes {
+				sealedInputModes[k] = v
+			}
+		}
+		for k, mode := range sealedInputModes {
+			if _, ok := sealedInputs[k]; !ok {
+				return nil, fmt.Errorf("action %q: sealed_input_modes[%q] references unknown sealed input", spec.ID, k)
+			}
+			switch mode {
+			case "", "env", "file":
+				// ok
+			default:
+				return nil, fmt.Errorf("action %q: sealed_input_modes[%q] = %q must be one of env | file", spec.ID, k, mode)
+			}
+		}
+
+		// Copy SealedOutputs map (nil-safe). Force impure when present:
+		// caching would skip the store_secret side-effect.
+		var sealedOutputs map[string]string
+		impure := spec.Impure
+		if spec.SealedOutputs != nil {
+			sealedOutputs = make(map[string]string, len(spec.SealedOutputs))
+			for k, v := range spec.SealedOutputs {
+				sealedOutputs[k] = v
+			}
+			impure = true
+		}
+		var sealedOutputModes map[string]string
+		if spec.SealedOutputModes != nil {
+			sealedOutputModes = make(map[string]string, len(spec.SealedOutputModes))
+			for k, v := range spec.SealedOutputModes {
+				sealedOutputModes[k] = v
+			}
+		}
 
 		if spec.TimeoutS < 0 || spec.Retries < 0 || spec.RetryBackoffMs < 0 {
 			return nil, fmt.Errorf("action %q: timeout_s, retries, and retry_backoff_ms must be non-negative", spec.ID)
@@ -128,19 +165,22 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string, crossTargetProducers
 		}
 
 		actions = append(actions, &dag.Action{
-			ID:             spec.ID,
-			Command:        spec.Command,
-			Inputs:         inputs,
-			Outputs:        spec.Outputs,
-			DependsOn:      dependsOn,
-			Env:            env,
-			SealedInputs:   sealedInputs,
-			Network:        spec.Network,
-			WorkDir:        workDir,
-			Impure:         spec.Impure,
-			TimeoutS:       spec.TimeoutS,
-			Retries:        spec.Retries,
-			RetryBackoffMs: spec.RetryBackoffMs,
+			ID:                spec.ID,
+			Command:           spec.Command,
+			Inputs:            inputs,
+			Outputs:           spec.Outputs,
+			DependsOn:         dependsOn,
+			Env:               env,
+			SealedInputs:      sealedInputs,
+			SealedInputModes:  sealedInputModes,
+			SealedOutputs:     sealedOutputs,
+			SealedOutputModes: sealedOutputModes,
+			Network:           spec.Network,
+			WorkDir:           workDir,
+			Impure:            impure,
+			TimeoutS:          spec.TimeoutS,
+			Retries:           spec.Retries,
+			RetryBackoffMs:    spec.RetryBackoffMs,
 		})
 	}
 

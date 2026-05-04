@@ -364,6 +364,31 @@ func TestResolveSealedInputsNil(t *testing.T) {
 	}
 }
 
+func TestResolveSealedOutputsForceImpure(t *testing.T) {
+	dir := t.TempDir()
+	specs := []plugin.ActionSpec{
+		{
+			ID:      "mint",
+			Command: []string{"sh", "-c", "true"},
+			// Note: spec.Impure left false; resolver must force it true
+			// because cache hits would skip the store_secret side-effect.
+			SealedOutputs: map[string]string{
+				"ADMIN_PASS": "pass:registry/admin",
+			},
+		},
+	}
+	actions, err := Resolve(specs, dir, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !actions[0].Impure {
+		t.Error("action with sealed_outputs should be forced impure")
+	}
+	if actions[0].SealedOutputs["ADMIN_PASS"] != "pass:registry/admin" {
+		t.Errorf("SealedOutputs[ADMIN_PASS] = %q, want pass:registry/admin", actions[0].SealedOutputs["ADMIN_PASS"])
+	}
+}
+
 func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 	dir := t.TempDir()
 

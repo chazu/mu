@@ -16,6 +16,17 @@ package mu
 	cache?:        #CacheConfig
 	plugins?:      [...#PluginDef]
 	preprocessor?: #Preprocessor
+	secrets?:      #SecretsConfig
+	...
+}
+
+// #SecretsConfig declares project-wide policy for the secret subsystem.
+// writable_refs is an allow-list of glob patterns; only refs that
+// match at least one pattern may be written to via sealed_outputs.
+// Omitting the field means "no allow-list" (writes permitted —
+// current behavior). Setting it to [] means "deny all writes".
+#SecretsConfig: {
+	writable_refs?: [...string]
 	...
 }
 
@@ -40,6 +51,8 @@ package mu
 	deps?:                    [...string]
 	config?:                  {...}
 	sealed_inputs?:           {[string]: string}
+	sealed_input_modes?:      {[string]: "env" | "file"}
+	sealed_outputs?:          {[string]: string}
 	kind?:                    "relationship" | "interface" | "component" | "kit" | ""
 	implements?:              string
 	...

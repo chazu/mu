@@ -36,6 +36,14 @@ type ExecuteResult struct {
 	Cancelled []string // action IDs cancelled due to upstream failure
 }
 
+// SealedOutputWriter persists a captured sealed-output value to its
+// destination. Implementations route the call to the appropriate
+// secret-provider plugin based on the ref's scheme. The mode selects
+// the store_secret semantics ("create", "overwrite", or
+// "create_if_absent"); an empty mode means "overwrite". The value
+// bytes must never be logged or cached by the implementation.
+type SealedOutputWriter func(ctx context.Context, ref, value, mode string) error
+
 // Executor runs a DAG of actions with parallel scheduling and CAS caching.
 type Executor struct {
 	Store           cas.Store
@@ -45,6 +53,11 @@ type Executor struct {
 	// means os.Stdout. Set to os.Stderr when the caller is using
 	// stdout for structured output (e.g. `mu build --emit-manifest`).
 	SubprocessStdout io.Writer
+	// SealedOutputWriter, if non-nil, is invoked once per (name, ref)
+	// after a sealed-output action exits successfully. If nil, an
+	// action with non-empty SealedOutputs fails — the runner cannot
+	// silently drop captured secrets.
+	SealedOutputWriter SealedOutputWriter
 }
 
 // subprocessStdout returns the configured stdout target for action
@@ -188,20 +201,92 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// because ComputeActionKey is called again after execution for cache storage,
 	// and secrets must never be part of the cache key.
 	execEnv := a.Env
-	if secrets := e.ResolvedSecrets[a.ID]; len(secrets) > 0 {
-		execEnv = make(map[string]string, len(a.Env)+len(secrets))
+	secrets := e.ResolvedSecrets[a.ID]
+	var sealedInDir string
+	if len(secrets) > 0 {
+		execEnv = make(map[string]string, len(a.Env)+len(secrets)+1)
 		for k, v := range a.Env {
 			execEnv[k] = v
 		}
+		// Apply per-name delivery modes. "env" (or empty) is the default
+		// and exports the value verbatim; "file" writes to a 0600 temp
+		// file under a per-action sealed-input directory and exports the
+		// path. Sandbox-mode actions cannot use "file" because the temp
+		// file lives outside the sandbox view.
 		for k, v := range secrets {
-			execEnv[k] = v
+			mode := a.SealedInputModes[k]
+			switch mode {
+			case "", "env":
+				execEnv[k] = v
+			case "file":
+				if a.Toolchain != nil {
+					return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q uses mode=file, which is not supported in sandboxed (toolchain) actions", a.ID, k)}
+				}
+				if sealedInDir == "" {
+					dir, err := os.MkdirTemp("", "mu-sealed-in-*")
+					if err != nil {
+						return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create sealed-in dir: %w", a.ID, err)}
+					}
+					sealedInDir = dir
+					defer os.RemoveAll(sealedInDir)
+					if err := os.Chmod(sealedInDir, 0o700); err != nil {
+						return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: chmod sealed-in dir: %w", a.ID, err)}
+					}
+				}
+				path := filepath.Join(sealedInDir, k)
+				if err := os.WriteFile(path, []byte(v), 0o600); err != nil {
+					return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: write sealed_input %q: %w", a.ID, k, err)}
+				}
+				execEnv[k] = path
+			default:
+				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q: unknown mode %q", a.ID, k, mode)}
+			}
 		}
+	}
+
+	// Sealed-output side channel: create a per-action temp directory and
+	// expose its path via $MU_SEALED_OUT_DIR. The action writes each
+	// declared name as a file there; we read them post-exec and route
+	// through the configured writer. The directory is removed on
+	// completion regardless of success, so failed values do not linger.
+	var sealedOutDir string
+	if len(a.SealedOutputs) > 0 {
+		if e.SealedOutputWriter == nil {
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_outputs declared but executor has no SealedOutputWriter", a.ID)}
+		}
+		dir, err := os.MkdirTemp("", "mu-sealed-out-*")
+		if err != nil {
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create sealed-out dir: %w", a.ID, err)}
+		}
+		sealedOutDir = dir
+		defer os.RemoveAll(sealedOutDir)
+		// 0700 — only the running user can see it.
+		if err := os.Chmod(sealedOutDir, 0o700); err != nil {
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: chmod sealed-out dir: %w", a.ID, err)}
+		}
+		// Ensure execEnv is a fresh copy before we add MU_SEALED_OUT_DIR.
+		if execEnv == nil || len(secrets) == 0 {
+			execEnv = make(map[string]string, len(a.Env)+1)
+			for k, v := range a.Env {
+				execEnv[k] = v
+			}
+		}
+		execEnv["MU_SEALED_OUT_DIR"] = sealedOutDir
 	}
 
 	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv)
 
 	if execErr != nil {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
+	}
+
+	// Capture sealed outputs post-exec. Each declared name must exist as
+	// a file in the side-channel dir; routing happens before cache
+	// storage so a routing failure aborts the action.
+	if len(a.SealedOutputs) > 0 {
+		if err := e.captureSealedOutputs(ctx, a, sealedOutDir); err != nil {
+			return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: err}
+		}
 	}
 
 	// Hash declared outputs and store in CAS — only for pure actions.
@@ -363,6 +448,38 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[stri
 	}
 
 	return exitCode, nil
+}
+
+// captureSealedOutputs reads each declared sealed-output file from the
+// side-channel directory and routes its contents through the configured
+// writer. The file must exist; missing files are an error. Values are
+// not logged. The caller is responsible for removing sealedOutDir.
+func (e *Executor) captureSealedOutputs(ctx context.Context, a *Action, sealedOutDir string) error {
+	for name, ref := range a.SealedOutputs {
+		// Reject names that would escape the side-channel directory. Names
+		// must be a single path component.
+		if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+			return fmt.Errorf("action %q: sealed_output name %q is not a single path component", a.ID, name)
+		}
+		path := filepath.Join(sealedOutDir, name)
+		value, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("action %q: sealed_output %q: read %s: %w", a.ID, name, name, err)
+		}
+		mode := a.SealedOutputModes[name]
+		if err := e.SealedOutputWriter(ctx, ref, string(value), mode); err != nil {
+			// Zero the buffer before returning so the value is not retained
+			// in the heap any longer than necessary.
+			for i := range value {
+				value[i] = 0
+			}
+			return fmt.Errorf("action %q: sealed_output %q: store: %w", a.ID, name, err)
+		}
+		for i := range value {
+			value[i] = 0
+		}
+	}
+	return nil
 }
 
 // storeOutput hashes a file and stores it in the CAS.
