@@ -16,6 +16,8 @@ func runGuide(args []string) int {
 	}
 
 	switch args[0] {
+	case "overview":
+		printGuideOverview()
 	case "mu.cue":
 		printGuideMuJSON()
 	case "plugins":
@@ -30,6 +32,8 @@ func runGuide(args []string) int {
 		printGuideCache()
 	case "secrets":
 		printGuideSecrets()
+	case "secret-gen":
+		printGuideSecretGen()
 	case "toolchains":
 		printGuideToolchains()
 	case "shell":
@@ -53,44 +57,120 @@ func runGuide(args []string) int {
 func printGuideIndex() {
 	fmt.Print(`mu guide — quick-reference for agents and humans
 
-Topics:
+Start here if you're new to mu:
 
-  mu guide mu.cue       How to write and structure mu.cue config files
+  mu guide overview      What mu is, the mental model, and where to go next
+
+Authoring:
+
+  mu guide mu.cue        How to write and structure mu.cue config files
   mu guide build         Building targets: flags, plan mode, manifests
-  mu guide plugins       Writing, loading, and distributing plugins
-  mu guide protocol      The NDJSON plugin protocol (discover, plan, observe)
   mu guide observe       Drift detection: observing current state
-  mu guide pudl          How mu and pudl work together
-  mu guide cache         Content-addressed storage and action caching
-  mu guide secrets       Sealed inputs and secret resolution
-  mu guide toolchains    Bootstrapping toolchains from scratch
-  mu guide shell         The built-in shell toolchain
+  mu guide secrets       Sealed inputs/outputs, secret resolution, write policy
+
+Built-in toolchains:
+
+  mu guide shell         Run an arbitrary shell command as a target
+  mu guide secret-gen    Mint a secret and store it via a provider plugin
+
+Plugins and integration:
+
+  mu guide plugins       Writing, loading, and distributing plugins
+  mu guide protocol      The NDJSON plugin protocol (discover, plan, observe, ...)
   mu guide plugin <name> Show guide text bundled with a plugin
+  mu guide pudl          How mu and pudl work together
+
+Operations:
+
+  mu guide cache         Content-addressed storage and action caching
+  mu guide toolchains    Bootstrapping toolchains from scratch
+`)
+}
+
+func printGuideOverview() {
+	fmt.Print(`mu guide overview — what mu is, in 60 seconds
+
+WHAT MU IS
+
+  mu is a build/convergence orchestrator. You declare targets in
+  mu.cue; mu resolves them into a DAG of actions, executes the DAG
+  with parallel scheduling and content-addressed caching, and
+  hands off observability to plugins.
+
+  mu is not opinionated about what you build — Go binaries, OCI
+  images, terraform-managed infrastructure, k8s manifests, secrets
+  in a password store, and shell pipelines all live in the same
+  graph and share the same cache.
+
+THE MENTAL MODEL
+
+  - mu.cue           declares targets (what you want)
+  - plugins          translate targets into actions (how to get there)
+  - the coordinator  resolves the cross-target action graph
+  - the executor     runs the DAG, caches by content
+  - the CAS          stores blobs and action results, keyed by sha256
+  - sealed_inputs    resolve secrets for actions (read side)
+  - sealed_outputs   capture secrets from actions (write side)
+  - observe          plugins report current state for drift detection
+
+  Each piece is replaceable. Plugins are external processes speaking
+  NDJSON over stdin/stdout (see 'mu guide protocol'). Two toolchains
+  are built in: 'shell' and 'secret-gen' (see their guides).
+
+THE DAY-TO-DAY VERBS
+
+  mu build <target>...      Plan + execute the target's action DAG.
+  mu build --plan <target>  Show the planned actions, don't run them.
+  mu observe <target>...    Ask each plugin to report current state.
+  mu cache ls               List cached action results.
+  mu plugin list            Show registered plugins.
+  mu target list            Show targets defined in this project.
+
+WHAT TO READ NEXT
+
+  Authoring a project:    mu guide mu.cue → mu guide build
+  Writing a plugin:       mu guide plugins → mu guide protocol
+  Working with secrets:   mu guide secrets → mu guide secret-gen
+  Drift / convergence:    mu guide observe → mu guide pudl
+  Hermetic toolchains:    mu guide toolchains
+  Caching/CAS internals:  mu guide cache
+
+KEY DESIGN PRINCIPLES
+
+  1. Everything that runs is an action with a deterministic cache key.
+  2. Plugins are sensors and planners; they never mutate the graph
+     after it's built.
+  3. Secrets values never enter the cache, manifests, or logs.
+     Refs and modes do — they're non-secret metadata.
+  4. mu and pudl are decoupled. mu builds; pudl reasons about state.
+  5. mu.cue is the single source of authoring truth.
 `)
 }
 
 func printGuideMuJSON() {
 	fmt.Print(`mu guide mu.cue — configuration file reference
 
-mu.cue is the project configuration file. mu discovers it by walking up
-from the current directory. Subdirectories may contain their own mu.cue
-files — they are merged automatically.
+mu.cue is the project configuration file, written in CUE
+(cuelang.org). mu discovers it by walking up from the current
+directory. Subdirectories may contain their own mu.cue files — they
+are merged automatically. CUE accepts JSON-shaped syntax as well, so
+existing JSON-style configs keep working.
 
 MINIMAL EXAMPLE
 
-  {
-    "plugins": [
-      {"name": "go", "script": "plugins/go/plugin.bb"}
-    ],
-    "targets": [
-      {
-        "target": "//cmd/myapp",
-        "toolchain": "go",
-        "sources": ["cmd/myapp/*.go", "internal/**/*.go"],
-        "config": {"output": "myapp", "pkg": "./cmd/myapp"}
+  package mu
+
+  plugins: [{name: "go", script: "plugins/go/plugin.bb"}]
+
+  targets: [{
+      target:    "//cmd/myapp"
+      toolchain: "go"
+      sources:   ["cmd/myapp/*.go", "internal/**/*.go"]
+      config: {
+          output: "myapp"
+          pkg:    "./cmd/myapp"
       }
-    ]
-  }
+  }]
 
 TOP-LEVEL KEYS
 
@@ -98,18 +178,28 @@ TOP-LEVEL KEYS
   plugins       Array of plugin definitions (see 'mu guide plugins').
   toolchains    Array of toolchain bootstrap definitions (see 'mu guide toolchains').
   cache         Cache configuration (optional).
-  preprocessor  Config preprocessor for non-JSON formats (optional).
+  secrets       Project-wide secret policy, e.g. writable_refs (optional).
+                See 'mu guide secrets'.
+  preprocessor  Config preprocessor for non-CUE/JSON formats (optional).
 
 TARGET FIELDS
 
-  target          Target name. Convention: "//path/to/name".
-  toolchain       Which plugin handles this target (e.g. "go", "file", "shell").
-  sources         Array of source file paths or globs (e.g. "src/**/*.go").
-  deps            Array of target names this depends on (optional).
-  config          Toolchain-specific config object (optional).
-  sealed_inputs   Secret references: {"ENV_VAR": "scheme:path"} (optional).
-  kind            BRICK classification: "relationship", "interface", "component", "kit" (optional).
-  implements      Interface this component satisfies (optional).
+  target               Target name. Convention: "//path/to/name".
+  toolchain            Which toolchain handles this target. Built-in:
+                       "shell", "secret-gen". Otherwise the name of a
+                       registered plugin (e.g. "go", "file", "k8s").
+  sources              Array of source file paths or globs ("src/**/*.go").
+  deps                 Array of target names this depends on (optional).
+  config               Toolchain-specific config object (optional).
+  sealed_inputs        {NAME: "scheme:path"} — secret refs to resolve
+                       before exec (optional). See 'mu guide secrets'.
+  sealed_input_modes   {NAME: "env" | "file"} — delivery per name
+                       (optional, default env).
+  sealed_outputs       {NAME: "scheme:path"} — destinations to capture
+                       from $MU_SEALED_OUT_DIR/<NAME> (optional).
+  kind                 BRICK classification: "relationship",
+                       "interface", "component", "kit" (optional).
+  implements           Interface this component satisfies (optional).
 
 TARGET NAMING
 
@@ -123,31 +213,39 @@ CONFIG MERGING
   with paths rebased relative to the project root. Globs in sources are
   expanded. Hidden directories (.git, .claude, etc.) and testdata/ are skipped.
 
+SECRETS POLICY
+
+  secrets: writable_refs: ["pass:my-project/*"]
+
+  Allow-list of glob patterns; sealed_outputs whose ref does not
+  match is rejected at plan time. Omit the block to allow all
+  writes; set to [] for explicit deny-all. See 'mu guide secrets'.
+
 PREPROCESSOR
 
-  For non-JSON config formats (CUE, YAML, TOML), define a preprocessor:
+  For other config formats (YAML, TOML), define a preprocessor:
 
-  {
-    "preprocessor": {
-      "extension": ".cue",
-      "command": ["cue", "export", "--out", "json"]
-    }
+  preprocessor: {
+      extension: ".yaml"
+      command: ["yq", "-o", "json"]
   }
 
   mu pipes files with matching extension through the command before parsing.
 
 CACHE CONFIG
 
-  {
-    "cache": {
-      "backends": [
-        {"type": "disk", "path": "~/.mu/cache", "max_size": "10GB"},
-        {"type": "oci", "registry": "ghcr.io/org/cache"}
-      ],
-      "write_through": true,
-      "read_repair": true
-    }
+  cache: {
+      backends: [
+          {type: "disk", path: "~/.mu/cache", max_size: "10GB"},
+          {type: "oci", registry: "ghcr.io/org/cache"},
+      ]
+      write_through: true
+      read_repair:   true
   }
+
+SEE ALSO
+
+  docs/cue-conventions.md     Authoring conventions, layout, embed.
 `)
 }
 
@@ -185,14 +283,25 @@ BUILD PIPELINE
   3. Start plugin processes and run discover.
   4. Resolve target dependency graph (topological order).
   5. Plan each target via its plugin (plugin emits action specs).
+     Built-in toolchains 'shell' and 'secret-gen' bypass plugins.
   6. Merge action subgraphs into a unified DAG.
-  7. Execute DAG: topological sort, worker pool, cache check, run, store.
+  7. Resolve sealed_inputs (secret values held in memory only).
+  8. Enforce secrets.writable_refs against any sealed_outputs in
+     the graph; abort if any ref is not allowed.
+  9. Execute DAG: topological sort, worker pool, per-action:
+     - check cache (skip if impure or sealed_outputs declared)
+     - inject secrets (env or file mode per sealed_input_modes)
+     - mint $MU_SEALED_OUT_DIR if sealed_outputs declared
+     - run command
+     - capture sealed_outputs and route via store_secret
+     - hash outputs into CAS, write action result entry
 
 ACTION CACHING
 
-  Each action's cache key is computed from: command, sorted input digests,
-  env vars, and network flag. Sealed inputs are excluded from cache keys.
-  On cache hit, outputs are restored from CAS without re-execution.
+  See 'mu guide cache' for the full cache-key contract. Summary:
+  command + sorted input digests + env + network + impure +
+  sealed-input refs/modes + sealed-output refs are hashed.
+  Sealed-input/output VALUES are never hashed.
 
 OTHER COMMANDS
 
@@ -230,7 +339,19 @@ WRITING A PLUGIN
 
   A plugin is any executable that reads NDJSON on stdin and writes NDJSON
   on stdout. It must implement at least "discover" and "plan" methods.
-  Optionally it can implement "observe" and "resolve_secret".
+  Optionally it can implement "observe", "resolve_secret", and
+  "store_secret". Each optional method must be listed in the
+  capabilities array returned by discover.
+
+  Capabilities:
+    discover         (required)  Identify the plugin and its protocol version.
+    plan             (required)  Translate a target into action specs.
+    observe          (optional)  Report current state for drift detection.
+    resolve_secret   (optional)  Read a secret value by ref.
+    store_secret     (optional)  Write a secret value by ref.
+
+  resolve_secret + store_secret together make a plugin a full
+  bidirectional secret provider (see 'mu guide secrets').
 
   Babashka (.bb) is the conventional runtime but any language works.
 
@@ -514,14 +635,33 @@ OCI image layout. The default location is ~/.mu/cache/.
 
 HOW CACHING WORKS
 
-  Each build action has a cache key computed from:
-  - Command (argv)
+  Each build action has a cache key (sha256) computed from:
+  - Command (argv, original order)
   - Sorted input digests (sha256 of each input file)
-  - Environment variables
+  - Environment variables (sorted)
   - Network flag
+  - Impure flag
+  - Work directory (if non-default)
+  - Sealed-input refs and modes (NOT values)
+  - Sealed-output destination refs
 
-  Sealed inputs (secrets) are deliberately excluded from cache keys.
-  Impure actions skip the cache entirely.
+  Cache key INCLUDES (non-secret metadata):
+    sealed_input refs       Changing pass:foo/v1 → pass:foo/v2 invalidates.
+    sealed_input modes      env vs file is observable (path vs literal).
+    sealed_output refs      Changing the destination invalidates.
+
+  Cache key EXCLUDES (secret data):
+    sealed_input values     The resolved bytes never enter the key.
+    sealed_output values    No value exists at key time anyway.
+
+  This means: two builds with the same ref but different resolved
+  values still cache-hit (if the underlying secret rotated, the
+  action does not re-run; the consumer sees whatever value was
+  resolved at exec time).
+
+  Impure actions skip the cache entirely. Actions with non-empty
+  sealed_outputs are forced impure — caching would skip the
+  store_secret side-effect.
 
   On cache hit: outputs are restored from CAS without re-execution.
   On cache miss: action runs, outputs are hashed and stored in CAS.
@@ -560,62 +700,303 @@ PLUGIN STORAGE
 }
 
 func printGuideSecrets() {
-	fmt.Print(`mu guide secrets — sealed inputs and secret resolution
+	fmt.Print(`mu guide secrets — sealed inputs/outputs, secret resolution, write policy
 
-Sealed inputs allow targets and actions to use secrets (API keys, tokens)
-without exposing them in the build graph, cache, or logs.
+mu has a symmetric secret system: actions can READ secrets via
+sealed_inputs and WRITE secrets via sealed_outputs, all routed through
+the same provider plugins (today: 'pass'). Values never enter the
+cache, manifests, or logs; refs and modes are non-secret metadata
+and are part of the cache key.
 
-DECLARING SEALED INPUTS
+This guide is the canonical reference. Per-feature deep dives:
+  docs/secret-gen-toolchain.md
+  docs/sealed-input-delivery-modes.md
+  docs/secrets-write-policy.md
 
-  In mu.cue targets:
+────────────────────────────────────────────────────────────────────
+READING SECRETS — sealed_inputs
+────────────────────────────────────────────────────────────────────
 
-  {
-    "target": "//deploy/app",
-    "toolchain": "k8s",
-    "sources": ["deploy/*.yaml"],
-    "sealed_inputs": {
-      "KUBECONFIG_TOKEN": "pass:deploy/k8s-token",
-      "AWS_SECRET_KEY":   "pass:aws/secret-key"
-    }
+DECLARATION
+
+  target: "//deploy/app"
+  toolchain: "k8s"
+  sealed_inputs: {
+      KUBECONFIG_TOKEN: "pass:deploy/k8s-token"
+      AWS_SECRET_KEY:   "pass:aws/secret-key"
   }
 
-  Format: "ENV_VAR_NAME": "scheme:path"
-  The scheme maps to the plugin that resolves the secret.
+  Format: NAME: "scheme:path". The scheme prefix selects the plugin
+  ("pass" → the pass plugin). The path is sent to that plugin's
+  resolve_secret method.
 
-SECRET RESOLUTION
+RESOLUTION FLOW
 
-  1. During planning, sealed_inputs are recorded but NOT resolved.
-  2. Before execution (or observation), mu finds the plugin matching
-     the scheme prefix (e.g. "pass" → pass plugin).
-  3. mu sends a "resolve_secret" request to that plugin:
-     {"method": "resolve_secret", "secret_ref": "deploy/k8s-token"}
-  4. The plugin returns: {"value": "the-actual-secret"}
-  5. mu injects the secret as an environment variable during action execution.
+  1. Planning records sealed_inputs but does not resolve them.
+  2. Before execution, mu sends each plugin:
+       {"method": "resolve_secret", "secret_ref": "deploy/k8s-token"}
+  3. The plugin returns {"value": "..."}.
+  4. mu delivers the value to the action per its delivery mode.
 
-SECURITY GUARANTEES
+DELIVERY MODES — sealed_input_modes
 
-  - Secrets are NEVER stored in CAS.
-  - Secrets are NEVER included in action cache keys.
-  - Secrets are NEVER logged or included in build manifests.
-  - Secrets are only held in memory during execution.
+  By default, the resolved value is exported as the env var $NAME.
+  Set sealed_input_modes to change that per-name:
 
+  sealed_inputs:      SSH_KEY: "pass:raw:hosts/dalian/key"
+  sealed_input_modes: SSH_KEY: "file"
+
+  Modes:
+    env  (default)  Value exported as $NAME.
+    file            Value written to a 0600 temp file under a
+                    per-action sealed-input directory; $NAME holds
+                    the path. The dir is removed when the action
+                    exits regardless of success.
+
+  Sandbox-mode (toolchain-pinned) actions reject file mode because
+  the temp file lives outside the sandbox view. shell, secret-gen,
+  remote-exec, remote-file all run bare and support file mode.
+
+THE PASS:RAW PREFIX
+
+  By default, "pass:foo/bar" returns the FIRST LINE of 'pass show
+  foo/bar' (the conventional "password" line). For multi-line
+  secrets — SSH keys, certs, JSON blobs — use the raw: prefix
+  inside the ref to get the full content, with trailing newlines
+  trimmed:
+
+    sealed_inputs: SSH_KEY: "pass:raw:hosts/dalian/key"
+
+────────────────────────────────────────────────────────────────────
+WRITING SECRETS — sealed_outputs
+────────────────────────────────────────────────────────────────────
+
+A target can capture an action's emitted value into a secret store.
+The action writes the value to a file under $MU_SEALED_OUT_DIR; mu
+reads it on success and routes through the provider's store_secret.
+
+DECLARATION
+
+  target: "//secrets/admin-pass"
+  toolchain: "shell"
+  sealed_outputs: ADMIN_PASS: "pass:registry/admin"
+  config: {
+      command: ["sh", "-c", ` + "`" + `openssl rand -base64 24 > "$MU_SEALED_OUT_DIR/ADMIN_PASS"` + "`" + `]
+  }
+
+PROPERTIES
+
+  - The value is read from $MU_SEALED_OUT_DIR/<NAME> after the
+    action exits (success only).
+  - Routing failures abort the action.
+  - Actions with sealed_outputs are forced impure — caching would
+    skip the store side-effect.
+  - Values never appear in stdout, the action cache, or manifests.
+
+For a higher-level wrapper that handles the common
+"derive-once-and-store" pattern, see 'mu guide secret-gen'.
+
+────────────────────────────────────────────────────────────────────
+WRITE-POLICY ALLOW-LIST — secrets.writable_refs
+────────────────────────────────────────────────────────────────────
+
+By default any plugin with the store_secret capability can write
+to any ref under its scheme. To bound the blast radius, declare a
+project-level allow-list at the top of mu.cue:
+
+  secrets: {
+      writable_refs: [
+          "pass:registry/*",
+          "pass:loosh/*",
+      ]
+  }
+
+  Patterns use Go's path.Match: '*' matches a single path segment
+  (does NOT span '/'); literal text matches itself. Multiple
+  patterns are OR'd.
+
+THREE STATES
+
+  secrets block omitted             No allow-list (writes unrestricted).
+  writable_refs: [...patterns]      Strict allow-list.
+  writable_refs: []                 Explicit deny-all (lockdown).
+
+ENFORCEMENT
+
+  Plan time: every sealed_output ref in the graph is checked. A
+  forbidden ref aborts Plan() before the provider manager starts.
+  Write time: the SealedOutputWriter closure re-checks defensively
+  before calling store_secret.
+
+────────────────────────────────────────────────────────────────────
+SECURITY MODEL
+────────────────────────────────────────────────────────────────────
+
+VALUES never appear in:
+  - the CAS or action cache
+  - build manifests
+  - stdout / stderr captured by the cache layer
+  - verbose plugin I/O logs
+  - process tables (file mode keeps multi-line secrets out of env)
+
+REFS and MODES are part of the cache key. Changing
+"pass:foo/v1" → "pass:foo/v2" or env → file invalidates the
+cache, because both can change observable behavior.
+
+The allow-list bounds writes; reads are bounded by what mu.cue
+explicitly references. mu cannot stop a target from shelling out
+to 'pass insert' directly — only writes routed through
+sealed_outputs go through store_secret.
+
+────────────────────────────────────────────────────────────────────
 THE PASS PLUGIN
+────────────────────────────────────────────────────────────────────
 
-  The bundled "pass" plugin resolves secrets via password-store (pass).
-  It implements the "resolve_secret" capability.
+The bundled pass plugin (plugins/pass/plugin.bb, v0.3.0) implements:
+  discover, resolve_secret, store_secret
 
-  {"name": "pass", "script": "plugins/pass/plugin.bb"}
+Register it:
 
-  References: "pass:path/to/secret" → runs 'pass show path/to/secret'.
+  plugins: [{name: "pass", script: "plugins/pass/plugin.bb"}]
 
+Resolution: "pass:foo/bar" → 'pass show foo/bar' (first line).
+            "pass:raw:foo/bar" → full content (newline-trimmed).
+Storage:    'pass insert -m -f' under the configured mode.
+            Modes: create | overwrite | create_if_absent.
+
+Run 'mu guide plugin pass' for the full plugin guide.
+
+────────────────────────────────────────────────────────────────────
 WRITING A SECRET PROVIDER PLUGIN
+────────────────────────────────────────────────────────────────────
 
-  Add "resolve_secret" to capabilities in discover, then handle the method:
+A provider plugin is a normal NDJSON plugin (see 'mu guide protocol')
+that adds two methods to its capability list:
 
-    "capabilities" ["discover" "resolve_secret"]
+  capabilities: ["discover", "resolve_secret", "store_secret"]
 
-    "resolve_secret" (let [ref (get req "secret_ref")]
-                       {"value" (fetch-secret-from-vault ref)})
+resolve_secret request:
+  {"method": "resolve_secret", "secret_ref": "deploy/token"}
+  reply: {"value": "..."}
+
+store_secret request:
+  {"method": "store_secret",
+   "secret_ref": "deploy/token",
+   "secret_value": "...",
+   "secret_mode": "create_if_absent"}
+  reply: {} or {"error": "..."}
+
+The plugin is responsible for:
+  - Implementing the three modes (create, overwrite, create_if_absent).
+  - Returning empty success on no-op (create_if_absent for an
+    existing ref).
+  - Never logging the resolved or stored value.
+`)
+}
+
+func printGuideSecretGen() {
+	fmt.Print(`mu guide secret-gen — built-in toolchain for minting and storing secrets
+
+The 'secret-gen' toolchain is built into mu — no plugin registration
+required. Use it to declaratively bootstrap a secret: run a
+derivation command, capture its stdout, route it through a
+store_secret-capable provider plugin (today: 'pass').
+
+This is the natural complement to sealed_inputs. Where sealed_inputs
+consumes a secret that someone has put in the store out of band,
+secret-gen lets you say "this secret should exist" with a derivation
+that produces it on first build.
+
+BASIC USAGE
+
+  target: "//secrets/admin-pass"
+  toolchain: "secret-gen"
+  config: {
+      ref:        "pass:registry/admin"
+      derivation: ["openssl", "rand", "-base64", "24"]
+      // mode defaults to "create_if_absent"
+  }
+
+CONFIG FIELDS
+
+  ref         (required) Destination secret ref, of the form
+              scheme:path. The scheme must resolve to a plugin
+              declaring the store_secret capability.
+  derivation  (required) []string — argv whose stdout becomes the
+              stored value.
+  mode        (optional) "create" | "overwrite" | "create_if_absent"
+              (default).
+  env         (optional) Extra env vars for the derivation.
+  keep_trailing_newline  (optional, default false) If false, strip
+              a single trailing newline from the derivation's
+              stdout before storing (the right thing for openssl
+              rand, uuidgen, etc.).
+
+PICKING A MODE
+
+  create_if_absent  Bootstrap. Re-running is a cheap no-op once
+                    the entry exists. Default.
+  overwrite         Rotation. Always set to the fresh value.
+  create            Strict bootstrap. Fail if the entry already
+                    exists (catches out-of-band seeding).
+
+  If your derivation is non-deterministic (openssl rand, uuidgen),
+  'overwrite' rotates the value on every build — almost never
+  what you want. Stick with create_if_absent.
+
+CACHING
+
+  secret-gen actions are always impure. Caching would skip the
+  store_secret side-effect, which would be wrong if the provider
+  entry has been wiped. The derivation runs every build; under
+  create_if_absent the wasted work is bounded to the derivation
+  itself.
+
+WORKED EXAMPLE — bootstrap zot's admin password
+
+  plugins: [{name: "pass", script: "plugins/pass/plugin.bb"}]
+  secrets: writable_refs: ["pass:registry/*"]
+
+  targets: [
+      {
+          target:    "//secrets/zot-admin"
+          toolchain: "secret-gen"
+          sources: []
+          config: {
+              ref:        "pass:registry/admin"
+              derivation: ["openssl", "rand", "-base64", "32"]
+          }
+      },
+      {
+          target:    "//zot/htpasswd"
+          toolchain: "remote-exec"
+          deps: ["//secrets/zot-admin"]
+          sealed_inputs: ADMIN_PASS: "pass:registry/admin"
+          // ... uses $ADMIN_PASS in its remote command
+      },
+  ]
+
+  First build: zot-admin runs the derivation, mints a fresh
+  password, stores it under pass:registry/admin. The downstream
+  htpasswd target's sealed_inputs resolves the same ref and
+  consumes the value.
+
+  Subsequent builds: the derivation re-runs, but pass insert is
+  short-circuited by create_if_absent. Downstream sealed_inputs
+  reads the stable value.
+
+WHAT SECRET-GEN IS NOT
+
+  - Not a generic "run-once" toolchain. It only handles the
+    derive-then-store pattern.
+  - Not a way to read a secret. Use sealed_inputs for that.
+  - Not aware of the value. mu sees the bytes only briefly,
+    in memory, between the side-channel read and store_secret.
+
+SEE ALSO
+
+  mu guide secrets         The full secrets reference.
+  docs/secret-gen-toolchain.md   In-depth design notes.
 `)
 }
 
@@ -811,18 +1192,57 @@ METHODS
     Request:  {"method": "resolve_secret", "secret_ref": "deploy/token"}
     Response: {"value": "the-secret-value"}
 
+  store_secret (optional, paired with resolve_secret)
+    Request:  {"method": "store_secret",
+               "secret_ref": "deploy/token",
+               "secret_value": "...",
+               "secret_mode": "create" | "overwrite" | "create_if_absent"}
+    Response: {} on success, {"error": "..."} on failure.
+    The plugin must implement all three modes; create_if_absent
+    is a no-op if the ref already exists. Capability:
+    "store_secret" must be present in discover.
+
+TARGET INFO FIELDS
+
+  Target info is sent in plan and observe requests. Fields beyond
+  the obvious name/toolchain/sources/config:
+
+  sealed_inputs       map[NAME]ref — secret refs to resolve before exec.
+  sealed_input_modes  map[NAME]mode — "env" (default) or "file".
+                      file mode writes the value to a 0600 temp
+                      file under a per-action sealed-input dir
+                      and exports the path as $NAME.
+  sealed_outputs      map[NAME]ref — destinations to capture
+                      after exec. Action writes the value to
+                      $MU_SEALED_OUT_DIR/<NAME>; mu routes
+                      through the scheme's plugin's store_secret.
+
+  Plugins are responsible for forwarding these fields onto the
+  ActionSpecs they emit (TargetInfo carries them; ActionSpec
+  honors them at exec time).
+
 ACTION SPEC FIELDS
 
-  id            Unique within the subgraph.
-  command       []string — the command to execute.
-  inputs        map[name]path — input files (paths resolved to CAS digests).
-  outputs       []string — declared output file paths.
-  depends_on    []string — IDs of actions this depends on (within subgraph).
-  env           map[string]string — environment variables (optional).
-  sealed_inputs map[string]string — secret refs, resolved at runtime (optional).
-  network       bool — whether action needs network (honor system).
-  work_dir      string — working directory relative to project root (optional).
-  impure        bool — skip CAS cache (optional).
+  id                  Unique within the subgraph.
+  command             []string — the command to execute.
+  inputs              map[name]path — input files (paths resolved to CAS digests).
+  outputs             []string — declared output file paths.
+  depends_on          []string — IDs of actions this depends on (within subgraph).
+  env                 map[string]string — environment variables (optional).
+  sealed_inputs       map[NAME]ref — secret refs, resolved at runtime (optional).
+  sealed_input_modes  map[NAME]mode — "env" (default) or "file" (optional).
+  sealed_outputs      map[NAME]ref — destinations for $MU_SEALED_OUT_DIR/<NAME>
+                      capture (optional). Forces impure.
+  sealed_output_modes map[NAME]mode — store mode per output:
+                      "create" | "overwrite" | "create_if_absent".
+                      Default "overwrite".
+  network             bool — whether action needs network (honor system).
+  work_dir            string — working directory relative to project root (optional).
+  impure              bool — skip CAS cache (optional; forced true
+                      when sealed_outputs is non-empty).
+  timeout_s           int — per-attempt wall-clock timeout in seconds (optional).
+  retries             int — additional attempts on failure (network actions only).
+  retry_backoff_ms    int — sleep between retries.
 
 INTER-ACTION REFERENCES
 
