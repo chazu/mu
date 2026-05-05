@@ -1102,6 +1102,64 @@ WORKED EXAMPLE — bootstrap zot's admin password
   short-circuited by create_if_absent. Downstream sealed_inputs
   reads the stable value.
 
+COOKBOOK — common derivations
+
+  All examples below assume mode: create_if_absent (the default) and
+  scheme: pass:. Swap "pass:..." for "sops:<file>#<key>" to land in a
+  SOPS-encrypted file instead.
+
+  Random password (32 bytes, base64, ~43 chars):
+      derivation: ["openssl", "rand", "-base64", "32"]
+
+  Random password (URL-safe, no '+' or '/' or '='):
+      derivation: ["sh", "-c",
+                   "openssl rand 32 | base64 | tr -d '=+/' | head -c 43"]
+
+  Hex token (32 bytes -> 64 hex chars, e.g. an API key):
+      derivation: ["openssl", "rand", "-hex", "32"]
+
+  Short numeric PIN (6 digits):
+      derivation: ["sh", "-c",
+                   "od -An -N3 -tu4 /dev/urandom | tr -d ' \\n' | cut -c1-6"]
+
+  UUID v4 (e.g. tenant id, idempotency key):
+      derivation: ["uuidgen"]                      // macOS / util-linux
+      derivation: ["cat", "/proc/sys/kernel/random/uuid"]   // any Linux
+
+  Bcrypt-hashed password (htpasswd line for a webserver):
+      // env-supplied plaintext keeps it off the argv. Pair this with a
+      // secret-gen target that produces RAW_PASS into pass:foo/raw.
+      config: {
+          ref:        "pass:registry/htpasswd-line"
+          derivation: ["sh", "-c",
+                       "htpasswd -nbBC 12 admin \"$RAW_PASS\""]
+          env: {RAW_PASS: ""}    // runner overrides via sealed_inputs below
+      }
+      sealed_inputs:      {RAW_PASS: "pass:registry/raw-pass"}
+      sealed_input_modes: {RAW_PASS: "env"}
+
+  Diceware-style passphrase (requires 'diceware' or similar; example
+  uses pwgen):
+      derivation: ["pwgen", "-s", "-1", "32"]
+
+  Argon2-hashed password (for systems that take pre-hashed values):
+      derivation: ["sh", "-c",
+                   "echo -n \"$RAW_PASS\" | argon2 \"$(openssl rand -hex 16)\" -id -t 3 -m 16 -p 4 -e"]
+      sealed_inputs: {RAW_PASS: "pass:bootstrap/raw-pass"}
+
+  TIPS
+
+  - Wrap multi-step derivations in 'sh -c' and quote carefully — argv
+    bypasses shell expansion otherwise.
+  - keep_trailing_newline: false (the default) is right for tools that
+    print "value\\n". Set to true only if your tool emits a value with
+    a meaningful trailing newline (rare).
+  - For binary secrets that don't survive being sent over a JSON
+    string, base64-encode in the derivation and base64-decode on the
+    consumer side. The wire protocol is text-only.
+  - Two-output secrets (an SSH keypair, a TLS cert+key) don't fit
+    secret-gen — use the dedicated keypair-gen plugin instead.
+
 WHAT SECRET-GEN IS NOT
 
   - Not a generic "run-once" toolchain. It only handles the
