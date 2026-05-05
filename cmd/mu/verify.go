@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chau/mu/internal/config"
 )
 
 func runVerify(args []string) int {
@@ -133,16 +135,23 @@ func runVerify(args []string) int {
 		}
 	}
 
+	// Plugin schema namespace policing: walk in-tree plugin source dirs,
+	// load each manifest, and warn when a "mu/<x>" output_schema or
+	// vendored schema doesn't match the plugin's own name. The check is
+	// advisory — it does not affect verify's exit code.
+	schemaWarnings := verifyPluginSchemaNamespaces(ctx.ProjectRoot, *jsonOut)
+
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(map[string]any{
-			"ok":        ok,
-			"corrupt":   corrupt,
-			"missing":   missing,
-			"errors":    errCount,
-			"fixed":     *fix && corrupt > 0,
-			"corrupted": corrupted,
+			"ok":              ok,
+			"corrupt":         corrupt,
+			"missing":         missing,
+			"errors":          errCount,
+			"fixed":           *fix && corrupt > 0,
+			"corrupted":       corrupted,
+			"schema_warnings": schemaWarnings,
 		})
 	} else {
 		fmt.Printf("Verified %d blobs: %d ok", ok+corrupt, ok)
@@ -165,4 +174,78 @@ func runVerify(args []string) int {
 		return exitFail
 	}
 	return exitOK
+}
+
+// schemaNamespaceWarning is one advisory finding from
+// verifyPluginSchemaNamespaces. Plugin-author convention is that
+// schemas under "mu/<x>" originate with plugin <x>; any other plugin
+// claiming that namespace is a likely mistake.
+type schemaNamespaceWarning struct {
+	Plugin  string `json:"plugin"`            // plugin directory name
+	Module  string `json:"module"`            // schema module that triggered the warning
+	Source  string `json:"source"`            // "output_schema" | "vendored"
+	Reason  string `json:"reason"`            // human-readable detail
+	Version string `json:"version,omitempty"` // version, if known
+}
+
+// verifyPluginSchemaNamespaces walks <projectRoot>/plugins/* and warns
+// when a plugin declares (or vendors) a schema in the mu/<x> namespace
+// that doesn't match its own directory name. Returns the list of
+// warnings; also prints them to stderr in non-JSON mode.
+func verifyPluginSchemaNamespaces(projectRoot string, jsonOut bool) []schemaNamespaceWarning {
+	pluginsDir := filepath.Join(projectRoot, "plugins")
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return nil
+	}
+	var warnings []schemaNamespaceWarning
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pluginName := e.Name()
+		dir := filepath.Join(pluginsDir, pluginName)
+		pcfg, err := config.LoadPluginManifest(dir)
+		if err != nil || pcfg.Plugin == nil {
+			continue
+		}
+		for _, decl := range pcfg.Plugin.Schemas {
+			if w, ok := checkMuNamespace(pluginName, decl.Module); !ok {
+				warnings = append(warnings, schemaNamespaceWarning{
+					Plugin:  pluginName,
+					Module:  decl.Module,
+					Source:  "vendored",
+					Version: decl.Version,
+					Reason:  w,
+				})
+			}
+		}
+	}
+	if !jsonOut {
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "  WARN plugin %q vendors schema %q: %s\n",
+				w.Plugin, w.Module, w.Reason)
+		}
+	}
+	return warnings
+}
+
+// checkMuNamespace returns ok=false and a reason when module names a
+// "mu/<segment>" path whose <segment> doesn't match pluginName. Modules
+// outside the "mu/" namespace are not policed.
+func checkMuNamespace(pluginName, module string) (string, bool) {
+	const muPrefix = "mu/"
+	if !strings.HasPrefix(module, muPrefix) {
+		return "", true
+	}
+	rest := strings.TrimPrefix(module, muPrefix)
+	// First path segment after "mu/" identifies the plugin-author's namespace.
+	seg := rest
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		seg = rest[:i]
+	}
+	if seg == pluginName {
+		return "", true
+	}
+	return fmt.Sprintf("namespace segment %q does not match plugin name %q", seg, pluginName), false
 }

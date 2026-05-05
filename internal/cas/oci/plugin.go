@@ -60,17 +60,27 @@ const (
 // back into the local CAS and project config. Don't drop them; future
 // installs depend on this contract.
 type PluginConfig struct {
-	Name       string   `json:"name"`
-	Entrypoint string   `json:"entrypoint"`
-	Toolchain  string   `json:"toolchain,omitempty"`
-	Files      []string `json:"files,omitempty"`
-	Guide      string   `json:"guide,omitempty"`
+	Name       string             `json:"name"`
+	Entrypoint string             `json:"entrypoint"`
+	Toolchain  string             `json:"toolchain,omitempty"`
+	Files      []string           `json:"files,omitempty"`
+	Guide      string             `json:"guide,omitempty"`
+	Schemas    []PluginSchemaDecl `json:"schemas,omitempty"`
 	// Digest is the CAS content digest of the plugin's primary artifact (the
 	// bundle for multi-file plugins, the entrypoint script for single-file
 	// plugins). Format: "sha256:<hex>". Used to derive the OCI tag via PluginTag
 	// and to round-trip the plugin back to the local CAS on install.
 	Digest string `json:"digest,omitempty"`
 	Source string `json:"source,omitempty"`
+}
+
+// PluginSchemaDecl mirrors config.SchemaDecl, recorded in the OCI plugin
+// config so consumers (notably pudl ingest) can locate vendored CUE
+// schemas without re-parsing mu.cue. Path is relative to the bundle root.
+type PluginSchemaDecl struct {
+	Module  string `json:"module"`
+	Version string `json:"version"`
+	Path    string `json:"path"`
 }
 
 // PluginIndex is the JSON payload of the plugin-index artifact's config blob.

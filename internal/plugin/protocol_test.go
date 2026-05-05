@@ -96,6 +96,108 @@ func TestNewObserveRequest(t *testing.T) {
 	}
 }
 
+func TestDiscoverResponseOutputSchemaRoundTrip(t *testing.T) {
+	resp := plugin.DiscoverResponse{
+		Name:            "aws",
+		Version:         "0.1.0",
+		ProtocolVersion: 1,
+		Consumes:        []string{},
+		Produces:        []string{"aws:resource"},
+		OutputSchema: &plugin.SchemaRef{
+			Module:     "mu/aws",
+			Version:    "v1",
+			Definition: "#EC2Instance",
+			Source:     "vendored",
+		},
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got plugin.DiscoverResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.OutputSchema == nil {
+		t.Fatal("expected non-nil OutputSchema after round-trip")
+	}
+	if got.OutputSchema.Module != "mu/aws" {
+		t.Errorf("Module = %q, want mu/aws", got.OutputSchema.Module)
+	}
+	if got.OutputSchema.Version != "v1" {
+		t.Errorf("Version = %q, want v1", got.OutputSchema.Version)
+	}
+	if got.OutputSchema.Definition != "#EC2Instance" {
+		t.Errorf("Definition = %q, want #EC2Instance", got.OutputSchema.Definition)
+	}
+	if got.OutputSchema.Source != "vendored" {
+		t.Errorf("Source = %q, want vendored", got.OutputSchema.Source)
+	}
+}
+
+func TestDiscoverResponseOutputSchemaOmitEmpty(t *testing.T) {
+	resp := plugin.DiscoverResponse{
+		Name:            "cowsay",
+		Version:         "0.1.0",
+		ProtocolVersion: 1,
+		Consumes:        []string{},
+		Produces:        []string{"text"},
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal raw: %v", err)
+	}
+	if _, exists := raw["output_schema"]; exists {
+		t.Error("output_schema should be omitted when nil (omitempty)")
+	}
+}
+
+func TestSchemaRefDefinitionAndSourceOmitEmpty(t *testing.T) {
+	ref := plugin.SchemaRef{
+		Module:  "mu/aws",
+		Version: "v1",
+	}
+	data, err := json.Marshal(ref)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal raw: %v", err)
+	}
+	if _, exists := raw["definition"]; exists {
+		t.Error("definition should be omitted when empty")
+	}
+	if _, exists := raw["source"]; exists {
+		t.Error("source should be omitted when empty")
+	}
+	if raw["module"] != "mu/aws" {
+		t.Errorf("module = %v, want mu/aws", raw["module"])
+	}
+}
+
+func TestHasCapability_UnaffectedByOutputSchema(t *testing.T) {
+	resp := &plugin.DiscoverResponse{
+		Capabilities: []string{"discover", "plan"},
+		OutputSchema: &plugin.SchemaRef{Module: "mu/aws", Version: "v1"},
+	}
+	if !resp.HasCapability("plan") {
+		t.Error("expected plan capability")
+	}
+	if resp.HasCapability("observe") {
+		t.Error("observe should not be present")
+	}
+}
+
 func TestActionSpecImpureOmitEmpty(t *testing.T) {
 	spec := plugin.ActionSpec{
 		ID:      "build",

@@ -90,10 +90,22 @@ type Preprocessor struct {
 // It declares the entrypoint, optional runtime toolchain, and files to
 // include in the CAS bundle.
 type PluginManifest struct {
-	Entrypoint string   `json:"entrypoint"`          // relative path to the executable within the plugin dir
-	Toolchain  string   `json:"toolchain,omitempty"` // runtime toolchain (e.g. "bb"); empty = direct execution
-	Files      []string `json:"files,omitempty"`     // files to include in CAS bundle; empty = all files
-	Guide      string   `json:"guide,omitempty"`     // relative path to a guide text file (bundled automatically)
+	Entrypoint string       `json:"entrypoint"`          // relative path to the executable within the plugin dir
+	Toolchain  string       `json:"toolchain,omitempty"` // runtime toolchain (e.g. "bb"); empty = direct execution
+	Files      []string     `json:"files,omitempty"`     // files to include in CAS bundle; empty = all files
+	Guide      string       `json:"guide,omitempty"`     // relative path to a guide text file (bundled automatically)
+	Schemas    []SchemaDecl `json:"schemas,omitempty"`   // vendored CUE schema modules shipped with the plugin
+}
+
+// SchemaDecl declares a CUE schema module vendored alongside a plugin.
+// The Path is a directory relative to the plugin's mu.cue containing
+// .cue files that constitute the module. By convention the directory
+// tree under the plugin's schemas/ root mirrors the module path
+// (e.g. module "mu/aws" lives under "schemas/mu/aws").
+type SchemaDecl struct {
+	Module  string `json:"module"`
+	Version string `json:"version"`
+	Path    string `json:"path"`
 }
 
 // PluginConfig is the structure of a plugin directory's mu.cue.

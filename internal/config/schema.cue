@@ -153,5 +153,18 @@ package mu
 	toolchain?: string
 	files?:     [...string]
 	guide?:     string
+	schemas?:   [...#SchemaDecl]
+	...
+}
+
+// #SchemaDecl declares a CUE schema module vendored alongside the plugin.
+// The path is a directory (relative to the plugin's mu.cue) containing
+// .cue files that constitute the module. By convention the directory
+// tree mirrors the module path
+// (e.g. module "mu/aws" lives under "schemas/mu/aws").
+#SchemaDecl: {
+	module:  string & !=""
+	version: string & !=""
+	path:    string & !=""
 	...
 }

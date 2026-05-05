@@ -160,6 +160,34 @@ When reviewing a new `mu.cue`, check:
 
 ---
 
+## 6. Schema package namespaces (plugin output schemas)
+
+When a plugin ships CUE schemas describing the data it produces, the
+schema's CUE module path encodes provenance. Three tiers:
+
+| Prefix             | Owned by                    | Example          |
+| ------------------ | --------------------------- | ---------------- |
+| `pudl/...`         | the pudl project            | `pudl/core`      |
+| `mu/<plugin-name>` | the mu plugin's authors     | `mu/aws`         |
+| anything else      | third-party / user-defined  | `acme/inventory` |
+
+Rules:
+
+- **Use `mu/<x>` only when you are the author of plugin `<x>`.** The
+  segment after `mu/` must match the plugin's directory name.
+  `mu verify` warns when a plugin declares a `mu/<other>` namespace.
+- **Use `pudl/...` only for first-party pudl schemas.** Plugins should
+  not invent or shadow `pudl/...` packages.
+- **Anything else is fair game** for third-party or experimental work.
+
+This convention keeps provenance visible wherever the schema name
+appears (`pudl list`, drift output, agent transcripts).
+
+See `docs/brainstorms/2026-05-04-plugin-output-schemas.md` and
+`docs/plans/2026-05-04-feat-plugin-output-schemas-plan.md` for design.
+
+---
+
 ## See also
 
 - [`scout-cue-migration.md`](scout-cue-migration.md) — full design rationale and

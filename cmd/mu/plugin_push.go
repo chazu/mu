@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/chau/mu/internal/cas/oci"
+	"github.com/chau/mu/internal/config"
 )
 
 // runPluginPush publishes the named plugin to the configured cache.push
@@ -86,6 +87,18 @@ func runPluginPush(args []string) int {
 		Files:      paths,
 		Digest:     dgst.String(),
 		Source:     detectGitRemote(c.ProjectRoot),
+	}
+
+	// Carry vendored schema declarations from the plugin source so
+	// downstream consumers (pudl) can locate them in the artifact
+	// without re-parsing mu.cue.
+	pluginSrc := filepath.Join(c.ProjectRoot, "plugins", name)
+	if pcfg, err := config.LoadPluginManifest(pluginSrc); err == nil && pcfg.Plugin != nil {
+		for _, s := range pcfg.Plugin.Schemas {
+			cfg.Schemas = append(cfg.Schemas, oci.PluginSchemaDecl{
+				Module: s.Module, Version: s.Version, Path: s.Path,
+			})
+		}
 	}
 
 	ref, code, ok := resolvePushRef(c)

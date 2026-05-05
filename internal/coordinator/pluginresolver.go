@@ -185,6 +185,28 @@ func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef
 			}
 		}
 	}
+	// Expand any declared schema directories into individual file entries
+	// so they ride along in the deterministic bundle. Only meaningful when
+	// an explicit Files list is set; otherwise everything under the plugin
+	// dir is included already.
+	if len(files) > 0 && len(manifest.Plugin.Schemas) > 0 {
+		seen := make(map[string]bool, len(files))
+		for _, f := range files {
+			seen[f] = true
+		}
+		for _, decl := range manifest.Plugin.Schemas {
+			schemaFiles, err := walkSchemaDir(dirPath, decl.Path)
+			if err != nil {
+				return nil, fmt.Errorf("plugin schema %s@%s: %w", decl.Module, decl.Version, err)
+			}
+			for _, sf := range schemaFiles {
+				if !seen[sf] {
+					files = append(files, sf)
+					seen[sf] = true
+				}
+			}
+		}
+	}
 	dgst, err := r.bundleDir(ctx, dirPath, files)
 	if err != nil {
 		return nil, fmt.Errorf("bundle plugin directory: %w", err)
@@ -493,4 +515,44 @@ func inferPluginToolchain(path string) string {
 		return "bb"
 	}
 	return ""
+}
+
+// walkSchemaDir returns the .cue files under pluginDir/schemaPath as
+// paths relative to pluginDir, sorted lexicographically. Errors if
+// schemaPath is not a directory or contains no .cue files.
+func walkSchemaDir(pluginDir, schemaPath string) ([]string, error) {
+	abs := filepath.Join(pluginDir, schemaPath)
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("stat schema dir %q: %w", schemaPath, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("schema path %q is not a directory", schemaPath)
+	}
+	var rels []string
+	err = filepath.Walk(abs, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(info.Name(), ".cue") {
+			return nil
+		}
+		rel, err := filepath.Rel(pluginDir, path)
+		if err != nil {
+			return err
+		}
+		rels = append(rels, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rels) == 0 {
+		return nil, fmt.Errorf("schema dir %q contains no .cue files", schemaPath)
+	}
+	sort.Strings(rels)
+	return rels, nil
 }
