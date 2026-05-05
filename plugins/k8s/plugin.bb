@@ -8,14 +8,28 @@
 ;; network access.
 ;;
 ;; Config options:
-;;   namespace    - Kubernetes namespace (default: from manifest)
-;;   context      - kubectl context (default: current context)
-;;   kubeconfig   - path to kubeconfig (default: ~/.kube/config)
-;;   server_side  - use server-side apply (default: true)
-;;   prune        - prune resources not in manifest (default: false)
-;;   dry_run      - kubectl --dry-run=server (default: false)
-;;   ignore_paths - list of dot-separated field paths to ignore in drift
-;;                  detection (e.g. ["spec.replicas" "metadata.annotations.my-ann"])
+;;   namespace             - Kubernetes namespace (default: from manifest)
+;;   context               - kubectl context (default: current context)
+;;   kubeconfig            - path to kubeconfig (default: ~/.kube/config)
+;;   server_side           - use server-side apply (default: true)
+;;   prune                 - prune resources not in manifest (default: false)
+;;   dry_run               - kubectl --dry-run=server (default: false)
+;;   ignore_paths          - list of dot-separated field paths to ignore in drift
+;;                           detection (e.g. ["spec.replicas" "metadata.annotations.my-ann"])
+;;   sealed_output_secrets - map sealed_output NAME -> {"namespace","secret","key"}.
+;;                           After apply, the fetch-secrets action runs
+;;                           `kubectl get secret -n NS NAME -o jsonpath="{.data.KEY}"
+;;                           | base64 -d` for each entry and writes the decoded
+;;                           value to $MU_SEALED_OUT_DIR/NAME (0600). Use to
+;;                           capture ServiceAccount tokens, generated database
+;;                           credentials, or any cluster-side secret value into
+;;                           a secret backend. Keys must match the target's
+;;                           sealed_outputs map.
+;;
+;; Sealed inputs are forwarded to every action (apply, fetch-secrets). Use
+;; sealed_input_modes:file for kubeconfig and other multi-line secrets so
+;; the runner writes them to a 0600 temp file and exports $NAME as the path
+;; (kubectl reads them via --kubeconfig "$NAME" or KUBECONFIG="$NAME").
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
@@ -27,19 +41,25 @@
 
 (defn handle-discover []
   {"name"             "k8s"
-   "version"          "0.2.0"
+   "version"          "0.3.0"
    "protocol_version" 1
    "capabilities"     ["discover" "plan" "observe"]
    "consumes"         ["source:yaml" "source:json"]
    "produces"         ["k8s_resource"]
-   "config_schema"    {"namespace"    {"type" "string"}
-                       "context"      {"type" "string"}
-                       "kubeconfig"   {"type" "string"}
-                       "server_side"  {"type" "boolean" "default" true}
-                       "prune"        {"type" "boolean" "default" false}
-                       "dry_run"      {"type" "boolean" "default" false}
-                       "ignore_paths" {"type" "array" "items" {"type" "string"}
-                                       "default" []}}})
+   "config_schema"    {"namespace"             {"type" "string"}
+                       "context"               {"type" "string"}
+                       "kubeconfig"            {"type" "string"}
+                       "server_side"           {"type" "boolean" "default" true}
+                       "prune"                 {"type" "boolean" "default" false}
+                       "dry_run"               {"type" "boolean" "default" false}
+                       "ignore_paths"          {"type" "array" "items" {"type" "string"}
+                                                "default" []}
+                       "sealed_output_secrets" {"type" "object"}}})
+
+(defn shell-quote
+  "Single-quote a string for safe inclusion in a bash command."
+  [s]
+  (str "'" (str/replace (str s) "'" "'\\''") "'"))
 
 ;;; ─── Helpers ────────────────────────────────────────────────────────
 
@@ -56,35 +76,112 @@
 
 ;;; ─── Plan ───────────────────────────────────────────────────────────
 
+(defn validate-secret-spec
+  "Each sealed_output_secrets value must be a map with namespace, secret, key."
+  [name spec]
+  (let [missing (remove #(get spec %) ["namespace" "secret" "key"])]
+    (when (seq missing)
+      (throw (ex-info
+              (str "k8s: sealed_output_secrets[" name
+                   "] missing required fields: " (str/join "," missing))
+              {:name name :spec spec})))))
+
+(defn build-fetch-secrets-cmd
+  "Bash one-liner: kubectl get secret per entry, base64-decode, write to
+   $MU_SEALED_OUT_DIR/NAME (chmod 0600). Common kubectl base flags
+   (context/kubeconfig) come from `base-args`; --namespace is per-secret."
+  [base-args sealed-out-secrets]
+  (let [pairs   (sort-by key sealed-out-secrets)
+        kctl    (str/join " "
+                          (cons "kubectl"
+                                (map shell-quote base-args)))]
+    (str "set -eu\n"
+         "if [ -z \"${MU_SEALED_OUT_DIR:-}\" ]; then\n"
+         "  echo 'k8s: sealed_output_secrets declared but MU_SEALED_OUT_DIR is unset' >&2\n"
+         "  exit 1\n"
+         "fi\n"
+         (str/join
+          (for [[name spec] pairs
+                :let [ns  (get spec "namespace")
+                      sec (get spec "secret")
+                      key (get spec "key")]]
+            (str kctl " get secret -n " (shell-quote ns) " "
+                 (shell-quote sec) " "
+                 "-o " (shell-quote (str "jsonpath={.data." key "}")) " "
+                 "| base64 -d > \"$MU_SEALED_OUT_DIR/" name "\"\n"
+                 "chmod 600 \"$MU_SEALED_OUT_DIR/" name "\"\n"))))))
+
+(defn attach-sealed-inputs
+  "Add sealed_inputs / sealed_input_modes to an action when present."
+  [action sealed sealed-modes]
+  (cond-> action
+    (seq sealed)        (assoc "sealed_inputs" sealed)
+    (seq sealed-modes)  (assoc "sealed_input_modes" sealed-modes)))
+
 (defn handle-plan [req]
-  (let [target   (get req "target")
-        tgt-name (get target "name")
-        sources  (get target "sources" [])
-        config   (get target "config" {})
+  (let [target            (get req "target")
+        tgt-name          (get target "name")
+        sources           (get target "sources" [])
+        config            (get target "config" {})
+        sealed            (get target "sealed_inputs" {})
+        sealed-modes      (get target "sealed_input_modes" {})
+        sealed-out        (get target "sealed_outputs" {})
+        sealed-out-modes  (get target "sealed_output_modes" {})
+        sealed-out-secs   (get config "sealed_output_secrets" {})
+        out-keys          (set (keys sealed-out))
+        secret-keys       (set (keys sealed-out-secs))]
 
-        ;; Build input map from declared sources (manifest files)
-        inputs (into {} (map (fn [s] [s s]) sources))
+    (cond
+      (and (seq sealed-out) (not= out-keys secret-keys))
+      {"error" (str "k8s: sealed_outputs keys " out-keys
+                    " must match config.sealed_output_secrets keys " secret-keys)}
 
-        ;; Build kubectl apply command
-        base-args (kubectl-base-args config)
-        apply-cmd (-> (into ["kubectl" "apply"] base-args)
-                      (cond->
-                        (get config "server_side" true) (conj "--server-side")
-                        (get config "prune" false)      (conj "--prune")
-                        (get config "dry_run" false)    (conj "--dry-run=server"))
-                      ;; Add all manifest files with -f
-                      (into (mapcat (fn [s] ["-f" s]) sources)))]
+      :else
+      (do
+        (doseq [[name spec] sealed-out-secs]
+          (validate-secret-spec name spec))
+        (let [;; Build input map from declared sources (manifest files)
+              inputs (into {} (map (fn [s] [s s]) sources))
 
-    {"actions"
-     [{"id"         "apply"
-       "command"    apply-cmd
-       "inputs"     inputs
-       "outputs"    []
-       "depends_on" []
-       "env"        {}
-       "network"    true
-       "impure"     true}]
-     "declared_outputs" {}}))
+              ;; Build kubectl apply command
+              base-args (kubectl-base-args config)
+              apply-cmd (-> (into ["kubectl" "apply"] base-args)
+                            (cond->
+                              (get config "server_side" true) (conj "--server-side")
+                              (get config "prune" false)      (conj "--prune")
+                              (get config "dry_run" false)    (conj "--dry-run=server"))
+                            ;; Add all manifest files with -f
+                            (into (mapcat (fn [s] ["-f" s]) sources)))
+
+              apply-action (-> {"id"         "apply"
+                                "command"    apply-cmd
+                                "inputs"     inputs
+                                "outputs"    []
+                                "depends_on" []
+                                "env"        {}
+                                "network"    true
+                                "impure"     true}
+                               (attach-sealed-inputs sealed sealed-modes))
+
+              fetch-action (when (seq sealed-out)
+                             (cond-> (-> {"id"             "fetch-secrets"
+                                          "command"        ["bash" "-c"
+                                                            (build-fetch-secrets-cmd base-args sealed-out-secs)]
+                                          "inputs"         {}
+                                          "outputs"        []
+                                          "depends_on"     ["apply"]
+                                          "env"            {}
+                                          "network"        true
+                                          "impure"         true
+                                          "sealed_outputs" sealed-out}
+                                         (attach-sealed-inputs sealed sealed-modes))
+                               (seq sealed-out-modes) (assoc "sealed_output_modes" sealed-out-modes)))
+
+              actions (cond-> [apply-action]
+                        fetch-action (conj fetch-action))]
+
+          {"actions"          actions
+           "declared_outputs" {}})))))
 
 ;;; ─── Observe: structured drift detection ────────────────────────────
 
@@ -278,7 +375,8 @@
 (defn handle-request [req]
   (case (get req "method")
     "discover" (handle-discover)
-    "plan"     (handle-plan req)
+    "plan"     (try (handle-plan req)
+                    (catch Exception e {"error" (.getMessage e)}))
     "observe"  (handle-observe req)
     {"error" (str "unknown method: " (get req "method"))}))
 

@@ -17,14 +17,16 @@ USAGE IN mu.json
 
 CONFIG FIELDS
 
-  namespace       Kubernetes namespace.
-  context         kubectl context name.
-  kubeconfig      Path to kubeconfig file (default: ~/.kube/config).
-  server_side     Use server-side apply (default: true).
-  prune           Prune resources not in manifest (default: false).
-  dry_run         Run kubectl --dry-run=server (default: false).
-  ignore_paths    List of dot-separated field paths to ignore in drift
-                  detection (e.g. ["metadata.annotations.kubectl"]).
+  namespace             Kubernetes namespace.
+  context               kubectl context name.
+  kubeconfig            Path to kubeconfig file (default: ~/.kube/config).
+  server_side           Use server-side apply (default: true).
+  prune                 Prune resources not in manifest (default: false).
+  dry_run               Run kubectl --dry-run=server (default: false).
+  ignore_paths          List of dot-separated field paths to ignore in drift
+                        detection (e.g. ["metadata.annotations.kubectl"]).
+  sealed_output_secrets Capture-mode map: sealed_output NAME ->
+                        {namespace, secret, key}. See "Sealed outputs" below.
 
 EXAMPLES
 
@@ -53,8 +55,76 @@ OBSERVATION (DRIFT DETECTION)
 
 ACTIONS GENERATED
 
-  kubectl-apply   Applies manifests with kubectl apply.
-                  Requires network access.
+  apply           Applies manifests with kubectl apply. Requires network.
+  fetch-secrets   Reads each sealed_output_secrets entry via
+                  `kubectl get secret -n NS NAME -o jsonpath="{.data.KEY}"`,
+                  base64-decodes, and writes to $MU_SEALED_OUT_DIR/NAME
+                  (chmod 0600). Depends on apply. Only generated when
+                  sealed_outputs is set.
+
+All actions are impure. Sealed inputs declared at target-level are
+forwarded to every action.
+
+SEALED INPUTS
+
+  Forward kubeconfig and any other secrets via target.sealed_inputs.
+  Single-line tokens use env delivery (the default):
+
+    "sealed_inputs": {"K8S_TOKEN": "pass:k8s/prod/svc-account"}
+
+  Kubeconfig and other multi-line secrets should declare file mode so
+  the bytes are written to a 0600 temp file and $NAME holds the path:
+
+    "sealed_inputs":      {"KUBECONFIG": "pass:raw:k8s/prod/kubeconfig"},
+    "sealed_input_modes": {"KUBECONFIG": "file"}
+
+  kubectl reads $KUBECONFIG natively (path env var), so no command-line
+  changes are needed. For other tools consuming the file, refer to it
+  as "$NAME".
+
+SEALED OUTPUTS (cluster Secret -> secret backend)
+
+  Capture values from a cluster-side Secret resource (a generated
+  database password, a ServiceAccount token, an external operator's
+  output) into your secret backend without round-tripping through
+  CAS or stdout.
+
+  Pair target.sealed_outputs with config.sealed_output_secrets, mapping
+  each sealed-output NAME to a {namespace, secret, key} triple:
+
+    {
+      "target": "//deploy/db-creds-capture",
+      "toolchain": "k8s",
+      "sources": ["deploy/db.yaml"],
+      "config": {
+        "context": "prod",
+        "sealed_output_secrets": {
+          "DBPASS": {"namespace": "db", "secret": "creds", "key": "password"}
+        }
+      },
+      "sealed_outputs":      {"DBPASS": "pass:rds/master-password"},
+      "sealed_output_modes": {"DBPASS": "create_if_absent"}
+    }
+
+  After the apply action succeeds, fetch-secrets runs:
+
+    kubectl --context prod get secret -n db creds \
+      -o jsonpath="{.data.password}" | base64 -d \
+      > $MU_SEALED_OUT_DIR/DBPASS
+
+  and the runner stores the decoded bytes via the configured provider.
+
+  Constraints
+    - Keys in sealed_output_secrets MUST exactly match sealed_outputs.
+      Each value MUST contain namespace, secret, and key.
+    - The matching ref must appear in secrets.writable_refs in the
+      project mu.cue.
+    - The Secret must exist by the time fetch-secrets runs — typically
+      because apply just created it. For Secrets created by an operator
+      that takes time to populate, use a separate target with a
+      remote-exec / shell-toolchain `kubectl wait` step in between.
+    - Actions with sealed_outputs are forced impure — the cache is
+      skipped so store_secret always runs.
 
 CAPABILITIES
 
