@@ -128,13 +128,18 @@ inserts safe (file-level locking or atomic rename).
 `internal/importer/enhanced_importer.go`, `internal/importer/detection.go`,
 plus a new catalog migration for the `item_schemas` junction table.
 
-**Decision (locked) — transport:** sidecar. mu writes the data file as
-the plugin produced it, plus an adjacent metadata file
-(`<datafile>.schema.json`) carrying the `SchemaRef`. pudl reads both on
-import. The data file stays byte-identical — portable to any consumer.
-For agentic / ad-hoc use, `pudl import` also accepts `--schema
-mu/aws@v1[#Definition]` as an explicit override; same downstream code
-path, different ref source.
+**Decision (locked) — transport:** envelope. A single JSON document
+with shape `{"schema": {...}, "definitions": [...], "data": <payload>}`.
+pudl detects envelope by shape (top-level object with both `schema`
+populated and `data` present); raw JSON without that shape is
+imported untouched. For agentic / ad-hoc use, `pudl import` also
+accepts `--schema mu/aws@v1[#Definition]` as an explicit override on
+raw JSON; same downstream code path, different ref source.
+
+(Originally sidecar; reverted 2026-05-05 because mu's natural producer
+is a stream/stdout path and writing a sibling file from `mu observe`
+required filesystem coordination that didn't fit. Envelope is one
+self-contained artifact, easier to pipe and store.)
 
 **Decision (locked) — catalog:** dedicated junction table
 `item_schemas`, not a column on the items table. Supports an item
@@ -169,8 +174,9 @@ CREATE INDEX item_schemas_ref_idx    ON item_schemas(schema_ref);
      plus `status='unresolved'` row for the declared ref.
 
 **Tests:** four-way decision tree covered. Multi-schema item gets
-multiple rows. Sidecar parse round-trip. `--schema` flag overrides
-sidecar when both present.
+multiple rows. Envelope detection (shape-based), unwrap round-trip,
+raw-JSON pass-through, `--schema` flag works on both raw and envelope
+inputs.
 
 ### W5: `pudl reclassify` (or extend existing)
 
@@ -234,8 +240,9 @@ behavior unchanged) → smoke-test import path → fill in W5/W6/W7.
 - **W1** — discover-only at v1; no per-observe override.
 - **W2** — mirrored layout (`schemas/<module-path>/`). Compatible with
   ORAS (layer internals are opaque to the spec).
-- **W4 transport** — sidecar `<datafile>.schema.json` for mu-driven
-  imports; `pudl import --schema <ref>` for agentic / explicit use.
+- **W4 transport** — envelope JSON (shape-detected) for mu-driven
+  imports; `pudl import --schema <ref>` for raw-JSON / agentic use.
+  (Originally sidecar — reverted 2026-05-05.)
 - **W4 catalog** — junction table `item_schemas`, not a column. Supports
   multi-schema-per-item from day one and avoids a future migration.
 - **W6** — namespace check uses the plugin's `name` from

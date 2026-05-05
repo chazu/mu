@@ -81,23 +81,40 @@ these up at bundle time, includes the `.cue` files in the plugin
 artifact, and records the declarations in the OCI manifest so pudl can
 find them on the consumer side.
 
-## How pudl picks up the schema
+## How the data reaches pudl
 
-When mu imports plugin output into pudl (or a user runs
-`pudl import --schema mu/aws@v1#EC2Instance`):
+The wire format is an **envelope JSON**: a single document with a
+top-level `schema` (the same fields as your discover `output_schema`),
+optional inline `definitions`, and a `data` payload. pudl detects
+envelopes by shape and unwraps them automatically:
 
-1. pudl looks the ref up in its schema cache. Hit → classify, record
-   `item_schemas` row with `status='declared'`.
-2. Miss with vendored definition shipped alongside → auto-register,
-   classify, record with `status='auto_registered'` *(scheduled — not
-   yet implemented)*.
-3. Miss without a definition → run pudl's existing inference, record
-   the inferred result and tag the item with the unresolved ref so
-   `pudl reclassify` can upgrade it later.
+```json
+{
+  "schema": {"module": "mu/aws", "version": "v1", "definition": "#EC2Instance"},
+  "definitions": [
+    {"path": "ec2.cue", "content": "package aws\n#EC2Instance: {...}\n"}
+  ],
+  "data": { "instance_id": "i-abc", "state": "running" }
+}
+```
 
-Today the resolution lands at step 3 for refs pudl hasn't been taught;
-once cross-process schema cache exposure is wired, steps 1 and 2 light
-up automatically — no plugin changes required.
+Producing envelopes from a plugin: the plugin author writes the
+envelope wrapper around its output. The `definitions` array is
+optional but recommended on first emit — when present, pudl writes
+them into its schema cache so subsequent imports of the same
+`(module, version)` skip the registration step.
+
+On the pudl side:
+
+1. Cache hit on `(module, version)` → record `status='declared'`.
+2. Cache miss, envelope carried `definitions` → write to cache,
+   record `status='auto_registered'`.
+3. Cache miss, no `definitions` → run pudl's existing inference,
+   record the inferred result and tag the item with the unresolved
+   ref so `pudl reclassify` can upgrade it later.
+
+Raw JSON without the envelope wrapper imports just like before; the
+typed flow is opt-in per artifact.
 
 ## Verifying
 

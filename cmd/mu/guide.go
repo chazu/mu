@@ -618,10 +618,13 @@ DATA IMPORT (mu → pudl)
   See 'mu guide plugins' (OUTPUT SCHEMAS section) for the plugin-side
   contract, or docs/plugin-output-schemas.md for the full guide.
 
-  On import, pudl reads a sidecar (<datafile>.schema.json) or accepts
-  an explicit ref via 'pudl import --schema mu/aws@v1#EC2Instance'.
-  Items can satisfy multiple schemas; unresolved refs are tagged for
-  later upgrade via 'pudl reclassify'.
+  On import, pudl auto-detects an envelope JSON with shape
+  {"schema": {...}, "definitions": [...], "data": <payload>} and
+  classifies the data under the declared schema. Raw JSON (no
+  envelope) can still be typed explicitly via
+  'pudl import --schema mu/aws@v1#EC2Instance'. Items can satisfy
+  multiple schemas; unresolved refs are tagged for later upgrade via
+  'pudl reclassify'.
 
 KEY DESIGN PRINCIPLE
 
