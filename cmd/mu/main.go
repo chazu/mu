@@ -48,7 +48,7 @@ Commands:
   graph      Show the dependency chain of a target
   plugin     List and inspect plugins
   observe    Check current state of targets (drift detection)
-  verify     Re-hash CAS blobs and report corruption
+  verify     Re-hash CAS blobs, check schema namespace conventions, report issues
   guide      Quick-reference guides for mu features
   version    Print the mu version`)
 }

@@ -439,6 +439,41 @@ PLUGIN GUIDES
   then falls back to local plugin directories (plugins/<name>/).
   Conventional filenames (GUIDE.md, GUIDE, guide.md) are also detected
   without an explicit manifest entry.
+
+OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
+
+  A plugin can declare a CUE schema for the data it produces so that
+  pudl classifies imports under a meaningful type instead of the
+  catchall pudl/core.#Item.
+
+  1. Add output_schema to the discover response:
+
+       "output_schema": {"module":     "mu/aws",
+                         "version":    "v1",
+                         "definition": "#EC2Instance"}
+
+  2. Vendor the schema files with the plugin (mirrored layout):
+
+       plugins/aws/
+         schemas/mu/aws/ec2.cue          # package aws
+
+  3. Declare the vendored module in mu.cue:
+
+       plugin: {
+         schemas: [
+           {module: "mu/aws", version: "v1", path: "schemas/mu/aws"},
+         ]
+       }
+
+  Namespace convention (see 'docs/cue-conventions.md' §6):
+    pudl/...         first-party pudl schemas
+    mu/<plugin>      schemas authored by the plugin's authors
+    anything else    third-party / user-defined
+
+  'mu verify' warns when a plugin claims a mu/<x> namespace whose <x>
+  doesn't match its directory name.
+
+  Full plugin-author guide: docs/plugin-output-schemas.md.
 `)
 }
 
@@ -572,6 +607,21 @@ RESOURCE TYPE MAPPING
     ec2.*, s3.*, iam.*, aws.*   → aws
     k8s.*, kubernetes.*         → k8s
     (unknown)                   → generic
+
+DATA IMPORT (mu → pudl)
+
+  Beyond the drift loop above, mu plugins can also produce data that
+  flows into pudl's catalog. Plugins optionally declare a CUE schema
+  for their output so pudl classifies the data under a meaningful
+  type instead of the catchall pudl/core.#Item.
+
+  See 'mu guide plugins' (OUTPUT SCHEMAS section) for the plugin-side
+  contract, or docs/plugin-output-schemas.md for the full guide.
+
+  On import, pudl reads a sidecar (<datafile>.schema.json) or accepts
+  an explicit ref via 'pudl import --schema mu/aws@v1#EC2Instance'.
+  Items can satisfy multiple schemas; unresolved refs are tagged for
+  later upgrade via 'pudl reclassify'.
 
 KEY DESIGN PRINCIPLE
 
