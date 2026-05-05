@@ -30,7 +30,29 @@ Exactly one file. Zero or more than one → plan error.
 ## Sealed inputs
 
 - `SSH_PASS` — optional. If absent, falls back to ssh-agent (`BatchMode=yes`).
-  Required when `sudo: true`; same value is used as sudo password.
+  Required when `sudo: true`; same value is used as sudo password. Single-line;
+  use `env` delivery (the default).
+
+### Multi-line / binary secrets (`sealed_input_modes: file`)
+
+For SSH private keys or other multi-line secrets, declare with `file` mode
+so the runner writes the bytes to a 0600 temp file and exports `$NAME` as
+the path:
+
+```json
+"sealed_inputs":      {"DEPLOY_KEY": "pass:raw:hosts/example.com/key"},
+"sealed_input_modes": {"DEPLOY_KEY": "file"}
+```
+
+remote-file runs bare (no sandbox), so `file` mode is supported. Reach for
+it whenever the secret would not survive shell quoting as an env value.
+
+## Sealed outputs
+
+remote-file *pushes* a local file to a remote — it does not produce a
+sealed output. To fetch a remote file and store it as a secret (e.g.,
+capturing `/etc/kubernetes/admin.conf` after `kubeadm init`), use the
+`remote-exec` plugin's `sealed_output_files` config — see its GUIDE.md.
 
 ## Example
 
