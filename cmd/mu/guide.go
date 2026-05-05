@@ -1252,7 +1252,7 @@ this guide tells plugin authors how to IMPLEMENT them correctly.
 Two roles a plugin can play, independently:
 
   1. SECRET PROVIDER — owns a ref scheme (e.g. "pass:") and serves
-     resolve_secret and/or store_secret. Today: 'pass'.
+     resolve_secret and/or store_secret. Today: 'pass', 'sops'.
 
   2. SECRET CONSUMER / EMITTER — an action plugin (k8s, terraform,
      remote-exec, …) that accepts sealed_inputs as runtime values and
