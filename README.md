@@ -8,7 +8,7 @@ The name means "emptiness" in Japanese. The build system has no built-in semanti
 
 ```
                     ┌──────────────┐
-  mu.json ─────────►│  Config      │──── validated config ────► Coordinator
+  mu.cue ─────────►│  Config      │──── validated config ────► Coordinator
                     │  Loader      │                            │
                     └──────────────┘                            │
                                                                ▼
@@ -63,33 +63,29 @@ Requires Go 1.25+.
 
 ## Quick Start
 
-**1. Create `mu.json`:**
+**1. Create `mu.cue`:**
 
-```json
-{
-  "toolchains": [
-    {
-      "toolchain": "bb",
-      "from": "scratch",
-      "config": {
-        "version": "1.12.216",
-        "url": "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-macos-aarch64.tar.gz",
-        "sha256": "91499b3f430038f9b40e433215256a6e5392942780dca9984d493d2bcca7055d"
-      }
+```cue
+package mu
+
+toolchains: [{
+    toolchain: "bb"
+    from:      "scratch"
+    config: {
+        version: "1.12.216"
+        url:     "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-macos-aarch64.tar.gz"
+        sha256:  "91499b3f430038f9b40e433215256a6e5392942780dca9984d493d2bcca7055d"
     }
-  ],
-  "plugins": [
-    {"name": "go", "script": "plugins/go/plugin.bb"}
-  ],
-  "targets": [
-    {
-      "target": "//cmd/hello",
-      "toolchain": "go",
-      "sources": ["go.mod", "go.sum", "cmd/hello/main.go"],
-      "config": {"output": "hello", "pkg": "./cmd/hello"}
-    }
-  ]
-}
+}]
+plugins: [
+    {name: "go", script: "plugins/go/plugin.bb"},
+]
+targets: [{
+    target:    "//cmd/hello"
+    toolchain: "go"
+    sources: ["go.mod", "go.sum", "cmd/hello/main.go"]
+    config: {output: "hello", pkg: "./cmd/hello"}
+}]
 ```
 
 **2. Build:**
@@ -126,7 +122,7 @@ Flags:
   --verbose     Show plugin I/O
 ```
 
-Builds all toolchains declared in `mu.json` from scratch. Downloads, extracts, verifies, and registers each toolchain as content-addressed artifacts.
+Builds all toolchains declared in `mu.cue` from scratch. Downloads, extracts, verifies, and registers each toolchain as content-addressed artifacts.
 
 Set `MU_SCRATCH` to an executable path to use an external scratch builder instead of the built-in logic:
 
@@ -198,14 +194,14 @@ Ingest can also run **inside the build graph** as a pudl target that depends on 
 
 ## Targets
 
-Targets are declared in `mu.json` and describe what to build:
+Targets are declared in `mu.cue` and describe what to build:
 
-```json
+```cue
 {
-  "target": "//cmd/server",
-  "toolchain": "go",
-  "sources": ["go.mod", "go.sum", "cmd/server/*.go"],
-  "config": {"output": "server", "pkg": "./cmd/server"}
+    target:    "//cmd/server"
+    toolchain: "go"
+    sources: ["go.mod", "go.sum", "cmd/server/*.go"]
+    config: {output: "server", pkg: "./cmd/server"}
 }
 ```
 
@@ -362,27 +358,26 @@ Plugins are external executables that tell mu what to build and how. mu itself h
 
 ### Plugin Structure
 
-A plugin is a directory containing a `mu.json` with a `plugin` key and at least one build target. The `mu.json` declares how to build the plugin, what files to include, and how to run it:
+A plugin is a directory containing a `mu.cue` with a `plugin` key and at least one build target. The `mu.cue` declares how to build the plugin, what files to include, and how to run it:
 
-```json
-{
-  "plugin": {
-    "entrypoint": "plugin.bb",
-    "toolchain": "bb",
-    "files": ["plugin.bb", "helper.sh"]
-  },
-  "targets": [
-    {
-      "target": "build",
-      "toolchain": "shell",
-      "sources": ["plugin.bb", "helper.sh"],
-      "config": {
-        "command": ["true"],
-        "impure": false
-      }
-    }
-  ]
+```cue
+package mu
+
+plugin: {
+    entrypoint: "plugin.bb"
+    toolchain:  "bb"
+    files: ["plugin.bb", "helper.sh"]
+    guide: "GUIDE.md"
 }
+targets: [{
+    target:    "build"
+    toolchain: "shell"
+    sources: ["plugin.bb", "helper.sh"]
+    config: {
+        command: ["true"]
+        impure: false
+    }
+}]
 ```
 
 **Plugin manifest fields** (`plugin` key):
@@ -392,37 +387,44 @@ A plugin is a directory containing a `mu.json` with a `plugin` key and at least 
 | `entrypoint` | yes | Relative path to the executable within the plugin directory |
 | `toolchain` | no | Runtime toolchain needed to execute the plugin (e.g. `"bb"` for Babashka). Omit for compiled binaries. If omitted, inferred from file extension (`.bb` → `bb`) |
 | `files` | no | Files to include in the CAS bundle. If omitted, all non-hidden files are included |
+| `guide` | no | Relative path to a guide file (e.g. `GUIDE.md`). Bundled automatically; surfaced by `mu guide plugin <name>` |
 
-**Build targets**: Every plugin declares its own build targets in its `mu.json`. For interpreted plugins (Babashka scripts), the build target can be a no-op (`true`). For compiled plugins (Go, Rust), the build target compiles the binary. mu does not dictate how plugins are built — the plugin author is in control.
+**Build targets**: Every plugin declares its own build targets in its `mu.cue`. For interpreted plugins (Babashka scripts), the build target can be a no-op (`true`). For compiled plugins (Go, Rust), the build target compiles the binary. mu does not dictate how plugins are built — the plugin author is in control.
 
 When `mu build` runs a plugin's build target, the plugin directory is automatically bundled as a deterministic tar and stored in CAS. The bundle is extracted to `~/.mu/plugins/<name>/` for execution.
 
 ### Referencing Plugins
 
-Plugins are declared in the consuming project's `mu.json` `plugins` array. There are four ways to reference a plugin:
+Plugins are declared in the consuming project's `mu.cue` `plugins` array. There are four ways to reference a plugin:
 
-**Plugin directory** (preferred) — point `script` at a directory containing a plugin `mu.json`:
+**Plugin directory** (preferred) — point `script` at a directory containing a plugin `mu.cue`:
 
-```json
-{"name": "go", "script": "plugins/go"}
+```cue
+{name: "go", script: "plugins/go"}
 ```
 
 **Single file** (legacy) — a single script file, hashed and stored in CAS:
 
-```json
-{"name": "go", "script": "plugins/go/plugin.bb"}
+```cue
+{name: "go", script: "plugins/go/plugin.bb"}
 ```
 
 **Remote file** — fetched by URL with SHA-256 verification, stored in CAS:
 
-```json
-{"name": "go", "url": "https://example.com/go-plugin.bb", "sha256": "abc123..."}
+```cue
+{name: "go", url: "https://example.com/go-plugin.bb", sha256: "abc123..."}
+```
+
+**CAS digest** — reference a previously built+published plugin by content hash:
+
+```cue
+{name: "go", digest: "sha256:abc123..."}
 ```
 
 **Command** — run an arbitrary executable directly (not stored in CAS):
 
-```json
-{"name": "go", "command": ["./my-plugin"]}
+```cue
+{name: "go", command: ["./my-plugin"]}
 ```
 
 ### Building Plugins
@@ -445,7 +447,7 @@ Building a plugin target bundles the plugin directory into CAS automatically.
 ### Inspecting Plugins
 
 ```bash
-# List plugins declared in mu.json
+# List plugins declared in mu.cue
 mu plugin list
 
 # List all plugins stored in CAS (across all projects)
@@ -453,6 +455,9 @@ mu plugin list --cached
 
 # Start plugins and show their capabilities
 mu plugin list --discover
+
+# Show capabilities, schemas, digest, and path for one plugin
+mu plugin info <name>
 ```
 
 ```
@@ -546,11 +551,11 @@ done
 
 Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract.
 
-To package it as a plugin, create a directory with the script and a `mu.json`:
+To package it as a plugin, create a directory with the script and a `mu.cue`:
 
 ```
 my-plugin/
-  mu.json       # {"plugin": {"entrypoint": "plugin.sh"}, "targets": [...]}
+  mu.cue        # plugin: {entrypoint: "plugin.sh", ...}, targets: [...]
   plugin.sh     # the script above
 ```
 
@@ -558,18 +563,22 @@ my-plugin/
 
 | Plugin | Description |
 |--------|-------------|
-| `go` | Builds Go binaries (cross-compile, tags, ldflags, race) |
+| `aws` | AWS resource observer (EC2, VPC, subnets) via the AWS CLI |
 | `cowsay` | Demo text transformation |
 | `docker` | Docker image builder |
-| `file` | File convergence (write, copy, symlink, delete) |
-| `k8s` | Kubernetes resource convergence and drift detection |
-| `zig` | Zig language toolchain |
-| `terraform` | Infrastructure provisioning |
-| `scratch` | Toolchain bootstrapping from scratch |
+| `file` | File convergence (write, copy, symlink, delete) and sealed-output capture |
+| `go` | Builds Go binaries (cross-compile, tags, ldflags, race) |
+| `host` | Remote host observer over SSH (OS, packages, services, mounts, network) |
+| `k8s` | Kubernetes resource convergence, drift detection, and Secret capture into sealed outputs |
+| `keypair-gen` | Generates ed25519/ECDSA keypairs into sealed outputs (PRIVATE + PUBLIC) |
 | `lint` | Linter wrapper (observe + fix) |
-| `pass` | Secret provider backed by [pass](https://passwordstore.org) |
-| `remote-exec` | Run a command on a remote host via SSH (with optional `check` guard and `sudo`) |
+| `pass` | Bidirectional secret provider backed by [pass](https://passwordstore.org) |
+| `remote-exec` | Run a command on a remote host via SSH; optional `check` guard, `sudo`, and sealed-output file fetch |
 | `remote-file` | Converge a file on a remote host via SSH (bytes, mode, owner) with observe support |
+| `scratch` | Toolchain bootstrapping from scratch |
+| `sops` | Bidirectional secret provider backed by [SOPS](https://github.com/getsops/sops) |
+| `terraform` | Infrastructure provisioning, drift detection, and sensitive-output capture |
+| `zig` | Zig language toolchain |
 
 ## Sealed Inputs
 
@@ -596,16 +605,16 @@ Each value is a reference in the format `scheme:path`, where the scheme maps to 
 
 ### In observe targets
 
-Targets can declare `sealed_inputs` directly in `mu.json` for use during observation (e.g., SSH credentials, API keys):
+Targets can declare `sealed_inputs` directly in `mu.cue` for use during observation (e.g., SSH credentials, API keys):
 
-```json
+```cue
 {
-  "target": "//home/server",
-  "toolchain": "host",
-  "config": {"host": "192.168.1.104", "user": "root"},
-  "sealed_inputs": {
-    "SSH_PASS": "pass:servers/root-password"
-  }
+    target:    "//home/server"
+    toolchain: "host"
+    config: {host: "192.168.1.104", user: "root"}
+    sealed_inputs: {
+        SSH_PASS: "pass:servers/root-password"
+    }
 }
 ```
 
@@ -620,9 +629,9 @@ The coordinator resolves these before calling the plugin's `observe` method and 
 
 ### Writing a secret-provider plugin
 
-A secret-provider plugin declares the `resolve_secret` capability and handles the method. The bundled `pass` plugin (`plugins/pass/`) provides an example backed by [password-store](https://passwordstore.org).
+A secret-provider plugin declares the `resolve_secret` and/or `store_secret` capabilities and handles the corresponding methods. The bundled `pass` plugin (`plugins/pass/`) provides a bidirectional reference implementation backed by [password-store](https://passwordstore.org); `sops` (`plugins/sops/`) is a second backend over [SOPS](https://github.com/getsops/sops)-encrypted files. See `mu guide secret-providers` for the authoring walkthrough.
 
-Register the plugin in `mu.json` and reference secrets using the provider's name as the scheme prefix (e.g., `"pass:deploy/token"`).
+Register the plugin in `mu.cue` and reference secrets using the provider's name as the scheme prefix (e.g., `"pass:deploy/token"` or `"sops:secrets/prod.yaml#db.password"`).
 
 ### Security properties
 
@@ -673,18 +682,18 @@ Downloads are verified against the declared SHA-256 hash. Extracted binaries are
 
 ## Config Formats
 
-mu natively reads JSON (`mu.json`). For other formats (CUE, TOML, YAML), declare an external preprocessor:
+mu natively reads CUE (`mu.cue`). The root config is required; per-package `mu.cue` files in subdirectories are auto-discovered and merged.
 
-```json
-{
-  "preprocessor": {
-    "extension": "star",
-    "command": ["cue", "export", "--out", "json"]
-  }
+For other formats (TOML, YAML, custom DSLs), declare an external preprocessor at the root that converts `mu.<ext>` files to JSON before they're loaded:
+
+```cue
+preprocessor: {
+    extension: "toml"
+    command: ["yj", "-tj"]
 }
 ```
 
-mu discovers `mu.<ext>` files in subdirectories, pipes them through the preprocessor, and consumes the JSON output.
+mu then discovers `mu.<ext>` files in subdirectories, pipes them through the preprocessor, and merges the JSON output.
 
 ## Project Structure
 
@@ -700,7 +709,7 @@ internal/
 ├── scratch/         Toolchain download, verify, extract, register
 ├── sandbox/         Hermetic execution environments
 └── builtin/         Built-in fetch command with SHA-256 verification
-plugins/             Babashka plugins (go, cowsay, docker, file, k8s, zig, terraform, scratch, remote-exec, remote-file)
+plugins/             Bundled plugins (aws, cowsay, docker, file, go, host, k8s, keypair-gen, lint, pass, remote-exec, remote-file, scratch, sops, terraform, zig)
 examples/            Example projects
 ```
 

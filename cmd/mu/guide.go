@@ -127,6 +127,7 @@ THE DAY-TO-DAY VERBS
   mu observe <target>...    Ask each plugin to report current state.
   mu cache ls               List cached action results.
   mu plugin list            Show registered plugins.
+  mu plugin info <name>     Show capabilities/metadata for one plugin.
   mu target list            Show targets defined in this project.
 
 WHAT TO READ NEXT
@@ -427,6 +428,14 @@ BUILDING AND DISTRIBUTING PLUGINS
   mu plugin list --discover      Start plugins and show capabilities.
   mu plugin list --cached        Show all plugins stored in ~/.mu/plugins/.
   mu plugin list --json          Output as JSON.
+  mu plugin info <name>          Show capabilities, schemas, digest, and
+                                 path for a single plugin (project or
+                                 cached). Works outside any mu project.
+  mu plugin status               Reconcile declared plugins against the
+                                 local cache (ok / missing / stale / local).
+  mu plugin push                 Publish a plugin to a configured OCI cache.
+  mu plugin test <plugin-path>   Run bundled + testdata/*.yaml scenarios
+                                 against a plugin.
 
 PLUGIN GUIDES
 
@@ -499,8 +508,13 @@ PLUGIN GUIDES
 
   Keep the guide short and copy-paste friendly. If a section has
   nothing to say for your plugin, drop it entirely — empty headings
-  are noise. See plugins/pass/GUIDE.md and plugins/host/GUIDE.md
-  for live examples.
+  are noise. Live examples in this repo:
+
+    plugins/pass/GUIDE.md         secret provider, ref grammar, modes
+    plugins/sops/GUIDE.md         file-based provider, write policy
+    plugins/host/GUIDE.md         observer, sealed-input file mode
+    plugins/remote-exec/GUIDE.md  consumer + emitter, sealed_output_files
+    plugins/keypair-gen/GUIDE.md  generator, two-name sealed_outputs contract
 
 OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
 
@@ -819,7 +833,7 @@ func printGuideSecrets() {
 
 mu has a symmetric secret system: actions can READ secrets via
 sealed_inputs and WRITE secrets via sealed_outputs, all routed through
-the same provider plugins (today: 'pass'). Values never enter the
+the same provider plugins (today: 'pass', 'sops'). Values never enter the
 cache, manifests, or logs; refs and modes are non-secret metadata
 and are part of the cache key.
 
@@ -911,7 +925,10 @@ PROPERTIES
   - Values never appear in stdout, the action cache, or manifests.
 
 For a higher-level wrapper that handles the common
-"derive-once-and-store" pattern, see 'mu guide secret-gen'.
+"derive-once-and-store" pattern, see 'mu guide secret-gen'. For
+two-correlated-output secrets that don't fit secret-gen's single-
+stdout shape (SSH keypairs, TLS keypairs), use the keypair-gen
+plugin — see plugins/keypair-gen/GUIDE.md.
 
 ────────────────────────────────────────────────────────────────────
 WRITE-POLICY ALLOW-LIST — secrets.writable_refs
@@ -1017,7 +1034,7 @@ func printGuideSecretGen() {
 The 'secret-gen' toolchain is built into mu — no plugin registration
 required. Use it to declaratively bootstrap a secret: run a
 derivation command, capture its stdout, route it through a
-store_secret-capable provider plugin (today: 'pass').
+store_secret-capable provider plugin (today: 'pass', 'sops').
 
 This is the natural complement to sealed_inputs. Where sealed_inputs
 consumes a secret that someone has put in the store out of band,
