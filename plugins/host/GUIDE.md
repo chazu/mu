@@ -31,7 +31,22 @@ SECRETS (via sealed_inputs)
     "sealed_inputs": {"SSH_PASS": "pass:infra/webserver-password"}
 
   When SSH_PASS is set, the plugin uses sshpass for authentication.
-  Otherwise it uses key-based authentication.
+  Otherwise it uses key-based authentication. SSH_PASS is short and
+  uses env delivery (the default).
+
+  Multi-line / binary secrets — file delivery mode
+
+  For SSH private keys stored in pass (or any multi-line secret), use
+  sealed_input_modes to receive the value as a file path rather than
+  an env-var literal:
+
+    "sealed_inputs":      {"DEPLOY_KEY": "pass:raw:infra/webserver-key"},
+    "sealed_input_modes": {"DEPLOY_KEY": "file"}
+
+  $DEPLOY_KEY then holds the path to a 0600 temp file holding the key
+  bytes. The temp dir is removed when the action exits. The host
+  plugin runs bare (no sandbox), so file mode works; reach for it any
+  time the secret would not survive shell quoting as an env value.
 
 EXAMPLES
 
