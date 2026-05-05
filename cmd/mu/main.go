@@ -11,17 +11,17 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
-	case "build":
+	case "build", "b":
 		os.Exit(runBuild(os.Args[2:]))
 	case "scratch":
 		os.Exit(runScratch(os.Args[2:]))
 	case "cache":
 		os.Exit(runCache(os.Args[2:]))
-	case "target":
+	case "target", "t":
 		os.Exit(runTarget(os.Args[2:]))
 	case "graph":
 		os.Exit(runGraph(os.Args[2:]))
-	case "plugin":
+	case "plugin", "p":
 		os.Exit(runPlugin(os.Args[2:]))
 	case "observe":
 		os.Exit(runObserve(os.Args[2:]))
@@ -41,12 +41,12 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: mu <command> [arguments]
 
 Commands:
-  build      Build one or more targets
+  build (b)  Build one or more targets
   scratch    Build toolchains from scratch (override with MU_SCRATCH)
   cache      Inspect the local CAS cache
-  target     List and inspect targets
+  target (t) List and inspect targets
   graph      Show the dependency chain of a target
-  plugin     List and inspect plugins
+  plugin (p) List and inspect plugins
   observe    Check current state of targets (drift detection)
   verify     Re-hash CAS blobs, check schema namespace conventions, report issues
   guide      Quick-reference guides for mu features
