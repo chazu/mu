@@ -87,9 +87,11 @@
     (conj (str "-parallelism=" (get config "parallelism")))))
 
 (defn build-apply-cmd
-  "Build terraform apply command."
+  "Build terraform apply command. `-json` emits NDJSON log events to stdout
+  (one event per line: apply_start, apply_progress, apply_complete,
+  change_summary, outputs, diagnostic). Implies -no-color and non-interactive."
   [config]
-  (cond-> [(resolve-bin config) "apply" "-input=false" "-no-color" "-auto-approve" "tfplan"]
+  (cond-> [(resolve-bin config) "apply" "-input=false" "-no-color" "-json" "-auto-approve" "tfplan"]
     (get config "parallelism")
     (conj (str "-parallelism=" (get config "parallelism")))))
 
