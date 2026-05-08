@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/config"
+	"github.com/chau/mu/internal/schemacache"
 )
 
 // runPluginPush publishes the named plugin to the configured cache.push
@@ -99,6 +101,12 @@ func runPluginPush(args []string) int {
 				Module: s.Module, Version: s.Version, Path: s.Path,
 			})
 		}
+	}
+
+	// Refuse to push if vendored schema bytes conflict with a
+	// previously-cached (module, version) under different content.
+	if err := checkPushSchemaCollisions(pluginSrc, cfg.Schemas); err != nil {
+		return c.fail(exitFail, "%v", err)
 	}
 
 	ref, code, ok := resolvePushRef(c)
@@ -232,4 +240,57 @@ func detectGitRemote(projectRoot string) string {
 		line = line[:nl]
 	}
 	return strings.TrimSpace(line)
+}
+
+// checkPushSchemaCollisions reads vendored schema files from the plugin
+// source directory and verifies they don't conflict with mu's local
+// schema cache. Returns an error if any (module, version) already exists
+// with different content bytes.
+func checkPushSchemaCollisions(pluginSrc string, schemas []oci.PluginSchemaDecl) error {
+	if len(schemas) == 0 {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	cache, err := schemacache.New(filepath.Join(home, ".mu", "schemas"))
+	if err != nil {
+		return nil
+	}
+	for _, s := range schemas {
+		if !cache.Has(s.Module, s.Version) {
+			continue
+		}
+		schemaDir := filepath.Join(pluginSrc, s.Path)
+		var incoming []schemacache.File
+		filepath.WalkDir(schemaDir, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".cue") {
+				return nil
+			}
+			rel, relErr := filepath.Rel(schemaDir, path)
+			if relErr != nil {
+				return nil
+			}
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			incoming = append(incoming, schemacache.File{
+				RelPath: filepath.ToSlash(rel),
+				Content: content,
+			})
+			return nil
+		})
+		if len(incoming) == 0 {
+			continue
+		}
+		if err := cache.Insert(s.Module, s.Version, incoming); err != nil {
+			if errors.Is(err, schemacache.ErrVersionMismatch) {
+				return fmt.Errorf("schema collision for (%s, %s): cached content differs from plugin bundle — bump the version before pushing", s.Module, s.Version)
+			}
+			return err
+		}
+	}
+	return nil
 }

@@ -136,9 +136,8 @@ func runVerify(args []string) int {
 	}
 
 	// Plugin schema namespace policing: walk in-tree plugin source dirs,
-	// load each manifest, and warn when a "mu/<x>" output_schema or
-	// vendored schema doesn't match the plugin's own name. The check is
-	// advisory — it does not affect verify's exit code.
+	// load each manifest, and error when a "mu/<x>" output_schema or
+	// vendored schema doesn't match the plugin's own name.
 	schemaWarnings := verifyPluginSchemaNamespaces(ctx.ProjectRoot, *jsonOut)
 
 	if *jsonOut {
@@ -170,7 +169,7 @@ func runVerify(args []string) int {
 		}
 	}
 
-	if corrupt > 0 || missing > 0 {
+	if corrupt > 0 || missing > 0 || len(schemaWarnings) > 0 {
 		return exitFail
 	}
 	return exitOK
@@ -188,10 +187,10 @@ type schemaNamespaceWarning struct {
 	Version string `json:"version,omitempty"` // version, if known
 }
 
-// verifyPluginSchemaNamespaces walks <projectRoot>/plugins/* and warns
-// when a plugin declares (or vendors) a schema in the mu/<x> namespace
-// that doesn't match its own directory name. Returns the list of
-// warnings; also prints them to stderr in non-JSON mode.
+// verifyPluginSchemaNamespaces walks <projectRoot>/plugins/* and reports
+// errors when a plugin declares (or vendors) a schema in the mu/<x>
+// namespace that doesn't match its own directory name. Returns the list
+// of findings; also prints them to stderr in non-JSON mode.
 func verifyPluginSchemaNamespaces(projectRoot string, jsonOut bool) []schemaNamespaceWarning {
 	pluginsDir := filepath.Join(projectRoot, "plugins")
 	entries, err := os.ReadDir(pluginsDir)
@@ -223,7 +222,7 @@ func verifyPluginSchemaNamespaces(projectRoot string, jsonOut bool) []schemaName
 	}
 	if !jsonOut {
 		for _, w := range warnings {
-			fmt.Fprintf(os.Stderr, "  WARN plugin %q vendors schema %q: %s\n",
+			fmt.Fprintf(os.Stderr, "  ERROR plugin %q vendors schema %q: %s\n",
 				w.Plugin, w.Module, w.Reason)
 		}
 	}
