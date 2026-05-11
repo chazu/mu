@@ -16,7 +16,9 @@ import (
 	"github.com/chau/mu/internal/config"
 	"github.com/chau/mu/internal/coordinator/discovercache"
 	"github.com/chau/mu/internal/dag"
+	"github.com/chau/mu/internal/pithvm"
 	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/pith"
 )
 
 // ToolchainBuilder builds toolchains from scratch before the planning phase.
@@ -236,6 +238,19 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 			planActions = actions
 			declaredOutputs = declared
+		} else if len(t.Plan) > 0 {
+			// Inline pith plan program — run the VM to emit action specs.
+			vm := pith.New(ctx)
+			buf := &pithvm.ActionBuffer{}
+			pithvm.RegisterPlanDrivers(vm, t.Config, buf)
+			if err := vm.Run(t.Plan); err != nil {
+				return nil, fmt.Errorf("coordinator: target %q plan: %w", t.Name, err)
+			}
+			// Convert emitted action maps to ActionSpecs.
+			for _, m := range buf.Actions {
+				spec := mapToActionSpec(m)
+				planActions = append(planActions, spec)
+			}
 		} else {
 			ti := plugin.TargetInfo{
 				Name:             t.Name,
@@ -754,6 +769,66 @@ func cloneStringMap(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// mapToActionSpec converts a map[string]any (emitted by a pith plan program)
+// into a plugin.ActionSpec. Only recognized keys are mapped; unknown keys are
+// silently ignored so that plan programs can evolve independently of the spec.
+func mapToActionSpec(m map[string]any) plugin.ActionSpec {
+	var spec plugin.ActionSpec
+	if id, ok := m["id"].(string); ok {
+		spec.ID = id
+	}
+	if cmd, ok := m["command"].([]any); ok {
+		for _, c := range cmd {
+			if s, ok := c.(string); ok {
+				spec.Command = append(spec.Command, s)
+			}
+		}
+	}
+	if body, ok := m["body"].([]any); ok {
+		spec.Body = body
+	}
+	if outputs, ok := m["outputs"].([]any); ok {
+		for _, o := range outputs {
+			if s, ok := o.(string); ok {
+				spec.Outputs = append(spec.Outputs, s)
+			}
+		}
+	}
+	if deps, ok := m["depends_on"].([]any); ok {
+		for _, d := range deps {
+			if s, ok := d.(string); ok {
+				spec.DependsOn = append(spec.DependsOn, s)
+			}
+		}
+	}
+	if env, ok := m["env"].(map[string]any); ok {
+		spec.Env = make(map[string]string, len(env))
+		for k, v := range env {
+			if s, ok := v.(string); ok {
+				spec.Env[k] = s
+			}
+		}
+	}
+	if inputs, ok := m["inputs"].(map[string]any); ok {
+		spec.Inputs = make(map[string]string, len(inputs))
+		for k, v := range inputs {
+			if s, ok := v.(string); ok {
+				spec.Inputs[k] = s
+			}
+		}
+	}
+	if wd, ok := m["work_dir"].(string); ok {
+		spec.WorkDir = wd
+	}
+	if imp, ok := m["impure"].(bool); ok {
+		spec.Impure = imp
+	}
+	if net, ok := m["network"].(bool); ok {
+		spec.Network = net
+	}
+	return spec
 }
 
 // prefixActions rewrites action IDs and DependsOn references with a target

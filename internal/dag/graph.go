@@ -11,6 +11,7 @@ import (
 type Action struct {
 	ID        string
 	Command   []string
+	Body      []any // pith VM program; if non-nil, overrides Command execution
 	Inputs    map[string]cas.Digest // name -> content hash (resolved by coordinator)
 	Outputs   []string              // declared output file paths
 	DependsOn []string              // action IDs this depends on

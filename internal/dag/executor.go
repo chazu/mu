@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/chau/mu/internal/cas"
+	"github.com/chau/mu/internal/pithvm"
 	"github.com/chau/mu/internal/sandbox"
+	"github.com/chazu/pith"
 )
 
 // ActionStatus represents the result of executing a single action.
@@ -192,9 +194,9 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 	}
 
-	// Execute the command.
-	if len(a.Command) == 0 {
-		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command", a.ID)}
+	// Execute the command (or pith Body program).
+	if len(a.Command) == 0 && len(a.Body) == 0 {
+		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command or body", a.ID)}
 	}
 
 	// Merge resolved secrets into a copy of the env. We must not mutate a.Env
@@ -348,6 +350,8 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 		var err error
 		if a.Toolchain != nil {
 			exitCode, err = e.executeInSandbox(attemptCtx, a, env)
+		} else if len(a.Body) > 0 {
+			exitCode, err = e.executePithVM(attemptCtx, a, env)
 		} else {
 			exitCode, err = e.executeBare(attemptCtx, a, env)
 		}
@@ -397,6 +401,16 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 		exitCode = cmd.ProcessState.ExitCode()
 	}
 	return exitCode, err
+}
+
+// executePithVM runs a pith VM program instead of a shell command.
+func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]string) (int, error) {
+	vm := pith.New(ctx)
+	pithvm.RegisterExecDrivers(vm, env, nil) // TODO: wire up getOutput
+	if err := vm.Run(a.Body); err != nil {
+		return 1, err
+	}
+	return 0, nil
 }
 
 // executeInSandbox runs a command in a hermetic sandbox environment.

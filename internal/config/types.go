@@ -43,6 +43,8 @@ type Target struct {
 	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name → secret ref (e.g. "pass:deploy/token")
 	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name → delivery mode: "env" (default) or "file"
 	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name → secret ref; action writes to $MU_SEALED_OUT_DIR/<name>
+	Plan      []any `json:"plan,omitempty"`      // pith plan program (alternative to plugin planning)
+	Transform []any `json:"transform,omitempty"` // pith transform program (runs after deps complete)
 	// BRICK classification (optional, set by pudl export-actions).
 	// mu does not validate these — pudl enforces BRICK constraints via CUE.
 	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"

@@ -167,6 +167,7 @@ func Resolve(specs []plugin.ActionSpec, projectRoot string, crossTargetProducers
 		actions = append(actions, &dag.Action{
 			ID:                spec.ID,
 			Command:           spec.Command,
+			Body:              spec.Body,
 			Inputs:            inputs,
 			Outputs:           spec.Outputs,
 			DependsOn:         dependsOn,

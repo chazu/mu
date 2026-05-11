@@ -113,6 +113,7 @@ type DepInfo struct {
 type ActionSpec struct {
 	ID           string            `json:"id"`
 	Command      []string          `json:"command"`
+	Body         []any             `json:"body,omitempty"` // pith VM program; mutually exclusive with Command
 	Inputs       map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
 	Outputs      []string          `json:"outputs"`              // declared output file paths
 	DependsOn    []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs

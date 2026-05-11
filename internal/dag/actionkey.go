@@ -3,6 +3,7 @@ package dag
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -44,6 +45,13 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	// Command args in original order.
 	for _, arg := range a.Command {
 		fmt.Fprintf(h, "cmd:%s\n", arg)
+	}
+
+	// Body (pith VM program) — serialize as JSON for deterministic hashing.
+	if len(a.Body) > 0 {
+		if b, err := json.Marshal(a.Body); err == nil {
+			fmt.Fprintf(h, "body:%s\n", b)
+		}
 	}
 
 	// Env vars sorted by key.
