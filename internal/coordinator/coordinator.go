@@ -284,6 +284,21 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			declaredOutputs = plan.Outputs
 		}
 
+		// Inject a synthetic transform action if the target has a Transform program.
+		// The transform runs after dependencies complete (via DAG ordering) and
+		// before the target's own actions (since they all depend on _transform).
+		if len(t.Transform) > 0 {
+			transformAction := plugin.ActionSpec{
+				ID:      "_transform",
+				Body:    t.Transform,
+				Outputs: []string{},
+			}
+			for i := range planActions {
+				planActions[i].DependsOn = append(planActions[i].DependsOn, "_transform")
+			}
+			planActions = append([]plugin.ActionSpec{transformAction}, planActions...)
+		}
+
 		// Apply target-level sealed_outputs as a convenience: if the target
 		// declares them and no plan action set its own, attach them to the
 		// single action in the plan. Multi-action plans must have the

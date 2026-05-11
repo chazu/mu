@@ -2,12 +2,14 @@ package dag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +62,13 @@ type Executor struct {
 	// action with non-empty SealedOutputs fails — the runner cannot
 	// silently drop captured secrets.
 	SealedOutputWriter SealedOutputWriter
+
+	// completedOutputs tracks output file paths by target prefix for
+	// completed actions, enabling pith VM getOutput closures.
+	// Protected by outputsMu since the main goroutine writes and
+	// worker goroutines read concurrently.
+	completedOutputs map[string]map[string]string // target -> outputName -> filePath
+	outputsMu        sync.RWMutex
 }
 
 // subprocessStdout returns the configured stdout target for action
@@ -86,6 +95,9 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
+
+	// Initialize completed outputs tracking for pith VM getOutput.
+	e.completedOutputs = make(map[string]map[string]string)
 
 	// Track state for each action.
 	var mu sync.Mutex
@@ -152,6 +164,24 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 				mu.Lock()
 				result.Completed = append(result.Completed, status)
 				mu.Unlock()
+
+				// Record completed outputs by target prefix for pith VM getOutput.
+				if idx := strings.Index(status.ID, ":"); idx >= 0 {
+					targetName := status.ID[:idx]
+					e.outputsMu.Lock()
+					if e.completedOutputs[targetName] == nil {
+						e.completedOutputs[targetName] = make(map[string]string)
+					}
+					for _, a := range g.Actions() {
+						if a.ID == status.ID {
+							for _, outPath := range a.Outputs {
+								e.completedOutputs[targetName][outPath] = outPath
+							}
+							break
+						}
+					}
+					e.outputsMu.Unlock()
+				}
 			}
 
 			// Unblock dependents.
@@ -406,7 +436,33 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 // executePithVM runs a pith VM program instead of a shell command.
 func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]string) (int, error) {
 	vm := pith.New(ctx)
-	pithvm.RegisterExecDrivers(vm, env, nil) // TODO: wire up getOutput
+
+	getOutput := func(targetName string) (map[string]any, error) {
+		e.outputsMu.RLock()
+		outputs, ok := e.completedOutputs[targetName]
+		e.outputsMu.RUnlock()
+		if !ok {
+			return nil, fmt.Errorf("no outputs for target %q", targetName)
+		}
+		result := make(map[string]any)
+		for name, path := range outputs {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				result[name] = map[string]any{"path": path, "error": err.Error()}
+				continue
+			}
+			// Try parsing as JSON
+			var parsed any
+			if json.Unmarshal(data, &parsed) == nil {
+				result[name] = parsed
+			} else {
+				result[name] = string(data)
+			}
+		}
+		return result, nil
+	}
+
+	pithvm.RegisterExecDrivers(vm, env, getOutput, e.Store)
 	if err := vm.Run(a.Body); err != nil {
 		return 1, err
 	}
