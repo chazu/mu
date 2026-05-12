@@ -68,7 +68,14 @@ type Executor struct {
 	// Protected by outputsMu since the main goroutine writes and
 	// worker goroutines read concurrently.
 	completedOutputs map[string]map[string]string // target -> outputName -> filePath
-	outputsMu        sync.RWMutex
+
+	// pithResults stores pith VM stack results by target prefix.
+	// Transform actions and body actions write their result here so
+	// downstream actions can access it via target/output under the
+	// "_result" key without requiring file-based output declarations.
+	pithResults map[string]any // target -> stack result
+
+	outputsMu sync.RWMutex
 }
 
 // subprocessStdout returns the configured stdout target for action
@@ -98,6 +105,7 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 
 	// Initialize completed outputs tracking for pith VM getOutput.
 	e.completedOutputs = make(map[string]map[string]string)
+	e.pithResults = make(map[string]any)
 
 	// Track state for each action.
 	var mu sync.Mutex
@@ -166,7 +174,7 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 				mu.Unlock()
 
 				// Record completed outputs by target prefix for pith VM getOutput.
-				if idx := strings.Index(status.ID, ":"); idx >= 0 {
+				if idx := strings.LastIndex(status.ID, ":"); idx >= 0 {
 					targetName := status.ID[:idx]
 					e.outputsMu.Lock()
 					if e.completedOutputs[targetName] == nil {
@@ -175,7 +183,11 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 					for _, a := range g.Actions() {
 						if a.ID == status.ID {
 							for _, outPath := range a.Outputs {
-								e.completedOutputs[targetName][outPath] = outPath
+								resolved := outPath
+								if !filepath.IsAbs(outPath) && a.WorkDir != "" {
+									resolved = filepath.Join(a.WorkDir, outPath)
+								}
+								e.completedOutputs[targetName][outPath] = resolved
 							}
 							break
 						}
@@ -306,10 +318,50 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		execEnv["MU_SEALED_OUT_DIR"] = sealedOutDir
 	}
 
+	// For bare-mode actions with relative output paths, create a per-action
+	// output directory and expose it as $MU_OUT. After execution, outputs
+	// are copied to WorkDir so dependents and cache storage can find them.
+	var muOutDir string
+	if a.Toolchain == nil && hasRelativeOutputs(a.Outputs) {
+		dir, err := os.MkdirTemp("", "mu-out-*")
+		if err != nil {
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create output dir: %w", a.ID, err)}
+		}
+		muOutDir = dir
+		defer os.RemoveAll(muOutDir)
+		if execEnv == nil {
+			execEnv = make(map[string]string, len(a.Env)+1)
+			for k, v := range a.Env {
+				execEnv[k] = v
+			}
+		}
+		execEnv["MU_OUT"] = muOutDir
+	}
+
 	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv)
 
 	if execErr != nil {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
+	}
+
+	// Copy outputs from MU_OUT staging dir to WorkDir so dependents can read them.
+	if muOutDir != "" {
+		for _, outRel := range a.Outputs {
+			srcPath := filepath.Join(muOutDir, outRel)
+			dstPath := filepath.Join(a.WorkDir, outRel)
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: create output dir for %s: %w", a.ID, outRel, err)}
+			}
+			src, err := os.Open(srcPath)
+			if err != nil {
+				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: open output %s: %w", a.ID, outRel, err)}
+			}
+			if err := writeFile(dstPath, src); err != nil {
+				src.Close()
+				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: copy output %s: %w", a.ID, outRel, err)}
+			}
+			src.Close()
+		}
 	}
 
 	// Capture sealed outputs post-exec. Each declared name must exist as
@@ -329,7 +381,11 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 
 	if e.Store != nil && !a.Impure {
 		for _, outPath := range a.Outputs {
-			dgst, err := e.storeOutput(ctx, outPath)
+			absPath := outPath
+			if muOutDir != "" && !filepath.IsAbs(outPath) {
+				absPath = filepath.Join(a.WorkDir, outPath)
+			}
+			dgst, err := e.storeOutput(ctx, absPath)
 			if err != nil {
 				return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q: storing output %q: %w", a.ID, outPath, err)}
 			}
@@ -439,11 +495,10 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 
 	getOutput := func(targetName string) (map[string]any, error) {
 		e.outputsMu.RLock()
-		outputs, ok := e.completedOutputs[targetName]
+		outputs := e.completedOutputs[targetName]
+		pithResult := e.pithResults[targetName]
 		e.outputsMu.RUnlock()
-		if !ok {
-			return nil, fmt.Errorf("no outputs for target %q", targetName)
-		}
+
 		result := make(map[string]any)
 		for name, path := range outputs {
 			data, err := os.ReadFile(path)
@@ -451,13 +506,18 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 				result[name] = map[string]any{"path": path, "error": err.Error()}
 				continue
 			}
-			// Try parsing as JSON
 			var parsed any
 			if json.Unmarshal(data, &parsed) == nil {
 				result[name] = parsed
 			} else {
 				result[name] = string(data)
 			}
+		}
+		if pithResult != nil {
+			result["_result"] = pithResult
+		}
+		if len(result) == 0 {
+			return nil, fmt.Errorf("no outputs for target %q", targetName)
 		}
 		return result, nil
 	}
@@ -466,6 +526,17 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 	if err := vm.Run(a.Body); err != nil {
 		return 1, err
 	}
+
+	// Store stack result for downstream access via target/output "_result" key.
+	if result, err := vm.Result(); err == nil && result != nil {
+		if idx := strings.LastIndex(a.ID, ":"); idx >= 0 {
+			targetName := a.ID[:idx]
+			e.outputsMu.Lock()
+			e.pithResults[targetName] = result
+			e.outputsMu.Unlock()
+		}
+	}
+
 	return 0, nil
 }
 
@@ -597,6 +668,15 @@ func writeFile(path string, r io.Reader) error {
 		return copyErr
 	}
 	return closeErr
+}
+
+func hasRelativeOutputs(outputs []string) bool {
+	for _, o := range outputs {
+		if !filepath.IsAbs(o) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildEnv converts an env map to the os/exec []string format.

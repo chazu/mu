@@ -213,6 +213,34 @@ func RegisterExecDrivers(vm *pith.VM, env map[string]string, getOutput func(stri
 		},
 	})
 
+	// format driver: serialization and string formatting.
+	vm.RegisterDriver("format", map[string]pith.Word{
+		"json": func(vm *pith.VM) error {
+			v, err := vm.Pop()
+			if err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				return err
+			}
+			vm.Push(string(b))
+			return nil
+		},
+		"compact": func(vm *pith.VM) error {
+			v, err := vm.Pop()
+			if err != nil {
+				return err
+			}
+			b, err := json.Marshal(v)
+			if err != nil {
+				return err
+			}
+			vm.Push(string(b))
+			return nil
+		},
+	})
+
 	// CAS driver: store and fetch content-addressed blobs.
 	if store != nil {
 		vm.RegisterDriver("cas", map[string]pith.Word{

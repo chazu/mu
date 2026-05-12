@@ -657,6 +657,198 @@ An action's cache key is derived from:
 
 Sealed inputs (secrets) are deliberately excluded from the cache key. If the key matches, the action is skipped and outputs are restored from cache.
 
+## Inline Programs (pith VM)
+
+mu embeds [pith](https://github.com/chazu/pith), a concatenative
+(stack-based) virtual machine. Programs are JSON arrays of words
+stored in CUE — no compiled plugins needed for simple logic.
+
+### Three Integration Points
+
+Targets gain three optional fields, each holding a `pith.#Program`:
+
+**`plan`** — inline planning. The coordinator interprets the program
+instead of dispatching to a plugin. `action/emit` collects actions
+into the DAG:
+
+```cue
+import "github.com/chazu/pith"
+
+targets: [{
+    target: "//infra/dns"
+    plan: pith.#Program & [
+        "target/config",
+        "dup", "'record_type", "get", "'A", "eq",
+        [
+            "dup", "'host", "get", "swap", "'ip", "get",
+            {"type": "dns/create-a"}, "merge",
+            "action/emit",
+        ],
+        [
+            "dup", "'host", "get", "swap", "'target", "get",
+            {"type": "dns/create-cname"}, "merge",
+            "action/emit",
+        ],
+        "if",
+    ]
+}]
+```
+
+**`transform`** — inter-target data reshaping. Runs after dependencies
+complete, before own actions. The stack result is automatically
+available to subsequent actions via `target/output` under the
+`_result` key:
+
+```cue
+targets: [{
+    target: "//deploy/config"
+    depends: ["//infra/vpc", "//infra/db"]
+    transform: pith.#Program & [
+        "'//infra/vpc", "target/output", "'vpc_id", "get",
+        "'//infra/db", "target/output", "'endpoint", "get",
+        {"vpc_id": null, "db_endpoint": null},
+        "swap", "'db_endpoint", "swap", "set",
+        "swap", "'vpc_id", "swap", "set",
+    ]
+    plan: pith.#Program & [
+        // reads transform result:
+        "'//deploy/config", "target/output", "'_result", "get",
+        {"id": "write-config", "type": "file/write"}, "merge",
+        "action/emit",
+    ]
+}]
+```
+
+**`body`** on actions — replaces shell commands. The executor
+interprets the program instead of running a subprocess:
+
+```cue
+// In a plugin's plan response or inline plan:
+{
+    id: "fetch-data"
+    body: pith.#Program & [
+        "'https://api.example.com/data", "http/get",
+        "'items", "get",
+        ["'status", "get", "'active", "eq"], "filter",
+        "format/json",
+    ]
+}
+```
+
+### Phase-Scoped Vocabularies
+
+Each execution phase registers a different set of driver words.
+Words unavailable in a phase produce "unknown word" errors:
+
+| Word | Plan | Transform | Execute |
+|------|:----:|:---------:|:-------:|
+| `action/emit` | yes | | |
+| `target/config` | yes | yes | yes |
+| `target/output` | | yes | yes |
+| `http/get`, `http/post` | | | yes |
+| `exec/run`, `exec/shell` | | | yes |
+| `cas/store`, `cas/fetch` | | | yes |
+| `format/json`, `format/compact` | | | yes |
+
+### Driver Words
+
+**DAG construction (plan phase only):**
+
+```
+action/emit     ( spec -- )         Emit ActionSpec into DAG
+target/config   ( -- config )       Current target config
+```
+
+**Cross-target (transform + execute):**
+
+```
+target/output   ( name -- data )    Read dependency outputs
+```
+
+**HTTP (execute only):**
+
+```
+http/get     ( url -- response )          GET, parse JSON response
+http/post    ( url body -- response )     POST JSON, parse response
+```
+
+**Process execution (execute only):**
+
+```
+exec/run     ( [args] -- stdout )    Run command, parse output
+exec/shell   ( cmd -- stdout )       Run shell command, parse output
+```
+
+**Content-addressed store (execute only):**
+
+```
+cas/store    ( data -- digest )      Store data, return digest
+cas/fetch    ( digest -- data )      Fetch data by digest
+```
+
+**Formatting (execute only):**
+
+```
+format/json      ( value -- string )    Pretty-printed JSON
+format/compact   ( value -- string )    Minified JSON
+```
+
+### Transform Output Passing
+
+When a transform program completes, its stack result is automatically
+stored and made available to the target's subsequent actions. Access
+it via `target/output` with your own target name — the result appears
+under the `_result` key in the output map.
+
+This eliminates the need to declare file-based outputs for transforms.
+The data flows in-memory from the transform to downstream actions.
+
+### When to Use Inline Programs vs Plugins
+
+| Use Case | Inline (pith) | Plugin Binary |
+|----------|:---:|:---:|
+| API call + transform | yes | |
+| Conditional action selection | yes | |
+| Data reshaping between targets | yes | |
+| Config templating | yes | |
+| Go/Rust compilation | | yes |
+| Docker build | | yes |
+| Terraform apply | | yes |
+| Streaming I/O | | yes |
+| Persistent state across actions | | yes |
+
+Rule of thumb: if the logic is "call API, transform data, emit
+result" — pith program. If it needs a toolchain, long-running
+process, or complex I/O — plugin binary.
+
+### Coexistence with Plugins
+
+Pith and the NDJSON plugin protocol coexist. A target can use both:
+`toolchain: "go"` dispatches to the Go plugin for compilation, while
+a `transform` pith program reshapes output for downstream targets.
+Targets with `plan` fields skip plugin dispatch entirely.
+
+### Caching
+
+Pith actions cache identically to shell actions. The cache key is
+`hash(canonical(body) + input_digests)`. Programs are deterministic
+— same program + same inputs = same outputs. Actions with side effects
+(e.g. `http/get`) should be marked `impure: true` to skip caching.
+
+### CUE Validation
+
+Import `pith.#Program` to validate programs at config load time:
+
+```cue
+import "github.com/chazu/pith"
+
+plan?: pith.#Program
+transform?: pith.#Program
+```
+
+Unknown words, malformed ops, and type errors are caught during CUE
+evaluation — before the coordinator starts.
+
 ## Toolchains
 
 Toolchains are built from scratch — mu downloads, verifies, extracts, and registers them as content-addressed artifacts:

@@ -285,13 +285,23 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		}
 
 		// Inject a synthetic transform action if the target has a Transform program.
-		// The transform runs after dependencies complete (via DAG ordering) and
-		// before the target's own actions (since they all depend on _transform).
+		// The transform must wait for all dependency targets to complete,
+		// then plan actions within this target depend on _transform.
 		if len(t.Transform) > 0 {
+			var depActionIDs []string
+			for _, depName := range t.Deps {
+				prefix := depName + ":"
+				for _, a := range graph.Actions() {
+					if strings.HasPrefix(a.ID, prefix) {
+						depActionIDs = append(depActionIDs, a.ID)
+					}
+				}
+			}
 			transformAction := plugin.ActionSpec{
-				ID:      "_transform",
-				Body:    t.Transform,
-				Outputs: []string{},
+				ID:        "_transform",
+				Body:      t.Transform,
+				Outputs:   []string{},
+				DependsOn: depActionIDs,
 			}
 			for i := range planActions {
 				planActions[i].DependsOn = append(planActions[i].DependsOn, "_transform")
@@ -849,10 +859,14 @@ func mapToActionSpec(m map[string]any) plugin.ActionSpec {
 // prefixActions rewrites action IDs and DependsOn references with a target
 // prefix so that actions from different targets never collide.
 func prefixActions(target string, actions []plugin.ActionSpec) {
+	prefix := target + ":"
 	for i := range actions {
-		actions[i].ID = target + ":" + actions[i].ID
+		actions[i].ID = prefix + actions[i].ID
 		for j := range actions[i].DependsOn {
-			actions[i].DependsOn[j] = target + ":" + actions[i].DependsOn[j]
+			// Don't re-prefix cross-target deps (already fully qualified).
+			if !strings.Contains(actions[i].DependsOn[j], ":") {
+				actions[i].DependsOn[j] = prefix + actions[i].DependsOn[j]
+			}
 		}
 	}
 }

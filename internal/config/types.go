@@ -36,7 +36,7 @@ type SecretsConfig struct {
 // Target describes a build target.
 type Target struct {
 	Name         string            `json:"target"`
-	Toolchain    string            `json:"toolchain"`
+	Toolchain    string            `json:"toolchain,omitempty"`
 	Sources      []string          `json:"sources"`
 	Deps         []string          `json:"deps,omitempty"`
 	Config       map[string]any    `json:"config,omitempty"`

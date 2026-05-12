@@ -141,10 +141,10 @@ func TestSchemaCUE_RejectsInvalid(t *testing.T) {
 		wantSub string // substring of the error message
 	}{
 		{
-			name: "missing toolchain",
+			name: "empty toolchain",
 			json: `{
 				"targets": [
-					{"target": "//foo", "sources": ["a.go"]}
+					{"target": "//foo", "toolchain": "", "sources": ["a.go"]}
 				]
 			}`,
 			wantSub: "toolchain",

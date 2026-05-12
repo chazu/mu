@@ -583,6 +583,42 @@ func TestSealedInputsNoResolvedSecretsIsNoOp(t *testing.T) {
 	}
 }
 
+func TestPithBodyResultPropagates(t *testing.T) {
+	g := dag.NewGraph()
+
+	// Transform action: pushes {"count": 42} onto stack.
+	_ = g.AddAction(&dag.Action{
+		ID:     "//t:_transform",
+		Body:   []any{map[string]any{"count": float64(42)}},
+		Impure: true,
+	})
+
+	// Downstream action: reads transform result via target/output.
+	// Program: push target name, call target/output, get "_result" key,
+	// then get "count" key. Result should be 42.
+	_ = g.AddAction(&dag.Action{
+		ID:        "//t:check",
+		Body:      []any{"'//t", "target/output", "'_result", "get", "'count", "get"},
+		DependsOn: []string{"//t:_transform"},
+		Impure:    true,
+	})
+
+	exec := &dag.Executor{Store: newStore(t), Workers: 1}
+	res, err := exec.Execute(context.Background(), g)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(res.Failed) != 0 {
+		for _, f := range res.Failed {
+			t.Errorf("failed: %s: %v", f.ID, f.Err)
+		}
+		t.FailNow()
+	}
+	if len(res.Completed) != 2 {
+		t.Fatalf("completed %d, want 2", len(res.Completed))
+	}
+}
+
 func TestPureActionStillCaches(t *testing.T) {
 	workDir := t.TempDir()
 	outA := filepath.Join(workDir, "a.txt")

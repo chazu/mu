@@ -46,10 +46,12 @@ package mu
 // #Target describes a single build target.
 #Target: {
 	target:                   #TargetName
-	toolchain:                string & !=""
+	toolchain?:               string & !=""
 	sources?:                 [...string]
 	deps?:                    [...string]
 	config?:                  {...}
+	plan?:                    [...]
+	transform?:               [...]
 	sealed_inputs?:           {[string]: string}
 	sealed_input_modes?:      {[string]: "env" | "file"}
 	sealed_outputs?:          {[string]: string}

@@ -1,7 +1,8 @@
-// Missing required toolchain field on the target — should fail #Target unification.
+// Empty toolchain string should fail — must be non-empty when provided.
 targets: [
 	{
 		target: "//foo"
+		toolchain: ""
 		sources: ["a.go"]
 	},
 ]
