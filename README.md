@@ -528,7 +528,31 @@ Observe requests include resolved secrets from the target's `sealed_inputs` (see
 
 Plugins that provide secrets must declare `"resolve_secret"` in their `capabilities` array during discover. See [Sealed Inputs](#sealed-inputs) below.
 
-**Timeouts:** `discover` 10 seconds, `plan` 5 minutes, `observe` 5 minutes, `resolve_secret` 30 seconds.
+**`advise`** *(optional)* — lifecycle observer, called after build phases complete:
+
+```json
+← {"method": "advise", "phase": "after-build",
+   "manifest": {"targets": [...], "actions": [...], "summary": {...}},
+   "advise_context": {"project_root": "/path", "targets": ["//cmd/server"],
+                       "duration_s": 12.3, "git_sha": "abc123",
+                       "git_branch": "main", "git_dirty": false},
+   "advise_config": {"webhook_url": "http://..."},
+   "secrets": {"hmac_secret": "resolved-value"}}
+→ {"ok": true}
+```
+
+Advice is non-fatal — errors are logged but never fail the build. Plugins declare `"advise"` in `capabilities` and `advise_phases` (e.g. `["after-build"]`) during discover. Advice config and sealed inputs are declared in `mu.cue`:
+
+```cue
+advice: [{
+    plugin: "void"
+    phases: ["after-build"]
+    config: {webhook_url: "http://void:8080/webhook/ns/repo/mu-build"}
+    sealed_inputs: {hmac_secret: "pass:void/webhook-hmac"}
+}]
+```
+
+**Timeouts:** `discover` 10 seconds, `plan` 5 minutes, `observe` 5 minutes, `resolve_secret` 30 seconds, `advise` 30 seconds.
 
 ### Writing a Plugin
 
@@ -578,6 +602,7 @@ my-plugin/
 | `scratch` | Toolchain bootstrapping from scratch |
 | `sops` | Bidirectional secret provider backed by [SOPS](https://github.com/getsops/sops) |
 | `terraform` | Infrastructure provisioning, drift detection, and sensitive-output capture |
+| `void` | Build result webhook reporter (advice plugin for [void](https://github.com/chazu/void) integration) |
 | `zig` | Zig language toolchain |
 
 ## Sealed Inputs
@@ -899,9 +924,9 @@ internal/
 ├── config/          Config loading, validation, preprocessor dispatch
 ├── coordinator/     Build orchestration pipeline
 ├── scratch/         Toolchain download, verify, extract, register
-├── sandbox/         Hermetic execution environments
+├── sandbox/         Hermetic execution (copy, Seatbelt, namespace isolation)
 └── builtin/         Built-in fetch command with SHA-256 verification
-plugins/             Bundled plugins (aws, cowsay, docker, file, go, host, k8s, keypair-gen, lint, pass, remote-exec, remote-file, scratch, sops, terraform, zig)
+plugins/             Bundled plugins (aws, cowsay, docker, file, go, host, k8s, keypair-gen, lint, pass, remote-exec, remote-file, scratch, sops, terraform, void, zig)
 examples/            Example projects
 ```
 
@@ -912,7 +937,7 @@ The build coordinator is functional end-to-end:
 - [x] Content-addressed store with OCI layout (local + remote)
 - [x] DAG construction with topological sort and cycle detection
 - [x] Parallel executor with configurable worker pool
-- [x] Sandbox execution environments (copy sandbox)
+- [x] Sandbox execution environments (copy, macOS Seatbelt, Linux namespaces)
 - [x] Plugin lifecycle management (discover, plan)
 - [x] Script-based plugins via bootstrapped bb toolchain
 - [x] NDJSON wire protocol
@@ -923,6 +948,8 @@ The build coordinator is functional end-to-end:
 - [x] Cross-toolchain artifact composition
 - [x] Plugin distribution via CAS digests (`mu plugin add`, `mu plugin list --cached`)
 - [x] Sealed inputs for secret injection (`resolve_secret` protocol, excluded from CAS/cache/logs)
+- [x] Advice protocol for build lifecycle observers (`advise` method, non-fatal)
+- [x] Hermetic sandbox isolation (Linux namespaces + macOS Seatbelt, auto-detected)
 
 ## Roadmap
 
@@ -936,7 +963,7 @@ The build coordinator is functional end-to-end:
 
 - [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS. See [`docs/brainstorms/2026-02-28-go-toolchain-plugin-design.md`](docs/brainstorms/2026-02-28-go-toolchain-plugin-design.md)
 - [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
-- [ ] **OS-level sandboxing** — Linux: user namespaces + overlayfs. macOS: sandbox-exec profiles
+- [x] **OS-level sandboxing** — Linux: user namespaces + pivot_root + PID/network isolation. macOS: sandbox-exec with deny-default SBPL profiles
 
 ### Plugin ecosystem
 
