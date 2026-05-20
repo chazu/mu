@@ -21,4 +21,4 @@ run = "go test ./..."
 
 [tasks.clean]
 description = "Remove build artifacts"
-run = "rm -f mu"
+run = "rm -f mu *.bb"
