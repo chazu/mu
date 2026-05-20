@@ -3,9 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/chau/mu/internal/sandbox"
 )
 
 func main() {
+	if sandbox.IsSandboxInit() {
+		sandbox.RunInit()
+		return
+	}
+
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)

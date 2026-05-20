@@ -4,12 +4,10 @@
 // it, copies source files in, and executes a command with a restricted
 // environment. After execution, declared outputs are extracted.
 //
-// Current isolation: copy sandbox (restricted PATH/env, temp rootfs).
-//
-// Planned isolation improvements:
-//   - Linux: user namespaces + pivot_root + overlayfs (no root required)
-//   - macOS: sandbox-exec profiles for filesystem restriction
-//   - Network: network namespaces on Linux, sandbox-exec on macOS
+// Three isolation levels, selected automatically by platform capability:
+//   - Copy: temp directory with restricted PATH/env (all platforms)
+//   - Seatbelt: macOS sandbox-exec with SBPL profile (darwin)
+//   - Namespace: Linux user/mount/PID/network namespaces (linux)
 package sandbox
 
 import (
@@ -24,16 +22,29 @@ import (
 	"github.com/chau/mu/internal/cas"
 )
 
+// IsolationLevel describes the strength of sandbox isolation.
+type IsolationLevel int
+
+const (
+	IsolationCopy      IsolationLevel = iota // temp dir + restricted env
+	IsolationSeatbelt                        // macOS sandbox-exec (darwin)
+	IsolationNamespace                       // Linux user/mount/PID/net namespaces
+)
+
 // Sandbox manages a temporary rootfs for executing a build action.
 type Sandbox struct {
-	rootDir string    // the temp directory serving as our rootfs
-	workDir string    // working directory inside rootfs for the action
-	store   cas.Store // CAS for unpacking toolchain blobs
+	rootDir   string         // the temp directory serving as our rootfs
+	workDir   string         // working directory inside rootfs for the action
+	store     cas.Store      // CAS for unpacking toolchain blobs
+	isolation IsolationLevel // actual isolation achieved
 
 	// Stdout overrides where the sandboxed command's stdout is written.
 	// Nil means os.Stdout.
 	Stdout io.Writer
 }
+
+// Level returns the actual isolation level achieved by this sandbox.
+func (s *Sandbox) Level() IsolationLevel { return s.isolation }
 
 // stdoutWriter returns the configured stdout target, defaulting to os.Stdout.
 func (s *Sandbox) stdoutWriter() io.Writer {
@@ -45,6 +56,7 @@ func (s *Sandbox) stdoutWriter() io.Writer {
 
 // New creates a Sandbox with a fresh temporary directory.
 // The caller must call Cleanup when done.
+// Isolation level is auto-detected from platform capabilities.
 func New(store cas.Store) (*Sandbox, error) {
 	root, err := os.MkdirTemp("", "mu-sandbox-*")
 	if err != nil {
@@ -60,9 +72,10 @@ func New(store cas.Store) (*Sandbox, error) {
 	}
 
 	return &Sandbox{
-		rootDir: root,
-		workDir: filepath.Join(root, "work"),
-		store:   store,
+		rootDir:   root,
+		workDir:   filepath.Join(root, "work"),
+		store:     store,
+		isolation: detectIsolation(),
 	}, nil
 }
 
@@ -153,11 +166,23 @@ func (s *Sandbox) CopySources(srcRoot string, relPaths []string) error {
 // The command runs in the work directory. PATH includes the sandbox's bin
 // directory (where toolchain binaries are unpacked) plus any additional
 // paths from the env map.
+//
+// Dispatches to platform-specific isolation when available (Linux namespaces,
+// macOS Seatbelt), falling back to copy-based isolation.
 func (s *Sandbox) Exec(ctx context.Context, command []string, env map[string]string, network bool) (int, error) {
 	if len(command) == 0 {
 		return -1, fmt.Errorf("sandbox: empty command")
 	}
 
+	if code, err, handled := s.execIsolated(ctx, command, env, network); handled {
+		return code, err
+	}
+
+	return s.execCopy(ctx, command, env)
+}
+
+// execCopy runs the command with copy-based isolation (restricted env only).
+func (s *Sandbox) execCopy(ctx context.Context, command []string, env map[string]string) (int, error) {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = s.workDir
 	cmd.Env = s.buildEnv(env)
