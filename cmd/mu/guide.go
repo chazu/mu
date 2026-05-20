@@ -44,6 +44,10 @@ func runGuide(args []string) int {
 		printGuideSecretProviders()
 	case "pith-plugins":
 		printGuidePithPlugins()
+	case "sandbox":
+		printGuideSandbox()
+	case "advice":
+		printGuideAdvice()
 	case "plugin":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: mu guide plugin <name>")
@@ -85,6 +89,11 @@ Plugins and integration:
   mu guide pith-plugins     Writing inline plugins with pith VM programs
   mu guide plugin <name>    Show guide text bundled with a plugin
   mu guide pudl             How mu and pudl work together
+
+Execution:
+
+  mu guide sandbox       Hermetic isolation: copy, Seatbelt, namespaces
+  mu guide advice        Build lifecycle observers (after-build hooks)
 
 Operations:
 
@@ -1967,6 +1976,150 @@ func findGuideProjectRoot() (string, error) {
 		return "", err
 	}
 	return config.FindProjectRoot(cwd)
+}
+
+func printGuideSandbox() {
+	fmt.Print(`mu guide sandbox — hermetic execution environments
+
+ISOLATION LEVELS
+
+  mu auto-detects the strongest isolation available on the platform:
+
+  Level      Platform   Enforcement
+  ─────      ────────   ───────────
+  Copy       all        Temp directory with restricted PATH/env. No kernel
+                        enforcement — undeclared host paths are accessible.
+
+  Seatbelt   macOS      sandbox-exec with a deny-default SBPL profile.
+                        Kernel-enforced: file writes restricted to output/tmp/work,
+                        network denied when hermetic, read access to system libs only.
+
+  Namespace  Linux      User/mount/PID/IPC/UTS/network namespaces via clone().
+                        pivot_root to tmpfs, minimal /dev, read-only rootfs.
+                        Full filesystem and network isolation.
+
+WHAT'S ENFORCED
+
+  Property            Copy    Seatbelt   Namespace
+  ────────            ────    ────────   ─────────
+  Restricted PATH     yes     yes        yes
+  Restricted TMPDIR   yes     yes        yes
+  File write deny     no      yes        yes
+  File read deny      no      partial    yes
+  Network deny        no      yes        yes
+  PID isolation       no      no         yes
+  UID isolation       no      no         yes
+
+NETWORK FLAG
+
+  Actions declare Network: true/false. With Seatbelt or Namespace isolation,
+  Network: false is enforced by the kernel (not honor-system).
+
+  - Seatbelt: SBPL rules deny network-outbound/inbound/bind
+  - Namespace: CLONE_NEWNET creates isolated network stack (loopback down)
+  - Copy: Network flag is advisory only
+
+PLATFORM NOTES
+
+  macOS Seatbelt:
+    sandbox-exec is deprecated since ~2016 but still used by Apple internally
+    (mDNSResponder, system daemons) and by Nix, Bazel, Chromium. Cannot nest
+    sandbox-exec inside sandbox-exec — falls back to Copy in sandboxed CI.
+
+  Linux Namespaces:
+    Requires unprivileged user namespaces. Check:
+      cat /proc/sys/kernel/unprivileged_userns_clone
+    Value "0" means disabled (Debian/Ubuntu default). mu falls back to Copy.
+    Ubuntu 24.04+ may also restrict via AppArmor.
+
+  The re-exec pattern (used by Docker, Bazel, bubblewrap): mu re-executes
+  itself as PID 1 inside new namespaces. The sentinel __sandbox_init__ in
+  os.Args triggers the init path in cmd/mu/main.go.
+
+BENCHMARKS (Apple M3, sandbox package)
+
+  Copy:      ~2.5 ms/action, 26 KB, 268 allocs
+  Seatbelt:  ~7.1 ms/action, 36 KB, 353 allocs
+
+  Overhead: ~4.5 ms per action for kernel-enforced isolation.
+
+QUERYING ISOLATION LEVEL
+
+  The Sandbox.Level() method returns the actual isolation achieved.
+  Build manifests can include this for downstream attestation.
+`)
+}
+
+func printGuideAdvice() {
+	fmt.Print(`mu guide advice — build lifecycle observers
+
+WHAT ADVICE IS
+
+  Advice is mu's AOP-inspired mechanism for plugins to observe build events
+  without affecting build outcomes. Advice is non-fatal: errors are logged
+  to stderr but never fail the build.
+
+  Use cases:
+    - Post build results to a webhook (void plugin)
+    - Send Slack/email notifications on failure
+    - Update a dashboard or metrics system
+    - Trigger downstream pipelines
+
+PHASES
+
+  Currently supported:
+    after-build    Called after all actions complete (success or failure)
+
+  The manifest includes targets, actions, cache hits, and timing.
+  The advise_context includes git metadata (sha, branch, dirty).
+
+CONFIGURATION
+
+  Advice is declared in mu.cue at the project level:
+
+    advice: [{
+        plugin: "void"
+        phases: ["after-build"]
+        config: {
+            webhook_url: "http://void:8080/webhook/ns/repo/mu-build"
+        }
+        sealed_inputs: {
+            hmac_secret: "pass:void/webhook-hmac"
+        }
+    }]
+
+  - plugin: name of the plugin (must be in plugins array)
+  - phases: which lifecycle phases to call this plugin for
+  - config: passed as advise_config in the request
+  - sealed_inputs: resolved at runtime, passed as secrets
+
+PLUGIN PROTOCOL
+
+  Plugins declare advice capability during discover:
+
+    → {"name": "void", "version": "0.1.0", "protocol_version": 1,
+       "capabilities": ["discover", "advise"],
+       "advise_phases": ["after-build"]}
+
+  The coordinator calls advise after the build:
+
+    ← {"method": "advise", "phase": "after-build",
+       "manifest": {full build manifest},
+       "advise_context": {"project_root": "...", "targets": [...],
+                           "duration_s": 12.3, "git_sha": "abc123",
+                           "git_branch": "main", "git_dirty": false},
+       "advise_config": {from advice[].config},
+       "secrets": {resolved sealed_inputs}}
+    → {"ok": true}
+
+  Timeout: 30 seconds. Errors in one advice plugin don't block others.
+
+BUNDLED ADVICE PLUGINS
+
+  void    Posts build manifest to a void server webhook endpoint.
+          Supports HMAC-SHA256 signing (GitHub-compatible X-Hub-Signature-256).
+          See: mu guide plugin void
+`)
 }
 
 // printGuideFile reads and prints a guide file.
