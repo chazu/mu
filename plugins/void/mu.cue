@@ -1,0 +1,17 @@
+package mu
+
+plugin: {
+	entrypoint: "plugin.bb"
+	toolchain:  "bb"
+	files: ["plugin.bb"]
+	guide: "GUIDE.md"
+}
+targets: [{
+	target:    "build"
+	toolchain: "shell"
+	sources: ["plugin.bb"]
+	config: {
+		command: ["true"]
+		impure: false
+	}
+}]
