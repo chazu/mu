@@ -8,6 +8,7 @@ type ProjectConfig struct {
 	Plugins      []PluginDef    `json:"plugins,omitempty"`
 	Preprocessor *Preprocessor  `json:"preprocessor,omitempty"`
 	Secrets      *SecretsConfig `json:"secrets,omitempty"`
+	Advice       []AdviceDef    `json:"advice,omitempty"`
 
 	// PluginDirs is populated by the loader — directories (relative to
 	// project root) whose mu.cue contains a "plugin" key. These are
@@ -79,6 +80,17 @@ type PluginDef struct {
 	URL     string   `json:"url,omitempty"`
 	SHA256  string   `json:"sha256,omitempty"`
 	Digest  string   `json:"digest,omitempty"`
+}
+
+// AdviceDef declares an advice plugin and its configuration.
+// Advice plugins are observers — they react to build lifecycle events
+// (e.g., posting results to a webhook) but do not produce build actions.
+// Advice errors are non-fatal to the build.
+type AdviceDef struct {
+	Plugin       string            `json:"plugin"`                    // plugin name (must match a plugin in plugins[])
+	Phases       []string          `json:"phases,omitempty"`          // lifecycle phases: "after-build", etc.
+	Config       map[string]any    `json:"config,omitempty"`          // plugin-specific configuration
+	SealedInputs map[string]string `json:"sealed_inputs,omitempty"`   // name → secret ref for advice secrets
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON

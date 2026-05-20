@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/chau/mu/internal/builtin"
 	"github.com/chau/mu/internal/cas"
@@ -515,8 +516,10 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	return br, nil
 }
 
-// Build orchestrates the full build pipeline: Plan() + Execute() + bundle plugins.
+// Build orchestrates the full build pipeline: Plan() + Execute() + advice + bundle plugins.
 func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
+	start := time.Now()
+
 	plan, err := c.Plan(ctx, targetNames)
 	if err != nil {
 		return nil, err
@@ -526,12 +529,137 @@ func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildRe
 		return result, err
 	}
 
+	// Run after-build advice (non-fatal).
+	c.runAfterBuildAdvice(ctx, result, targetNames, time.Since(start))
+
 	// Bundle any plugin directories whose targets were built.
 	if err := c.bundlePlugins(ctx, targetNames); err != nil {
 		return result, fmt.Errorf("coordinator: bundling plugins: %w", err)
 	}
 
 	return result, nil
+}
+
+// runAfterBuildAdvice starts advice plugins, sends them the build manifest,
+// and shuts them down. Errors are logged but never fail the build.
+func (c *Coordinator) runAfterBuildAdvice(ctx context.Context, result *BuildResult, targetNames []string, elapsed time.Duration) {
+	if len(c.Config.Advice) == 0 {
+		return
+	}
+
+	// Filter to advice defs that want "after-build".
+	var afterBuild []config.AdviceDef
+	for _, a := range c.Config.Advice {
+		for _, phase := range a.Phases {
+			if phase == "after-build" {
+				afterBuild = append(afterBuild, a)
+				break
+			}
+		}
+	}
+	if len(afterBuild) == 0 {
+		return
+	}
+
+	// Resolve + start only the plugins referenced by advice defs.
+	home, _ := os.UserHomeDir()
+	resolver := &PluginResolver{
+		Store:       c.Store,
+		ProjectRoot: c.ProjectRoot,
+		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+	}
+
+	// Find the PluginDef for each advice plugin.
+	pluginsByName := make(map[string]config.PluginDef)
+	for _, p := range c.Config.Plugins {
+		pluginsByName[p.Name] = p
+	}
+
+	var toResolve []config.PluginDef
+	for _, a := range afterBuild {
+		if pd, ok := pluginsByName[a.Plugin]; ok {
+			toResolve = append(toResolve, pd)
+		} else {
+			fmt.Fprintf(os.Stderr, "  advice: plugin %q not found in plugins[]\n", a.Plugin)
+		}
+	}
+	if len(toResolve) == 0 {
+		return
+	}
+
+	resolved, err := resolver.Resolve(ctx, toResolve)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  advice: resolve plugins: %v\n", err)
+		return
+	}
+
+	mgr := plugin.NewManager(c.ProjectRoot)
+	if needsScriptRuntime(toResolve, c.ProjectRoot) {
+		registry := c.ToolchainRegistry
+		if registry == nil {
+			registry = NewToolchainRegistry(c.Store)
+		}
+		bbPath, err := c.resolveScriptRuntime(ctx, registry)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  advice: resolve script runtime: %v\n", err)
+			return
+		}
+		mgr.SetScriptRuntime(bbPath)
+	}
+
+	for _, rp := range resolved {
+		if err := mgr.Register(rp.Def); err != nil {
+			fmt.Fprintf(os.Stderr, "  advice: register %q: %v\n", rp.Def.Name, err)
+			return
+		}
+	}
+
+	if err := mgr.Start(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "  advice: start plugins: %v\n", err)
+		return
+	}
+	defer mgr.Close()
+
+	// Build manifest and context.
+	manifest := NewManifest(result, result.ExecResult, result.Targets, elapsed)
+	advCtx := &plugin.AdviseContext{
+		ProjectRoot: c.ProjectRoot,
+		Targets:     targetNames,
+		DurationS:   elapsed.Seconds(),
+	}
+	advCtx.GitSHA, advCtx.GitBranch, advCtx.GitDirty = gitInfo(c.ProjectRoot)
+
+	// Collect per-plugin configs and resolve sealed inputs.
+	configs := make(map[string]map[string]any)
+	secrets := make(map[string]map[string]string)
+	for _, a := range afterBuild {
+		if a.Config != nil {
+			configs[a.Plugin] = a.Config
+		}
+		// Sealed inputs for advice are resolved here. For now, pass as-is
+		// (refs, not values) — full secret resolution requires the secret
+		// provider plugins which may not be running. The advice plugin is
+		// responsible for resolving its own secrets if needed.
+		if len(a.SealedInputs) > 0 {
+			secrets[a.Plugin] = a.SealedInputs
+		}
+	}
+
+	mgr.Advise(ctx, "after-build", manifest, advCtx, configs, secrets)
+}
+
+// gitInfo returns the current HEAD SHA, branch, and dirty state.
+func gitInfo(projectRoot string) (sha, branch string, dirty bool) {
+	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--short", "HEAD").Output(); err == nil {
+		sha = strings.TrimSpace(string(out))
+	}
+	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+		branch = strings.TrimSpace(string(out))
+	}
+	if err := exec.Command("git", "-C", projectRoot, "diff", "--quiet", "HEAD").Run(); err != nil {
+		dirty = true
+	}
+	return
 }
 
 // bundlePlugins checks if any of the built targets belong to a plugin

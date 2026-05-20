@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -297,6 +298,36 @@ func (m *Manager) StoreSecret(ctx context.Context, pluginName, ref, value, mode 
 	}
 
 	return entry.process.StoreSecret(ctx, ref, value, mode)
+}
+
+// Advise sends an advise request to all plugins registered for the given phase.
+// Errors are logged but do not fail the build — advice is supplementary.
+// Returns the responses from plugins that were called.
+func (m *Manager) Advise(ctx context.Context, phase string, manifest any, advCtx *AdviseContext, configs map[string]map[string]any, secrets map[string]map[string]string) []AdviseResponse {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var responses []AdviseResponse
+	for name, entry := range m.plugins {
+		if entry.process == nil || entry.discover == nil {
+			continue
+		}
+		if !entry.discover.HasCapability("advise") || !entry.discover.HasAdvisePhase(phase) {
+			continue
+		}
+		cfg := configs[name]
+		sec := secrets[name]
+		resp, err := entry.process.Advise(ctx, phase, manifest, advCtx, cfg, sec)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  advice %s/%s: %v\n", name, phase, err)
+			continue
+		}
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "  advice %s/%s: %s\n", name, phase, resp.Error)
+		}
+		responses = append(responses, *resp)
+	}
+	return responses
 }
 
 // DiscoverInfo returns a copy of the discover response for a plugin, or nil if not found.

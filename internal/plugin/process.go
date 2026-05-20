@@ -341,6 +341,21 @@ func (p *Process) StoreSecret(ctx context.Context, ref, value, mode string) erro
 	return nil
 }
 
+// Advise sends an advise request and returns the response.
+// Advice errors are non-fatal to the build — callers should log but not fail.
+func (p *Process) Advise(ctx context.Context, phase string, manifest any, advCtx *AdviseContext, cfg map[string]any, secrets map[string]string) (*AdviseResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultAdviseTimeout)
+	defer cancel()
+
+	var resp AdviseResponse
+	req := NewAdviseRequest(phase, manifest, advCtx, cfg, secrets)
+	if err := p.send(ctx, req, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
 // Close gracefully shuts down the plugin process.
 // Closes stdin and waits for the process and the stderr pump to exit.
 func (p *Process) Close() error {
