@@ -77,16 +77,17 @@ bookkeeping to produce a graph of actions.
 ### 3. Plugin
 
 An external executable that speaks NDJSON over stdin/stdout. Plugins are how
-mu learns what actions to run. A plugin implements two methods:
+mu learns what actions to run. A plugin implements these methods:
 
-**discover** — "what can you do?"
+**discover** (required) — "what can you do?"
 ```json
 -> {"method": "discover"}
 <- {"name": "go", "version": "0.1.0", "protocol_version": 1,
-    "consumes": ["go_source"], "produces": ["executable"]}
+    "consumes": ["go_source"], "produces": ["executable"],
+    "capabilities": ["discover", "plan", "observe"]}
 ```
 
-**plan** — "given this target, what actions should I run?"
+**plan** (required) — "given this target, what actions should I run?"
 ```json
 -> {"method": "plan",
     "target": {"name": "//cmd/server", "toolchain": "go",
@@ -97,6 +98,11 @@ mu learns what actions to run. A plugin implements two methods:
     "declared_outputs": {"executable": "server"}}
 ```
 
+**observe** (optional) — report current state for drift detection
+**resolve_secret** (optional) — resolve a secret reference to its value
+**store_secret** (optional) — write a value to a secret backend
+**advise** (optional) — lifecycle observer, called after build phases complete
+
 A plugin can be written in any language. It reads JSON lines from stdin,
 dispatches on `method`, and writes JSON responses to stdout. That's the
 entire contract.
@@ -105,18 +111,25 @@ Plugins receive **toolchain artifacts** in plan requests — the content-address
 binaries and files that were produced by the scratch build. This is how a Go
 plugin knows where the `go` binary lives.
 
+Targets with a `plan` field (a pith VM program) skip plugin dispatch entirely —
+the coordinator interprets the inline program instead.
+
 ### 4. Target
 
-A declared build unit. Defined in `mu.json`. A target says "I want to build
+A declared build unit. Defined in `mu.cue`. A target says "I want to build
 *this thing* using *this plugin*."
 
 ```
 Target = {
-  name:      string         # e.g. "//cmd/server"
-  toolchain: string         # which plugin handles this (e.g. "go")
-  sources:   []string       # input files
-  deps:      []string       # other targets this depends on
-  config:    map[any]        # plugin-specific configuration
+  name:           string              # e.g. "//cmd/server"
+  toolchain:      string              # which plugin handles this (e.g. "go")
+  sources:        []string            # input files
+  deps:           []string            # other targets this depends on
+  config:         map[any]            # plugin-specific configuration
+  sealed_inputs:  map[name -> ref]    # secret references resolved at runtime
+  sealed_outputs: map[name -> ref]    # secret capture destinations
+  plan:           pith.#Program       # inline planning (optional, replaces plugin dispatch)
+  transform:      pith.#Program       # inter-target data reshaping (optional)
 }
 ```
 
@@ -186,7 +199,7 @@ executable, should anyone need custom scratch build logic.
                     ┌──────────────────────────────────┐
                     │         mu (the binary)          │
                     │                                  │
-  mu.json ─────────►  Config Loader                   │
+  mu.cue ────────►  Config Loader                    │
                     │  (parse, validate)               │
                     │         │                        │
                     │         ▼                        │
@@ -216,42 +229,40 @@ executable, should anyone need custom scratch build logic.
 Consider a project that builds a Go server using a Go toolchain built from
 scratch.
 
-**Configuration (`mu.json`):**
-```json
-{
-  "toolchains": [
+**Configuration (`mu.cue`):**
+```cue
+package mu
+
+toolchains: [
     {
-      "toolchain": "bb",
-      "from": "scratch",
-      "config": {
-        "version": "1.12.216",
-        "url": "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-linux-amd64.tar.gz",
-        "sha256": "..."
-      }
+        toolchain: "bb"
+        from:      "scratch"
+        config: {
+            version: "1.12.216"
+            url:     "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-linux-amd64.tar.gz"
+            sha256:  "..."
+        }
     },
     {
-      "toolchain": "go",
-      "from": "scratch",
-      "config": {
-        "version": "1.25.7",
-        "url": "https://go.dev/dl/go1.25.7.linux-amd64.tar.gz",
-        "sha256": "abc123...",
-        "strip_prefix": "go"
-      }
-    }
-  ],
-  "plugins": [
-    {"name": "go", "script": "plugins/go/plugin.bb"}
-  ],
-  "targets": [
-    {
-      "target": "//cmd/server",
-      "toolchain": "go",
-      "sources": ["cmd/server/main.go", "go.mod", "go.sum"],
-      "config": {"output": "server"}
-    }
-  ]
-}
+        toolchain: "go"
+        from:      "scratch"
+        config: {
+            version:      "1.25.7"
+            url:          "https://go.dev/dl/go1.25.7.linux-amd64.tar.gz"
+            sha256:       "abc123..."
+            strip_prefix: "go"
+        }
+    },
+]
+plugins: [
+    {name: "go", script: "plugins/go/plugin.bb"},
+]
+targets: [{
+    target:    "//cmd/server"
+    toolchain: "go"
+    sources: ["cmd/server/main.go", "go.mod", "go.sum"]
+    config: {output: "server"}
+}]
 ```
 
 **Execution flow of `mu build //cmd/server`:**
@@ -316,6 +327,9 @@ Step 6: Nothing to execute
 │  Plugin protocol           (NDJSON over stdio)   │
 │  Scratch environment       (fetch/extract/store) │
 │  Sandbox execution         (hermetic rootfs)     │
+│  Sealed inputs/outputs     (secret lifecycle)    │
+│  Inline programs           (pith VM)             │
+│  Advice protocol           (lifecycle observers) │
 │                                                  │
 ├─────────────────────────────────────────────────┤
 │              Comes from plugins                  │
@@ -381,30 +395,32 @@ isolated filesystem for the build step. The sandbox lifecycle:
 5. Extract declared outputs from `work/` back to the project
 6. Clean up the temp directory
 
-### Isolation Levels (Progressive)
+### Isolation Levels
 
-**Current: copy sandbox.** Cross-platform, no root required. The sandbox is a
-temp directory with controlled `PATH` and `env`. Actions cannot *accidentally*
-read host files, but there is no OS-level enforcement preventing it.
+mu auto-detects the strongest isolation available on the current platform:
 
-**Planned: OS-level isolation.**
-
-- **Linux:** User namespaces + `pivot_root` + overlayfs. No root required.
-  The toolchain OCI image becomes the overlay lower dir, sources are
-  bind-mounted. Network blocked via network namespace unless `network: true`.
-- **macOS:** `sandbox-exec` with profiles restricting filesystem reads/writes
-  to the sandbox directory only.
-- **Network:** Linux network namespaces; macOS `sandbox-exec` network deny
-  profile. Only actions with `network: true` get access.
+- **Linux (Namespace):** User, mount, PID, IPC, UTS, and (optionally) network
+  namespaces. Bind-mounts the rootfs, sets up minimal `/dev`, remounts most of
+  the filesystem read-only except `/work`, `/out`, `/tmp`. No root required.
+  Network blocked via network namespace unless `network: true`.
+- **macOS (Seatbelt):** `sandbox-exec` with a deny-default SBPL profile.
+  Restricts filesystem reads/writes to declared sandbox directories only.
+  Network controlled per-action.
+- **Copy (fallback):** Cross-platform temp directory with restricted `PATH` and
+  `env`. Actions cannot *accidentally* read host files, but there is no OS-level
+  enforcement preventing it.
 
 ## Plugin Runtime
 
-Plugins are `.bb` (Babashka) scripts that speak NDJSON over stdin/stdout.
-Rather than requiring `bb` on the host's PATH, mu builds Babashka from scratch
-as a toolchain — downloading a specific version by URL and SHA-256 — and uses
+Plugins are external executables that speak NDJSON over stdin/stdout. The
+bundled plugins use `.bb` (Babashka) scripts — mu builds Babashka from scratch
+as a toolchain, downloading a specific version by URL and SHA-256, and uses
 the cached binary to run plugin scripts. This means:
 
 - Plugins are distributed as plain `.bb` files (no compilation needed)
 - The bb runtime is hermetic and version-pinned
-- Plugin authors only need to implement `discover` and `plan` methods
-- Users who prefer a different plugin language can define their own toolchain
+- Plugin authors implement `discover` and `plan` methods, plus optional methods
+  (`observe`, `resolve_secret`, `store_secret`, `advise`)
+- Plugins can also be compiled binaries (Go, Rust, etc.) — any language works
+- Plugin directories are deterministically bundled and stored in CAS for
+  distribution via digest references

@@ -102,14 +102,21 @@ See [`examples/`](examples/) for working examples including a Go build, a cowsay
 mu <command> [arguments]
 
 Commands:
-  build      Build one or more targets
-  scratch    Build toolchains from scratch (override with MU_SCRATCH)
-  cache      Inspect CAS cache contents
-  target     List and inspect targets
-  plugin     List, inspect, and add plugins
-  observe    Check if targets are up-to-date (drift detection)
-  verify     Validate CAS blob integrity
-  version    Print the mu version
+  build   (b)   Build one or more targets
+  scratch       Build toolchains from scratch (override with MU_SCRATCH)
+  cache         Inspect and manage the CAS cache
+  target  (t)   List and inspect targets
+  graph         Show target dependency chains
+  plugin  (p)   List, inspect, add, push, and test plugins
+  observe       Check if targets are up-to-date (drift detection)
+  verify        Validate CAS blob integrity and plugin schema namespaces
+  guide         Quick-reference help topics
+  version       Print the mu version
+
+Shared flags (available on most commands):
+  --json        Output as JSON
+  --verbose     Show plugin I/O
+  --config PATH Path to mu.cue config file
 ```
 
 ### `mu scratch`
@@ -136,15 +143,16 @@ MU_SCRATCH=plugins/scratch/plugin.bb mu scratch
 mu build <targets...>
 
 Flags:
-  --jobs N          Max parallel actions (default: CPU count)
-  --no-cache        Skip cache reads, always rebuild
-  --plan            Show planned actions without executing
-  --emit-manifest   Emit build manifest as JSON to stdout
-  --json            Output as JSON
-  --verbose         Show plugin I/O
+  --jobs N              Max parallel actions (default: CPU count)
+  --no-cache            Skip cache reads, always rebuild
+  --no-discover-cache   Force live plugin discover (bypass cached capabilities)
+  --plan / --dry-run    Show planned actions without executing
+  --emit-manifest       Emit build manifest as JSON to stdout
+  --json                Output as JSON
+  --verbose             Show plugin I/O
 ```
 
-`--plan` shows the DAG without executing, useful for debugging. `--emit-manifest` produces a structured JSON manifest documenting what was built, cache hits, and output digests — used by pudl's ACUTE loop to track convergence state.
+`--plan` (or `--dry-run`) shows the DAG without executing, useful for debugging. `--emit-manifest` produces a structured JSON manifest documenting what was built, cache hits, and output digests — used by pudl's ACUTE loop to track convergence state. `--plan` and `--emit-manifest` are mutually exclusive.
 
 ### `mu observe`
 
@@ -191,6 +199,92 @@ Ingest can also run **inside the build graph** as a pudl target that depends on 
 {"_schema":"linux.host","hostname":"renge","kernel":"5.10.0",...}
 {"_schema":"linux.package","host":"renge","name":"acl",...}
 ```
+
+### `mu target`
+
+```bash
+mu target list
+
+Flags:
+  --json    Output as JSON
+```
+
+Lists all targets declared in `mu.cue` and discovered subdirectory configs.
+
+### `mu graph`
+
+```bash
+mu graph <target>
+
+Flags:
+  --reverse   Show what depends on the target (inverse edges)
+  --dot       Emit Graphviz DOT format instead of ASCII tree
+  --json      Structured output with nodes array
+```
+
+Displays dependency relationships between targets. Default output is an ASCII tree with cycle detection (`↺` marks cycles). `--dot` emits a Graphviz digraph for rendering with `dot`:
+
+```bash
+mu graph --dot //cmd/server | dot -Tpng > deps.png
+```
+
+### `mu cache`
+
+```bash
+mu cache <subcommand>
+
+Subcommands:
+  ls        List cached artifacts
+  inspect   Show details of a cached blob
+  size      Report cache size
+  clean     Remove unreachable blobs (garbage collection)
+  push      Push blobs to a remote OCI registry
+  login     Authenticate with an OCI registry
+  logout    Remove stored registry credentials
+```
+
+`cache ls --toolchains` lists only toolchain artifacts. `cache clean --dry-run` shows what would be removed without deleting. Clean identifies garbage-collection roots from tagged manifests in `index.json` and removes unreachable blobs.
+
+### `mu verify`
+
+```bash
+mu verify
+
+Flags:
+  --fix   Delete corrupt blobs
+  --json  Output as JSON
+```
+
+Checks cache integrity and plugin schema namespace compliance. SHA-256 hashes every blob in the cache and reports mismatches. Also validates that plugin schemas use the correct namespace (e.g., schemas under `mu/<name>` match the plugin directory name). With `--fix`, corrupt blobs are deleted.
+
+### `mu guide`
+
+```bash
+mu guide [topic]
+mu guide plugin <name>
+```
+
+Quick-reference help for mu concepts and features. Available topics:
+
+| Topic | Description |
+|-------|-------------|
+| `overview` | What mu is, mental model |
+| `mu.cue` | Configuration file reference |
+| `plugins` | Writing, loading, distributing plugins |
+| `build` | Building targets: flags, plan mode, manifests |
+| `observe` | Drift detection |
+| `pudl` | mu and pudl integration |
+| `cache` | Content-addressed storage |
+| `secrets` | Sealed inputs and outputs |
+| `secret-gen` | Built-in toolchain for minting secrets |
+| `toolchains` | Bootstrapping toolchains from scratch |
+| `shell` | Built-in shell toolchain |
+| `protocol` | NDJSON plugin protocol |
+| `secret-providers` | Authoring secret-aware plugins |
+| `pith-plugins` | Writing inline plugins with pith VM |
+| `sandbox` | Hermetic execution environments |
+| `advice` | Build lifecycle observers |
+| `plugin <name>` | Plugin-specific guide from GUIDE.md |
 
 ## Targets
 
@@ -453,11 +547,20 @@ mu plugin list
 # List all plugins stored in CAS (across all projects)
 mu plugin list --cached
 
+# List remote plugins from an OCI registry
+mu plugin list --remote
+
 # Start plugins and show their capabilities
 mu plugin list --discover
 
 # Show capabilities, schemas, digest, and path for one plugin
 mu plugin info <name>
+
+# Check plugin health/status
+mu plugin status <name>
+
+# Run plugin test scenarios
+mu plugin test <name>
 ```
 
 ```
@@ -465,6 +568,16 @@ PLUGIN               DIGEST
 go                   sha256:ea33df5f454a
 cowsay               sha256:ff96f94da42e
 docker               sha256:433d180dbe2e
+```
+
+### Publishing Plugins
+
+```bash
+# Push a plugin to an OCI registry
+mu plugin push <name>
+
+# Add a plugin from a registry by digest
+mu plugin add <name> --digest sha256:...
 ```
 
 ### Plugin Protocol
@@ -666,6 +779,83 @@ Register the plugin in `mu.cue` and reference secrets using the provider's name 
 - **Never logged.** Secret values are excluded from `--verbose` output and `--emit-manifest` JSON.
 - **Resolved late.** Secrets are resolved after planning but before execution — the value window is as short as possible.
 
+## Sealed Outputs
+
+Sealed outputs capture action results into secret backends. An action writes a value to `$MU_SEALED_OUT_DIR/<NAME>` (a 0700 directory); on success, mu reads the file and routes the value through the secret provider's `store_secret` method. The value never appears in stdout, cache, or build manifests.
+
+### Declaring sealed outputs
+
+Targets declare `sealed_outputs` in `mu.cue` — a map from output name to a secret reference:
+
+```cue
+{
+    target:    "//bootstrap/admin-password"
+    toolchain: "secret-gen"
+    config: {
+        ref:        "pass:app/admin-password"
+        derivation: ["openssl", "rand", "-base64", "32"]
+    }
+    sealed_outputs: {
+        VALUE: "pass:app/admin-password"
+    }
+    sealed_output_modes: {
+        VALUE: "create_if_absent"
+    }
+}
+```
+
+### Write modes
+
+| Mode | Behavior |
+|------|----------|
+| `"create"` | Fail if the secret already exists |
+| `"overwrite"` | Always write, create intermediate keys |
+| `"create_if_absent"` | No-op if the secret exists; create otherwise (bootstrap pattern) |
+
+### Write policy
+
+Secret providers can restrict which refs are writable. Declare allowed patterns in `mu.cue`:
+
+```cue
+secrets: {
+    writable_refs: ["pass:bootstrap/*", "sops:secrets/generated.yaml#*"]
+}
+```
+
+Patterns are matched against the full ref including scheme. Writes to refs not matching any pattern are rejected.
+
+### Plugin support
+
+Sealed outputs are supported by: `pass`, `sops`, `terraform` (via `sealed_output_outputs`), `keypair-gen`, `remote-exec`, `file`, `k8s`, `remote-file`, and the `secret-gen` built-in toolchain.
+
+## Secret Generation
+
+The built-in `secret-gen` toolchain synthesizes secrets by running a derivation command and routing the output through sealed outputs. No external plugin binary is needed.
+
+```cue
+{
+    target:    "//bootstrap/api-token"
+    toolchain: "secret-gen"
+    config: {
+        ref:        "pass:app/api-token"
+        derivation: ["openssl", "rand", "-hex", "32"]
+        mode:       "create_if_absent"
+    }
+}
+```
+
+### Config fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `ref` | yes | Destination secret ref (e.g., `"pass:app/token"`) |
+| `derivation` | yes | Command whose stdout becomes the stored value |
+| `mode` | no | `"create"`, `"overwrite"`, or `"create_if_absent"` (default) |
+| `env` | no | Extra environment variables for the derivation |
+| `keep_trailing_newline` | no | Keep trailing newline (default: false, trims one) |
+
+The derivation runs through bash. The output is written to `$MU_SEALED_OUT_DIR/VALUE` and routed to the secret provider specified by the ref's scheme. The action is always impure.
+
 ## Caching
 
 All artifacts are stored by their SHA-256 content hash in OCI layout (same format locally and remotely).
@@ -681,6 +871,32 @@ An action's cache key is derived from:
 - Network flag
 
 Sealed inputs (secrets) are deliberately excluded from the cache key. If the key matches, the action is skipped and outputs are restored from cache.
+
+## Hermetic Sandbox
+
+Actions execute inside an isolated sandbox that restricts file system access, environment variables, and (optionally) network. The sandbox creates four standard directories: `bin/` (toolchain binaries), `work/` (source files), `out/` (outputs), and `tmp/` (per-action temporary storage).
+
+### Isolation levels
+
+mu auto-detects the strongest isolation available on the current platform:
+
+| Level | Platform | Mechanism |
+|-------|----------|-----------|
+| **Namespace** | Linux | User, mount, PID, IPC, UTS, and (optionally) network namespaces. Bind-mounts rootDir, sets up minimal `/dev`, remounts everything except `/work`, `/out`, `/tmp` read-only. |
+| **Seatbelt** | macOS | `sandbox-exec` with a deny-default SBPL profile. Allows read/write only to declared directories. Network access controlled per-action. |
+| **Copy** | All | Temp directory with restricted `PATH` and environment. Fallback when OS-level isolation is unavailable. |
+
+### Sandbox environment
+
+All isolation levels provide:
+
+- `PATH` restricted to the sandbox `bin/` directory (toolchain binaries only)
+- `TMPDIR` set to the sandbox's isolated `tmp/` directory
+- Source files copied into `work/`
+- Toolchain artifacts unpacked into the sandbox rootfs
+- Output files written to `out/`
+
+Network access is controlled per-action. Actions that need network (e.g., `go mod download`) must declare `network: true` in their action spec.
 
 ## Inline Programs (pith VM)
 
@@ -917,17 +1133,22 @@ mu then discovers `mu.<ext>` files in subdirectories, pipes them through the pre
 ```
 cmd/mu/              CLI entry point
 internal/
+├── builtin/         Built-in fetch, shell, and secret-gen toolchains
 ├── cas/             Content-addressed store interface
 │   └── oci/         OCI layout backend (local + remote)
-├── dag/             DAG construction, topological sort, parallel executor
-├── plugin/          Plugin lifecycle, NDJSON protocol, process management
 ├── config/          Config loading, validation, preprocessor dispatch
 ├── coordinator/     Build orchestration pipeline
-├── scratch/         Toolchain download, verify, extract, register
+│   └── discovercache/  Plugin discover response caching
+├── dag/             DAG construction, topological sort, parallel executor
+├── pithvm/          pith VM driver word registration
+├── plugin/          Plugin lifecycle, NDJSON protocol, process management
+│   └── scenario/    Plugin test scenarios
 ├── sandbox/         Hermetic execution (copy, Seatbelt, namespace isolation)
-└── builtin/         Built-in fetch command with SHA-256 verification
+├── schemacache/     Plugin schema caching
+└── scratch/         Toolchain download, verify, extract, register
 plugins/             Bundled plugins (aws, cowsay, docker, file, go, host, k8s, keypair-gen, lint, pass, remote-exec, remote-file, scratch, sops, terraform, void, zig)
 examples/            Example projects
+docs/                Architecture references, plans, brainstorms
 ```
 
 ## Current Status (v0.1.0)
@@ -937,39 +1158,45 @@ The build coordinator is functional end-to-end:
 - [x] Content-addressed store with OCI layout (local + remote)
 - [x] DAG construction with topological sort and cycle detection
 - [x] Parallel executor with configurable worker pool
-- [x] Sandbox execution environments (copy, macOS Seatbelt, Linux namespaces)
-- [x] Plugin lifecycle management (discover, plan)
+- [x] Hermetic sandbox isolation (Linux namespaces + macOS Seatbelt, auto-detected)
+- [x] Plugin lifecycle management (discover, plan, observe, resolve_secret, advise)
 - [x] Script-based plugins via bootstrapped bb toolchain
 - [x] NDJSON wire protocol
 - [x] Config loading with external preprocessor support
+- [x] CUE-based configuration with validation
 - [x] Toolchain scratch builds (download, verify, extract, register)
 - [x] Go toolchain plugin (build, cross-compile, tags, ldflags, race)
 - [x] `mu build` command with cache integration
 - [x] Cross-toolchain artifact composition
 - [x] Plugin distribution via CAS digests (`mu plugin add`, `mu plugin list --cached`)
 - [x] Sealed inputs for secret injection (`resolve_secret` protocol, excluded from CAS/cache/logs)
+- [x] Sealed outputs for secret capture (`store_secret` protocol, write modes, write policy)
+- [x] Secret-gen built-in toolchain for minting secrets from derivation commands
+- [x] Bidirectional secret providers: `pass` (password-store) and `sops` (Mozilla SOPS)
 - [x] Advice protocol for build lifecycle observers (`advise` method, non-fatal)
-- [x] Hermetic sandbox isolation (Linux namespaces + macOS Seatbelt, auto-detected)
+- [x] Inline programs via pith VM (plan, transform, action body execution)
+- [x] Plugin output schema declarations and CUE validation
+- [x] Plugin discover caching (`--no-discover-cache` to bypass)
+- [x] `mu cache clean` for garbage collection of unreachable blobs
+- [x] `mu verify` for cache integrity and schema namespace compliance
+- [x] `mu graph` for dependency chain visualization (ASCII, DOT, JSON)
+- [x] `mu guide` quick-reference help system
 
 ## Roadmap
 
 ### Core
 
 - [ ] **Tiered cache composition** — Chain local + OCI backends with read-repair and write-through policies
-- [ ] **`mu clean`** — Prune stale artifacts from the local CAS
-- [ ] **CLI polish** — Color output, `--verbose` for all commands, consistent `--json` across subcommands
+- [ ] **CLI polish** — Color output, consistent `--json` across subcommands
 
 ### Build intelligence
 
-- [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS. See [`docs/brainstorms/2026-02-28-go-toolchain-plugin-design.md`](docs/brainstorms/2026-02-28-go-toolchain-plugin-design.md)
+- [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS
 - [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
-- [x] **OS-level sandboxing** — Linux: user namespaces + pivot_root + PID/network isolation. macOS: sandbox-exec with deny-default SBPL profiles
 
 ### Plugin ecosystem
 
-Proposed plugins and the mu/pudl ownership split are documented in [`docs/brainstorms/2026-03-25-plugin-ideas.md`](docs/brainstorms/2026-03-25-plugin-ideas.md).
-
-- [ ] **Secrets plugins** — `pass` and `op` (1Password) plugins using the `resolve_secret` protocol for secret injection and drift detection
+- [ ] **1Password plugin** — `op` backend for the `resolve_secret` / `store_secret` protocol
 - [ ] **Policy plugin** — OPA/conftest for runtime policy enforcement via observe
 - [ ] **Container image plugins** — `buildpack` and `ko` as alternatives to the Docker plugin
 - [ ] **Developer standards plugins** — `structure`, `docs`, `convention` for project layout and documentation enforcement
@@ -984,7 +1211,6 @@ Proposed plugins and the mu/pudl ownership split are documented in [`docs/brains
 - [Conceptual model](docs/architecture/mu-conceptual-model.md) — mu's primitives, hermeticity model, and execution flow
 - [BRICK ecosystem](docs/architecture/brick-ecosystem.md) — how mu and pudl work together (BRICK/IDEA/ACUTE frameworks)
 - [BRICK project guide](docs/architecture/brick-project-guide.md) — practical guide to structuring a BRICK project
-- [BRICK integration plan](docs/plans/2026-03-24-feat-brick-ecosystem-integration-plan.md) — implementation plan for convergence and observation
 
 ## License
 
