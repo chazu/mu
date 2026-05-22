@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/chau/mu/internal/cas"
 	"github.com/chau/mu/internal/cas/oci"
 	"github.com/chau/mu/internal/config"
@@ -284,45 +286,139 @@ func resolveBundleEntry(bundleDir string) (string, string, error) {
 }
 
 func printPluginInfo(o pluginInfoOutput) {
-	fmt.Printf("Name:             %s\n", o.Name)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	bright := lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+	label := dim.Width(16)
+	tag := lipgloss.NewStyle().Foreground(lipgloss.Color("183"))
+
+	titleLine := accent.Bold(true).Render(o.Name)
 	if o.Version != "" {
-		fmt.Printf("Version:          %s\n", o.Version)
+		titleLine += " " + dim.Render(o.Version)
 	}
+
+	var meta []string
 	if o.ProtocolVersion != 0 {
-		fmt.Printf("Protocol:         %d\n", o.ProtocolVersion)
+		meta = append(meta, fmt.Sprintf("protocol %d", o.ProtocolVersion))
 	}
-	fmt.Printf("Source:           %s\n", o.Source)
-	if o.Digest != "" {
-		fmt.Printf("Digest:           %s\n", o.Digest)
-	}
+	meta = append(meta, o.Source)
 	if o.Toolchain != "" {
-		fmt.Printf("Toolchain:        %s\n", o.Toolchain)
+		meta = append(meta, o.Toolchain)
+	}
+	metaLine := dim.Render(strings.Join(meta, " · "))
+
+	header := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(0, 2).
+		Render(titleLine + "\n" + metaLine)
+
+	fmt.Println(header)
+	fmt.Println()
+
+	kv := func(k, v string) {
+		fmt.Println(label.Render(k) + bright.Render(v))
+	}
+
+	if o.Digest != "" {
+		kv("Digest", o.Digest)
 	}
 	if o.Path != "" {
-		fmt.Printf("Path:             %s\n", o.Path)
+		kv("Path", o.Path)
 	}
+
+	caps := "discover, plan (default)"
 	if len(o.Capabilities) > 0 {
-		fmt.Printf("Capabilities:     %s\n", strings.Join(o.Capabilities, ", "))
-	} else {
-		fmt.Printf("Capabilities:     discover, plan (default)\n")
+		styled := make([]string, len(o.Capabilities))
+		for i, c := range o.Capabilities {
+			styled[i] = tag.Render(c)
+		}
+		caps = strings.Join(styled, dim.Render(", "))
 	}
-	fmt.Printf("Consumes:         %s\n", joinOrDash(o.Consumes))
-	fmt.Printf("Produces:         %s\n", joinOrDash(o.Produces))
+	fmt.Println(label.Render("Capabilities") + caps)
+
+	fmt.Println(label.Render("Consumes") + bright.Render(joinOrDash(o.Consumes)))
+	fmt.Println(label.Render("Produces") + bright.Render(joinOrDash(o.Produces)))
+
 	if o.OutputSchema != nil {
-		ref := o.OutputSchema.Module + "@" + o.OutputSchema.Version
+		fmt.Println()
+		fmt.Println(accent.Bold(true).Render("Output Schema"))
+		fmt.Println(dim.Render("  module") + "  " + bright.Render(o.OutputSchema.Module+"@"+o.OutputSchema.Version))
 		if o.OutputSchema.Definition != "" {
-			ref += " " + o.OutputSchema.Definition
+			fmt.Println(dim.Render("  def") + "     " + accent.Render(o.OutputSchema.Definition))
 		}
 		if o.OutputSchema.Source != "" {
-			ref += " (" + o.OutputSchema.Source + ")"
+			fmt.Println(dim.Render("  source") + "  " + bright.Render(o.OutputSchema.Source))
 		}
-		fmt.Printf("Output schema:    %s\n", ref)
 	}
+
 	if len(o.ConfigSchema) > 0 {
-		fmt.Println("Config schema:")
-		b, _ := json.MarshalIndent(o.ConfigSchema, "  ", "  ")
-		fmt.Printf("  %s\n", string(b))
+		fmt.Println()
+		fmt.Println(accent.Bold(true).Render("Config Schema"))
+		printConfigSchema(o.ConfigSchema, dim, accent, bright, tag)
 	}
+}
+
+func printConfigSchema(schema map[string]any, dim, accent, bright, tag lipgloss.Style) {
+	names := make([]string, 0, len(schema))
+	for k := range schema {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+
+	for i, name := range names {
+		if i > 0 {
+			fmt.Println()
+		}
+		props, ok := schema[name].(map[string]any)
+		if !ok {
+			fmt.Println("  " + bright.Render(name))
+			continue
+		}
+
+		typStr := schemaFieldStr(props, "type")
+		if items, ok := props["items"].(map[string]any); ok && typStr == "array" {
+			if inner := schemaFieldStr(items, "type"); inner != "" {
+				typStr = inner + "[]"
+			}
+		}
+
+		namePart := accent.Render(name)
+		typePart := ""
+		if typStr != "" {
+			typePart = " " + dim.Render(typStr)
+		}
+		fmt.Println("  " + namePart + typePart)
+
+		if def, ok := props["default"]; ok {
+			defStr := fmt.Sprintf("%v", def)
+			if defStr == "" {
+				defStr = `""`
+			}
+			fmt.Println("    " + dim.Render("default ") + tag.Render(defStr))
+		}
+
+		if desc := schemaFieldStr(props, "description"); desc != "" {
+			fmt.Println("    " + dim.Render(desc))
+		}
+
+		if enum, ok := props["enum"].([]any); ok {
+			vals := make([]string, len(enum))
+			for j, v := range enum {
+				vals[j] = tag.Render(fmt.Sprintf("%v", v))
+			}
+			fmt.Println("    " + dim.Render("values: ") + strings.Join(vals, dim.Render(" | ")))
+		}
+	}
+}
+
+func schemaFieldStr(m map[string]any, key string) string {
+	v, ok := m[key]
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }
 
 // isJSONFlag reads the --json flag from fs after Parse. Resolve sets
