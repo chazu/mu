@@ -23,6 +23,7 @@
   {"name"             "pass"
    "version"          "0.3.0"
    "protocol_version" 1
+   "description"      "Resolve and store secrets via the pass password manager"
    "consumes"         []
    "produces"         []
    "capabilities"     ["discover" "resolve_secret" "store_secret"]})

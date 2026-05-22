@@ -32,6 +32,7 @@
   {"name"             "remote-exec"
    "version"          "0.2.0"
    "protocol_version" 1
+   "description"      "Execute commands on remote hosts over SSH"
    "consumes"         []
    "produces"         []
    "capabilities"     ["discover" "plan"]})

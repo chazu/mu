@@ -6,6 +6,7 @@
   {"name"             "scratch"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Download, verify, and extract toolchain archives"
    "consumes"         []
    "produces"         ["toolchain"]})
 

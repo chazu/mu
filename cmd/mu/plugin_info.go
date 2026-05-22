@@ -92,6 +92,7 @@ func runPluginInfo(args []string) int {
 
 	out := pluginInfoOutput{
 		Name:            info.Name,
+		Description:     info.Description,
 		Version:         info.Version,
 		ProtocolVersion: info.ProtocolVersion,
 		Source:          source,
@@ -121,6 +122,7 @@ func runPluginInfo(args []string) int {
 
 type pluginInfoOutput struct {
 	Name            string             `json:"name"`
+	Description     string             `json:"description,omitempty"`
 	Version         string             `json:"version,omitempty"`
 	ProtocolVersion int                `json:"protocol_version,omitempty"`
 	Source          string             `json:"source"` // "project" | "cache"
@@ -307,11 +309,16 @@ func printPluginInfo(o pluginInfoOutput) {
 	}
 	metaLine := dim.Render(strings.Join(meta, " · "))
 
+	headerContent := titleLine + "\n" + metaLine
+	if o.Description != "" {
+		headerContent += "\n" + dim.Italic(true).Render(o.Description)
+	}
+
 	header := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("63")).
 		Padding(0, 2).
-		Render(titleLine + "\n" + metaLine)
+		Render(headerContent)
 
 	fmt.Println(header)
 	fmt.Println()
@@ -343,6 +350,9 @@ func printPluginInfo(o pluginInfoOutput) {
 	if o.OutputSchema != nil {
 		fmt.Println()
 		fmt.Println(accent.Bold(true).Render("Output Schema"))
+		if o.OutputSchema.Description != "" {
+			fmt.Println("  " + dim.Italic(true).Render(o.OutputSchema.Description))
+		}
 		fmt.Println(dim.Render("  module") + "  " + bright.Render(o.OutputSchema.Module+"@"+o.OutputSchema.Version))
 		if o.OutputSchema.Definition != "" {
 			fmt.Println(dim.Render("  def") + "     " + accent.Render(o.OutputSchema.Definition))

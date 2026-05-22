@@ -28,14 +28,16 @@
   {"name"             "lint"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Run linter or code-quality commands against source files"
    "capabilities"     ["discover" "plan" "observe"]
    "consumes"         ["source:any"]
    "produces"         []
    "config_schema"    {"command"     {"type" "array" "items" {"type" "string"}
-                                      "required" true}
-                       "fix_command" {"type" "array" "items" {"type" "string"}}
-                       "env"         {"type" "object"}
-                       "working_dir" {"type" "string"}}})
+                                      "required" true "description" "Lint command to execute"}
+                       "fix_command" {"type" "array" "items" {"type" "string"}
+                                      "description" "Auto-fix command (used in plan phase instead of command)"}
+                       "env"         {"type" "object" "description" "Extra environment variables for the lint process"}
+                       "working_dir" {"type" "string" "description" "Working directory for the lint command"}}})
 
 (defn handle-plan [req]
   (let [target  (get req "target")

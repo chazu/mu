@@ -43,18 +43,19 @@
   {"name"             "k8s"
    "version"          "0.3.0"
    "protocol_version" 1
+   "description"      "Apply Kubernetes manifests via kubectl with server-side apply and drift detection"
    "capabilities"     ["discover" "plan" "observe"]
    "consumes"         ["source:yaml" "source:json"]
    "produces"         ["k8s_resource"]
-   "config_schema"    {"namespace"             {"type" "string"}
-                       "context"               {"type" "string"}
-                       "kubeconfig"            {"type" "string"}
-                       "server_side"           {"type" "boolean" "default" true}
-                       "prune"                 {"type" "boolean" "default" false}
-                       "dry_run"               {"type" "boolean" "default" false}
+   "config_schema"    {"namespace"             {"type" "string" "description" "Target Kubernetes namespace"}
+                       "context"               {"type" "string" "description" "Kubeconfig context to use"}
+                       "kubeconfig"            {"type" "string" "description" "Path to kubeconfig file"}
+                       "server_side"           {"type" "boolean" "default" true "description" "Use server-side apply"}
+                       "prune"                 {"type" "boolean" "default" false "description" "Remove resources not in the manifest set"}
+                       "dry_run"               {"type" "boolean" "default" false "description" "Validate without applying changes"}
                        "ignore_paths"          {"type" "array" "items" {"type" "string"}
-                                                "default" []}
-                       "sealed_output_secrets" {"type" "object"}}})
+                                                "default" [] "description" "JSON paths to ignore during drift detection"}
+                       "sealed_output_secrets" {"type" "object" "description" "Map of sealed output names to cluster secret references"}}})
 
 (defn shell-quote
   "Single-quote a string for safe inclusion in a bash command."

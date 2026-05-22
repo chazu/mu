@@ -31,14 +31,15 @@
   {"name"             "keypair-gen"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Generate SSH key pairs (Ed25519 or ECDSA) as sealed outputs"
    "consumes"         []
    "produces"         []
    "capabilities"     ["discover" "plan"]
    "config_schema"    {"type"    {"type" "string" "default" "ed25519"
-                                  "enum" ["ed25519" "ecdsa"]}
+                                  "enum" ["ed25519" "ecdsa"] "description" "Key algorithm"}
                        "curve"   {"type" "string" "default" "P-256"
-                                  "enum" ["P-256" "P-384" "P-521"]}
-                       "comment" {"type" "string"}}})
+                                  "enum" ["P-256" "P-384" "P-521"] "description" "ECDSA curve (ignored for Ed25519)"}
+                       "comment" {"type" "string" "description" "Key comment embedded in the public key"}}})
 
 (defn shell-quote
   "Single-quote a string for safe inclusion in a bash command."

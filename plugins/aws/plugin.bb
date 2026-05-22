@@ -175,12 +175,13 @@
     {"name"             "aws"
      "version"          "0.1.0"
      "protocol_version" 1
+     "description"      "Observe AWS resources via the CLI and emit state records"
      "consumes"         []
      "produces"         ["aws_state"]
      "capabilities"     ["discover" "observe"]
-     "config_schema"    {"profile"   {"type" "string"}
-                         "region"    {"type" "string"}
-                         "resources" {"type" "array"}}}
+     "config_schema"    {"profile"   {"type" "string" "description" "AWS CLI named profile"}
+                         "region"    {"type" "string" "description" "AWS region to query"}
+                         "resources" {"type" "array"  "description" "Resource types to gather (e.g. ec2, s3, iam-role)"}}}
     (catch Exception e
       {"error" (.getMessage e)})))
 

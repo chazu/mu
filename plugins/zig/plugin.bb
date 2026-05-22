@@ -26,18 +26,20 @@
   {"name"             "zig"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Compile Zig projects via build system or direct compilation"
    "consumes"         ["source:zig"]
    "produces"         ["executable" "zig_library" "object_file"]
-   "config_schema"    {"output"     {"type" "string"}
-                       "mode"       {"type" "string"  "default" "build"  "enum" ["build" "compile"]}
-                       "target"     {"type" "string"}
+   "config_schema"    {"output"     {"type" "string" "description" "Output artifact path"}
+                       "mode"       {"type" "string"  "default" "build"  "enum" ["build" "compile"] "description" "Build mode: use build.zig system or compile a single file"}
+                       "target"     {"type" "string" "description" "Cross-compilation target triple"}
                        "optimize"   {"type" "string"  "default" "Debug"
-                                     "enum" ["Debug" "ReleaseSafe" "ReleaseFast" "ReleaseSmall"]}
-                       "step"       {"type" "string"  "default" "install"}
-                       "build_file" {"type" "string"  "default" "build.zig"}
-                       "emit"       {"type" "string"  "default" "exe" "enum" ["exe" "lib" "obj"]}
-                       "flags"      {"type" "array"   "items" "string"}
-                       "pkg"        {"type" "string"}}})
+                                     "enum" ["Debug" "ReleaseSafe" "ReleaseFast" "ReleaseSmall"]
+                                     "description" "Optimization level"}
+                       "step"       {"type" "string"  "default" "install" "description" "Build system step to run"}
+                       "build_file" {"type" "string"  "default" "build.zig" "description" "Path to build.zig"}
+                       "emit"       {"type" "string"  "default" "exe" "enum" ["exe" "lib" "obj"] "description" "Artifact type to produce"}
+                       "flags"      {"type" "array"   "items" "string" "description" "Additional flags passed to the compiler"}
+                       "pkg"        {"type" "string" "description" "Package path for direct compilation"}}})
 
 (defn target-short-name [target-name]
   (last (str/split target-name #"[:/]")))

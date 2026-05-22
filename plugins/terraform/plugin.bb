@@ -52,17 +52,18 @@
   {"name"             "terraform"
    "version"          "0.2.0"
    "protocol_version" 1
+   "description"      "Plan and apply Terraform configurations with state observation"
    "capabilities"     ["discover" "plan" "observe"]
    "consumes"         ["source:terraform" "source:hcl"]
    "produces"         ["terraform_state"]
-   "config_schema"    {"dir"                   {"type" "string"  "default" "."}
-                       "var_file"              {"type" "string"}
-                       "backend_config"        {"type" "object"}
-                       "auto_approve"          {"type" "boolean" "default" true}
-                       "parallelism"           {"type" "integer"}
-                       "emit_state"            {"type" "boolean" "default" true}
-                       "binary"                {"type" "string"}
-                       "sealed_output_outputs" {"type" "object"}}})
+   "config_schema"    {"dir"                   {"type" "string"  "default" "." "description" "Working directory containing .tf files"}
+                       "var_file"              {"type" "string" "description" "Path to a .tfvars variable file"}
+                       "backend_config"        {"type" "object" "description" "Backend configuration key-value pairs for terraform init"}
+                       "auto_approve"          {"type" "boolean" "default" true "description" "Skip interactive approval during apply"}
+                       "parallelism"           {"type" "integer" "description" "Limit concurrent Terraform operations"}
+                       "emit_state"            {"type" "boolean" "default" true "description" "Include Terraform state in observe output"}
+                       "binary"                {"type" "string" "description" "Path to terraform or tofu binary"}
+                       "sealed_output_outputs" {"type" "object" "description" "Map of sealed output names to Terraform output names"}}})
 
 (defn shell-quote
   "Single-quote a string for safe inclusion in a bash command."

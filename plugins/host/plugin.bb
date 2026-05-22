@@ -25,13 +25,14 @@
   {"name"             "host"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Observe remote host state via SSH"
    "consumes"         []
    "produces"         ["host_state"]
    "capabilities"     ["discover" "observe"]
-   "config_schema"    {"host" {"type" "string"}
-                       "user" {"type" "string" "default" "root"}
-                       "key"  {"type" "string"}
-                       "port" {"type" "integer" "default" 22}}})
+   "config_schema"    {"host" {"type" "string" "description" "Hostname or IP address of the remote machine"}
+                       "user" {"type" "string" "default" "root" "description" "SSH login user"}
+                       "key"  {"type" "string" "description" "Path to SSH private key"}
+                       "port" {"type" "integer" "default" 22 "description" "SSH port"}}})
 
 ;;; ─── SSH helpers ──────────────────────────────────────────────────────
 

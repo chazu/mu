@@ -31,17 +31,18 @@
   {"name"             "file"
    "version"          "0.2.0"
    "protocol_version" 1
+   "description"      "Manage local files: copy, template, create, symlink, or remove"
    "consumes"         ["source:any"]
    "produces"         ["file"]
-   "config_schema"    {"path"                {"type" "string"}
-                       "source"              {"type" "string"}
-                       "content"             {"type" "string"}
-                       "mode"                {"type" "string"  "default" "0644"}
-                       "symlink"             {"type" "string"}
-                       "absent"              {"type" "boolean" "default" false}
-                       "owner"               {"type" "string"}
-                       "group"               {"type" "string"}
-                       "sealed_output_files" {"type" "object"}}})
+   "config_schema"    {"path"                {"type" "string"  "description" "Destination path on the local filesystem"}
+                       "source"              {"type" "string"  "description" "Source file to copy from"}
+                       "content"             {"type" "string"  "description" "Inline content to write (alternative to source)"}
+                       "mode"                {"type" "string"  "default" "0644" "description" "File permission mode"}
+                       "symlink"             {"type" "string"  "description" "Create a symlink pointing to this path"}
+                       "absent"              {"type" "boolean" "default" false "description" "Ensure the file does not exist"}
+                       "owner"               {"type" "string"  "description" "File owner (user name or UID)"}
+                       "group"               {"type" "string"  "description" "File group (group name or GID)"}
+                       "sealed_output_files" {"type" "object"  "description" "Map of sealed output names to file paths"}}})
 
 (defn target-short-name [target-name]
   (last (str/split target-name #"[:/]")))

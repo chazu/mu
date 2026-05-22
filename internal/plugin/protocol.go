@@ -27,6 +27,7 @@ type Request struct {
 // DiscoverResponse is returned by plugins for method "discover".
 type DiscoverResponse struct {
 	Name            string         `json:"name"`
+	Description     string         `json:"description,omitempty"`
 	Version         string         `json:"version"`
 	ProtocolVersion int            `json:"protocol_version"`
 	Consumes        []string       `json:"consumes"` // artifact types this plugin can consume
@@ -51,10 +52,11 @@ type DiscoverResponse struct {
 //   - "mu/<plugin-name>" → schemas originated by a mu plugin's authors
 //   - anything else      → third-party / user-defined
 type SchemaRef struct {
-	Module     string `json:"module"`               // CUE module path, e.g. "mu/aws"
-	Version    string `json:"version"`              // module version, e.g. "v1"
-	Definition string `json:"definition,omitempty"` // optional CUE definition selector, e.g. "#EC2Instance"
-	Source     string `json:"source,omitempty"`     // advisory: "vendored" | "remote"
+	Module      string `json:"module"`                // CUE module path, e.g. "mu/aws"
+	Version     string `json:"version"`               // module version, e.g. "v1"
+	Definition  string `json:"definition,omitempty"`   // optional CUE definition selector, e.g. "#EC2Instance"
+	Description string `json:"description,omitempty"` // human-readable summary of the schema's purpose
+	Source      string `json:"source,omitempty"`       // advisory: "vendored" | "remote"
 }
 
 // HasCapability reports whether the plugin declared support for the given method.

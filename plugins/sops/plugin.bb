@@ -37,6 +37,7 @@
   {"name"             "sops"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Resolve and store secrets in SOPS-encrypted files"
    "consumes"         []
    "produces"         []
    "capabilities"     ["discover" "resolve_secret" "store_secret"]})

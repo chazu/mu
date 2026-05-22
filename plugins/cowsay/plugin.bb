@@ -6,6 +6,7 @@
   {"name"             "cowsay"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Pipe text through cowsay for ASCII art output"
    "consumes"         ["source:text"]
    "produces"         ["text_output"]})
 

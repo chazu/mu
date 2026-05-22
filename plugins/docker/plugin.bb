@@ -23,17 +23,18 @@
   {"name"             "docker"
    "version"          "0.1.0"
    "protocol_version" 1
+   "description"      "Build and optionally push Docker images"
    "consumes"         ["source:dockerfile" "source:any"]
    "produces"         ["docker_image"]
-   "config_schema"    {"dockerfile" {"type" "string"  "default" "Dockerfile"}
-                       "tag"        {"type" "string"}
-                       "context"    {"type" "string"  "default" "."}
-                       "target"     {"type" "string"}
-                       "platform"   {"type" "string"}
-                       "build_args" {"type" "object"}
-                       "no_cache"   {"type" "boolean" "default" false}
-                       "push"       {"type" "boolean" "default" false}
-                       "labels"     {"type" "object"}}})
+   "config_schema"    {"dockerfile" {"type" "string"  "default" "Dockerfile" "description" "Path to Dockerfile"}
+                       "tag"        {"type" "string"  "description" "Image tag (e.g. myapp:latest)"}
+                       "context"    {"type" "string"  "default" "." "description" "Docker build context directory"}
+                       "target"     {"type" "string"  "description" "Multi-stage build target name"}
+                       "platform"   {"type" "string"  "description" "Target platform (e.g. linux/amd64)"}
+                       "build_args" {"type" "object"  "description" "Build-time variables passed via --build-arg"}
+                       "no_cache"   {"type" "boolean" "default" false "description" "Disable layer caching"}
+                       "push"       {"type" "boolean" "default" false "description" "Push image to registry after build"}
+                       "labels"     {"type" "object"  "description" "OCI labels applied to image metadata"}}})
 
 (defn target-short-name [target-name]
   (last (str/split target-name #"[:/]")))
