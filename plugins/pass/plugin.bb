@@ -48,7 +48,11 @@
   ;; `pass insert -m -f` reads multi-line input from stdin until EOF and
   ;; overwrites any existing entry. We always feed raw bytes; the caller
   ;; is responsible for whatever encoding they want stored.
-  (process/shell {:in value} "pass" "insert" "-m" "-f" path))
+  ;;
+  ;; Use process/sh (captures stdout/stderr) rather than process/shell
+  ;; (inherits). pass insert prints "Enter contents..." prompts that would
+  ;; otherwise leak onto plugin stdout and corrupt the NDJSON channel.
+  (process/sh {:in value} "pass" "insert" "-m" "-f" path))
 
 (defn handle-store-secret [req]
   (let [ref   (get req "secret_ref")

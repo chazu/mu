@@ -123,6 +123,9 @@ func runBuild(args []string) int {
 	}
 
 	if result.Failed > 0 {
+		for _, s := range result.ExecResult.Failed {
+			fmt.Fprintf(os.Stderr, "  \u2717 %s: %v\n", s.ID, s.Err)
+		}
 		fmt.Fprintf(os.Stderr, "  \u2717 %d failed, %d cancelled\n", result.Failed, result.Cancelled)
 		return exitFail
 	}

@@ -192,7 +192,9 @@
                "command"       ["bash" "-c" wrapper]
                "inputs"        {}
                "outputs"       []
-               "env"           {"PATH" "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+               "env"           (cond-> {"PATH" "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+                                 (System/getenv "SSH_AUTH_SOCK") (assoc "SSH_AUTH_SOCK" (System/getenv "SSH_AUTH_SOCK"))
+                                 (System/getenv "HOME")          (assoc "HOME" (System/getenv "HOME")))
                "sealed_inputs" sealed
                "network"       true
                "impure"        impure?
