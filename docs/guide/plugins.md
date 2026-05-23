@@ -27,8 +27,7 @@ WRITING A PLUGIN
   A plugin is any executable that reads NDJSON on stdin and writes NDJSON
   on stdout. It must implement at least "discover" and "plan" methods.
   Optionally it can implement "observe", "resolve_secret", and
-  "store_secret". Each optional method must be listed in the
-  capabilities array returned by discover.
+  "store_secret".
 
   Capabilities:
     discover         (required)  Identify the plugin and its protocol version.
@@ -42,36 +41,103 @@ WRITING A PLUGIN
   for the plugin-author walkthrough (ref grammars, modes, sealed
   inputs/outputs, forced-impure semantics).
 
-  Babashka (.bb) is the conventional runtime but any language works.
+  RECOMMENDED: Go SDK
 
-  Minimal plugin (Babashka):
+    Use sdk/muplugin to author plugins in Go. The SDK handles NDJSON,
+    capability advertisement, and error envelopes. Capabilities are
+    derived from which optional func fields are non-nil — there is
+    no separate capabilities list to keep in sync.
 
-    #!/usr/bin/env bb
-    (require '[cheshire.core :as json])
+      package main
 
-    (defn handle-request [req]
-      (case (get req "method")
-        "discover" {"name"             "myplugin"
-                    "version"          "0.1.0"
-                    "protocol_version" 1
-                    "consumes"         []
-                    "produces"         ["myartifact"]
-                    "capabilities"     ["discover" "plan"]}
-        "plan"     (let [target (get req "target")
-                         config (get target "config")]
-                     {"actions" [{"id"      "run"
+      import (
+          "context"
+          "github.com/chau/mu/sdk/muplugin"
+      )
+
+      func main() {
+          (&muplugin.Plugin{
+              Name:     "myplugin",
+              Version:  "0.1.0",
+              Produces: []string{"myartifact"},
+              Plan:     plan,
+          }).Main()
+      }
+
+      func plan(ctx context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
+          return muplugin.PlanResponse{
+              Actions: []muplugin.ActionSpec{{
+                  ID:      "run",
+                  Command: []string{"echo", "hello"},
+                  Inputs:  map[string]string{},
+                  Outputs: []string{},
+              }},
+              Outputs: map[string]string{},
+          }, nil
+      }
+
+    Build with `go build -o myplugin .` and reference the binary in
+    mu.cue. Full SDK reference: 'mu guide sdk'. Canonical example:
+    examples/plugins/hello-go/.
+
+    Reference ports in this repo: plugins/{scratch,file,host,
+    keypair-gen,pass,remote-exec,remote-file}/main.go.
+
+  OTHER LANGUAGES
+
+    Any executable that speaks the NDJSON protocol works. Babashka
+    (.bb), Python, Rust, shell — all fine. The Go SDK is the
+    recommended path because it eliminates manual capability bookkeeping
+    and ships with an in-process test harness, but the wire protocol
+    is the real contract.
+
+    Minimal plugin in Babashka:
+
+      #!/usr/bin/env bb
+      (require '[cheshire.core :as json])
+
+      (defn handle-request [req]
+        (case (get req "method")
+          "discover" {"name"             "myplugin"
+                      "version"          "0.1.0"
+                      "protocol_version" 1
+                      "consumes"         []
+                      "produces"         ["myartifact"]
+                      "capabilities"     ["discover" "plan"]}
+          "plan"     {"actions" [{"id"      "run"
                                   "command" ["echo" "hello"]
                                   "inputs"  {}
                                   "outputs" []
                                   "depends_on" []}]
-                      "declared_outputs" {}})
-        {"error" (str "unknown method: " (get req "method"))}))
+                      "declared_outputs" {}}
+          {"error" (str "unknown method: " (get req "method"))}))
 
-    (loop []
-      (when-let [line (read-line)]
-        (println (json/generate-string (handle-request (json/parse-string line))))
-        (flush)
-        (recur)))
+      (loop []
+        (when-let [line (read-line)]
+          (println (json/generate-string (handle-request (json/parse-string line))))
+          (flush)
+          (recur)))
+
+  PORTING A BB PLUGIN TO GO
+
+    Almost every bb idiom has a one-line Go equivalent:
+
+      bb                                     Go (sdk/muplugin)
+      ────────────────────────────────────────────────────────────────
+      (case (get req "method") ...)          SDK dispatches automatically
+      (defn discover-response [] {...})      Plugin{Name, Version, ...}
+      (defn plan-response [req] {...})       Plan: func(ctx, req) {...}
+      (defn observe-response [req] {...})    Observe: func(ctx, req) {...}
+      (json/generate-string)                 SDK handles all encoding
+      (json/parse-string line)               SDK handles all decoding
+      (read-line) loop                       SDK dispatch loop
+      "capabilities" ["discover" "plan"]     auto-derived from fields
+      (clojure.string/split s #"/")          strings.Split(s, "/")
+      cheshire map → JSON object             map[string]any
+      throwing on bad config                 return error from handler
+
+    Action shapes (id/command/inputs/outputs/depends_on/env/network)
+    map field-for-field via muplugin.ActionSpec.
 
 PLUGIN DIRECTORY STRUCTURE
 

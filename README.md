@@ -54,11 +54,69 @@ Requires Go 1.25+.
 
 ## Quick Start
 
-Create `mu.cue`:
+Write a 30-line Go plugin against the SDK (`sdk/muplugin`):
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/chau/mu/sdk/muplugin"
+)
+
+func main() {
+    (&muplugin.Plugin{
+        Name:     "hello",
+        Version:  "0.1.0",
+        Produces: []string{"text"},
+        Plan:     plan,
+    }).Main()
+}
+
+func plan(ctx context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
+    return muplugin.PlanResponse{
+        Actions: []muplugin.ActionSpec{{
+            ID:      "write",
+            Command: []string{"sh", "-c", "echo hello > hello.txt"},
+            Outputs: []string{"hello.txt"},
+        }},
+        Outputs: map[string]string{"text": "hello.txt"},
+    }, nil
+}
+```
+
+`go build -o hello-go .` and reference it from `mu.cue`:
 
 ```cue
 package mu
 
+plugins: [{name: "hello", command: ["./hello-go"]}]
+targets: [{
+    target:    "//hello"
+    toolchain: "hello"
+    sources: []
+    config: {}
+}]
+```
+
+```bash
+mu build //hello
+```
+
+That's the whole loop — no toolchain bootstrap needed for Go plugins. The
+SDK derives capabilities from which optional handlers (Observe,
+ResolveSecret, StoreSecret, Advise) are non-nil. Full SDK reference:
+`mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
+
+### Alternative: Babashka (or any other language)
+
+Any executable speaking the NDJSON plugin protocol works. The repo ships
+a number of Babashka plugins under [`plugins/`](plugins/) using the bb
+toolchain — see `examples/` for a full Go-build pipeline that uses the
+`go` plugin via Babashka. To use bb-based plugins, declare the bb
+toolchain so mu scratch-builds it:
+
+```cue
 toolchains: [{
     toolchain: "bb"
     from:      "scratch"
@@ -68,19 +126,6 @@ toolchains: [{
         sha256:  "91499b3f430038f9b40e433215256a6e5392942780dca9984d493d2bcca7055d"
     }
 }]
-plugins: [{name: "go", script: "plugins/go"}]
-targets: [{
-    target:    "//cmd/hello"
-    toolchain: "go"
-    sources: ["go.mod", "go.sum", "cmd/hello/main.go"]
-    config: {output: "hello", pkg: "./cmd/hello"}
-}]
-```
-
-Build:
-
-```bash
-mu build //cmd/hello
 ```
 
 Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventions.md`](docs/cue-conventions.md).

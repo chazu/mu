@@ -1,5 +1,8 @@
 mu guide plugin host — remote host observer
 
+(Implemented in Go using sdk/muplugin; the original Babashka version
+ at plugin.bb remains in-tree for one release cycle. See 'mu guide sdk'.)
+
 Observes the state of a remote host via SSH. Gathers OS info, packages,
 services, filesystems, network interfaces, and users.
 

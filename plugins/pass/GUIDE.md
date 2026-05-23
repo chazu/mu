@@ -1,5 +1,9 @@
 mu guide plugin pass — secret provider (password-store)
 
+(Implemented in Go using sdk/muplugin via the SecretPlugin helper; the
+ original Babashka version at plugin.bb remains in-tree for one release
+ cycle. See 'mu guide sdk' for the SecretBackend interface.)
+
 Resolves and stores secrets from password-store (pass). The plugin
 does not build or converge anything — it serves as the bidirectional
 secret backend for mu's sealed_inputs and sealed_outputs.

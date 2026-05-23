@@ -3,6 +3,12 @@ mu guide protocol — the NDJSON plugin protocol
 Plugins communicate with mu over stdin/stdout using NDJSON (newline-
 delimited JSON). Each line is a complete JSON object.
 
+  The Go representation of every message below lives in
+  sdk/muplugin/types.go — that package is the canonical Go binding
+  for this protocol. Plugin authors writing in Go should use
+  sdk/muplugin (see 'mu guide sdk'); the wire format documented
+  here is the contract for any other language.
+
 LIFECYCLE
 
   1. mu starts the plugin process.

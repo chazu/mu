@@ -1,5 +1,8 @@
 mu guide plugin keypair-gen — EC keypair generator (sealed outputs only)
 
+(Implemented in Go using sdk/muplugin; the original Babashka version
+ at plugin.bb remains in-tree for one release cycle. See 'mu guide sdk'.)
+
 Generates an EC keypair (ed25519 or ecdsa P-256/P-384/P-521) and routes
 both halves through sealed_outputs into a secret backend (pass / sops /
 …). The plugin never writes the keys to disk persistently — they live

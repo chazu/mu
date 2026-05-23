@@ -1,5 +1,8 @@
 mu guide plugin scratch — toolchain downloader and registrar
 
+(Implemented in Go using sdk/muplugin; the original Babashka version
+ at plugin.bb remains in-tree for one release cycle. See 'mu guide sdk'.)
+
 Downloads, verifies, extracts, and registers toolchains from source
 archives. This is the plugin implementation of 'mu scratch'.
 

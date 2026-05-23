@@ -1,5 +1,9 @@
 # remote-file plugin
 
+> Implemented in Go using `sdk/muplugin`; the original Babashka version
+> at `plugin.bb` remains in-tree for one release cycle. See
+> `mu guide sdk`.
+
 Ensures a file on a remote host matches a local source file's bytes,
 mode, and owner. SSH-based. Idempotent via `mu build` (always re-asserts).
 

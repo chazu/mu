@@ -1,5 +1,9 @@
 # remote-exec plugin
 
+> Implemented in Go using `sdk/muplugin`; the original Babashka version
+> at `plugin.bb` remains in-tree for one release cycle. See
+> `mu guide sdk`.
+
 Runs a command on a remote host via SSH. Optional `check` guard skips
 execution when a precondition is already met.
 
