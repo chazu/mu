@@ -19,6 +19,7 @@ Built-in toolchains:
 Plugins and integration:
 
   mu guide plugins          Writing, loading, and distributing plugins
+  mu guide sdk              Writing plugins in Go with sdk/muplugin (recommended)
   mu guide protocol         The NDJSON plugin protocol (discover, plan, observe, ...)
   mu guide secret-providers Authoring secret-aware plugins (resolve/store, sealed_outputs)
   mu guide pith-plugins     Writing inline plugins with pith VM programs

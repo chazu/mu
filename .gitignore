@@ -6,6 +6,24 @@
 *-plugin.bb
 plugin.bb
 
+# Stray plugin binaries built at repo root from `go build ./plugins/<name>`
+/file
+/host
+/scratch
+/cowsay
+/docker
+/aws
+/k8s
+/keypair-gen
+/lint
+/pass
+/remote-exec
+/remote-file
+/sops
+/terraform
+/void
+/zig
+
 # Examples build output
 examples/*/hello
 

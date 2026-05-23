@@ -31,6 +31,7 @@ var topicFiles = map[string]string{
 	"pith-plugins":     "pith-plugins.md",
 	"sandbox":          "sandbox.md",
 	"advice":           "advice.md",
+	"sdk":              "sdk.md",
 }
 
 // Get returns the markdown body for the given topic key. The returned

@@ -49,6 +49,8 @@ func runGuide(args []string) int {
 		printGuideSandbox()
 	case "advice":
 		printGuideAdvice()
+	case "sdk":
+		printGuideSDK()
 	case "plugin":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: mu guide plugin <name>")
@@ -92,6 +94,7 @@ func printGuideProtocol()         { printTopic("protocol") }
 func printGuidePithPlugins()      { printTopic("pith-plugins") }
 func printGuideSandbox()          { printTopic("sandbox") }
 func printGuideAdvice()           { printTopic("advice") }
+func printGuideSDK()              { printTopic("sdk") }
 
 // printGuideForPlugin finds and prints the guide text for a named plugin.
 // It searches in order:
