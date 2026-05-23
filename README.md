@@ -1,35 +1,25 @@
 # mu
 
-A language-agnostic build coordinator. mu knows nothing about programming languages, compilers, or toolchains. External plugins emit action subgraphs via a simple protocol, and mu orchestrates them as a unified DAG of content-addressed actions.
+Language-agnostic build coordinator. mu knows nothing about programming languages, compilers, or toolchains. External plugins emit action subgraphs via a simple NDJSON protocol; mu orchestrates them as a unified DAG of content-addressed actions.
 
 The name means "emptiness" in Japanese. The build system has no built-in semantics. Plugins fill it with meaning.
 
 ## How It Works
 
 ```
-                    ┌──────────────┐
-  mu.cue ─────────►│  Config      │──── validated config ────► Coordinator
-                    │  Loader      │                            │
-                    └──────────────┘                            │
-                                                               ▼
-                                                   ┌───────────────────┐
-                                                   │   DAG Executor    │
-                                                   │   (goroutines)    │
-                                                   └─────────┬─────────┘
-                                                             │
-                             ┌────────────────────────────────┼────────────────┐
-                             ▼                                ▼                ▼
-                   ┌─────────────────┐            ┌───────────────┐   ┌────────────┐
-                   │  Plugin Manager │            │     CAS       │   │  Scratch   │
-                   │  (stdin/stdout) │            │  (OCI store)  │   │  Builder   │
-                   └────────┬────────┘            └───────────────┘   └────────────┘
-                            │
-                   ┌────────┼────────┐
-                   ▼        ▼        ▼
+  mu.cue ──► Config Loader ──► Coordinator ──► DAG Executor
+                                                   │
+                          ┌────────────────────────┼────────────────┐
+                          ▼                        ▼                ▼
+                   Plugin Manager              CAS (OCI)       Scratch Builder
+                   (stdin/stdout)
+                          │
+                   ┌──────┼──────┐
+                   ▼      ▼      ▼
                  go.bb  rust.bb  any.exe
 ```
 
-mu coordinates. Plugins decide what to build and how.
+Plugins decide what to build and how. mu executes.
 
 ### Core Primitives
 
@@ -40,10 +30,12 @@ mu coordinates. Plugins decide what to build and how.
 
 ### Design Principles
 
-- **Plugin protocol over built-in rules.** The LSP model applied to builds. Each toolchain is a plugin that emits action graphs; the build system is just the executor.
-- **Content-addressed everything.** Universal caching across all languages. Toolchain upgrades are hash changes. Remote cache works automatically.
-- **OCI as the cache layer.** Same OCI layout locally and remotely. Reuses infrastructure every org already operates. Auth, replication, GC, monitoring — all solved.
-- **Minimal and composable.** mu is ~7,500 lines of Go. Plugins can be written in any language.
+- **Plugin protocol over built-in rules.** LSP model applied to builds.
+- **Content-addressed everything.** Universal caching across all languages.
+- **OCI as the cache layer.** Same OCI layout locally and remotely.
+- **Minimal and composable.** ~7,500 LOC of Go. Plugins in any language.
+
+See [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) for the full mental model.
 
 ## Installation
 
@@ -51,19 +43,18 @@ mu coordinates. Plugins decide what to build and how.
 go install github.com/chau/mu/cmd/mu@latest
 ```
 
-Or build from source:
+Or from source:
 
 ```bash
 git clone https://github.com/chau/mu.git
-cd mu
-go build -o mu ./cmd/mu
+cd mu && go build -o mu ./cmd/mu
 ```
 
 Requires Go 1.25+.
 
 ## Quick Start
 
-**1. Create `mu.cue`:**
+Create `mu.cue`:
 
 ```cue
 package mu
@@ -77,9 +68,7 @@ toolchains: [{
         sha256:  "91499b3f430038f9b40e433215256a6e5392942780dca9984d493d2bcca7055d"
     }
 }]
-plugins: [
-    {name: "go", script: "plugins/go/plugin.bb"},
-]
+plugins: [{name: "go", script: "plugins/go"}]
 targets: [{
     target:    "//cmd/hello"
     toolchain: "go"
@@ -88,1129 +77,88 @@ targets: [{
 }]
 ```
 
-**2. Build:**
+Build:
 
 ```bash
 mu build //cmd/hello
 ```
 
-See [`examples/`](examples/) for working examples including a Go build, a cowsay transformer, and a scratch toolchain build.
+Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventions.md`](docs/cue-conventions.md).
 
-## Usage
-
-```
-mu <command> [arguments]
-
-Commands:
-  build   (b)   Build one or more targets
-  scratch       Build toolchains from scratch (override with MU_SCRATCH)
-  cache         Inspect and manage the CAS cache
-  target  (t)   List and inspect targets
-  graph         Show target dependency chains
-  plugin  (p)   List, inspect, add, push, and test plugins
-  observe       Check if targets are up-to-date (drift detection)
-  verify        Validate CAS blob integrity and plugin schema namespaces
-  guide         Quick-reference help topics
-  version       Print the mu version
-
-Shared flags (available on most commands):
-  --json        Output as JSON
-  --verbose     Show plugin I/O
-  --config PATH Path to mu.cue config file
-```
-
-### `mu scratch`
-
-```bash
-mu scratch
-
-Flags:
-  --no-cache    Skip cache reads, always re-fetch
-  --verbose     Show plugin I/O
-```
-
-Builds all toolchains declared in `mu.cue` from scratch. Downloads, extracts, verifies, and registers each toolchain as content-addressed artifacts.
-
-Set `MU_SCRATCH` to an executable path to use an external scratch builder instead of the built-in logic:
-
-```bash
-MU_SCRATCH=plugins/scratch/plugin.bb mu scratch
-```
-
-### `mu build`
-
-```bash
-mu build <targets...>
-
-Flags:
-  --jobs N              Max parallel actions (default: CPU count)
-  --no-cache            Skip cache reads, always rebuild
-  --no-discover-cache   Force live plugin discover (bypass cached capabilities)
-  --plan / --dry-run    Show planned actions without executing
-  --emit-manifest       Emit build manifest as JSON to stdout
-  --json                Output as JSON
-  --verbose             Show plugin I/O
-```
-
-`--plan` (or `--dry-run`) shows the DAG without executing, useful for debugging. `--emit-manifest` produces a structured JSON manifest documenting what was built, cache hits, and output digests — used by pudl's ACUTE loop to track convergence state. `--plan` and `--emit-manifest` are mutually exclusive.
-
-### `mu observe`
-
-```bash
-mu observe <targets...>
-
-Flags:
-  --json      Output as JSON (array of ObserveResult)
-  --ndjson    Output current.records as flat NDJSON (one record per line)
-```
-
-Reports the current observed state of each target by sending observe requests to their plugins. Plugins return structured data describing what they see — mu does not make convergence decisions. The observed state is designed for ingestion into pudl's catalog, where it is compared against desired state to determine drift.
-
-Kit targets (shell targets with deps) aggregate their dependencies' observed state.
-
-#### Piping to pudl
-
-The `--json` output is the canonical format for ingestion into pudl:
-
-```bash
-mu observe --json //home/odroid | pudl ingest-observe
-```
-
-`pudl ingest-observe` reads the JSON array, iterates each target's `current.records`, and stores each record as an individual observe entry. Records with a `_schema` field (e.g. `"linux.host"`) are routed to the corresponding pudl schema (e.g. `pudl/linux.#Host`). Records without `_schema` are stored as `pudl/mu.#ObserveResult`.
-
-Ingest can also run **inside the build graph** as a pudl target that depends on another target's declared outputs — e.g. ingesting a `terraform` target's state in the same `mu build` invocation. See [Cross-target artifacts](#cross-target-artifacts) and [Example: terraform → pudl ingest](#example-terraform--pudl-ingest).
-
-#### Output formats
-
-`--json` preserves target context and is the format pudl expects:
-
-```json
-[
-  {"target": "//home/odroid", "current": {"records": [
-    {"_schema": "linux.host", "hostname": "renge", "kernel": "5.10.0", ...},
-    {"_schema": "linux.package", "host": "renge", "name": "acl", ...}
-  ]}}
-]
-```
-
-`--ndjson` flattens `current.records` into one JSON line per record (useful for ad-hoc piping to `jq`, etc., but loses target context):
+## Commands
 
 ```
-{"_schema":"linux.host","hostname":"renge","kernel":"5.10.0",...}
-{"_schema":"linux.package","host":"renge","name":"acl",...}
+mu build      Build targets
+mu scratch    Build toolchains from scratch
+mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
+mu target     List and inspect targets
+mu graph      Show dependency chains (ASCII/DOT/JSON)
+mu plugin     List, inspect, add, push, test plugins
+mu observe    Drift detection (pipe --json into pudl)
+mu verify     Validate CAS integrity + schema namespaces
+mu guide      Quick-reference help topics
+mu version
 ```
 
-### `mu target`
-
-```bash
-mu target list
-
-Flags:
-  --json    Output as JSON
-```
-
-Lists all targets declared in `mu.cue` and discovered subdirectory configs.
-
-### `mu graph`
-
-```bash
-mu graph <target>
-
-Flags:
-  --reverse   Show what depends on the target (inverse edges)
-  --dot       Emit Graphviz DOT format instead of ASCII tree
-  --json      Structured output with nodes array
-```
-
-Displays dependency relationships between targets. Default output is an ASCII tree with cycle detection (`↺` marks cycles). `--dot` emits a Graphviz digraph for rendering with `dot`:
-
-```bash
-mu graph --dot //cmd/server | dot -Tpng > deps.png
-```
-
-### `mu cache`
-
-```bash
-mu cache <subcommand>
-
-Subcommands:
-  ls        List cached artifacts
-  inspect   Show details of a cached blob
-  size      Report cache size
-  clean     Remove unreachable blobs (garbage collection)
-  push      Push blobs to a remote OCI registry
-  login     Authenticate with an OCI registry
-  logout    Remove stored registry credentials
-```
-
-`cache ls --toolchains` lists only toolchain artifacts. `cache clean --dry-run` shows what would be removed without deleting. Clean identifies garbage-collection roots from tagged manifests in `index.json` and removes unreachable blobs.
-
-### `mu verify`
-
-```bash
-mu verify
-
-Flags:
-  --fix   Delete corrupt blobs
-  --json  Output as JSON
-```
-
-Checks cache integrity and plugin schema namespace compliance. SHA-256 hashes every blob in the cache and reports mismatches. Also validates that plugin schemas use the correct namespace (e.g., schemas under `mu/<name>` match the plugin directory name). With `--fix`, corrupt blobs are deleted.
-
-### `mu guide`
-
-```bash
-mu guide [topic]
-mu guide plugin <name>
-```
-
-Quick-reference help for mu concepts and features. Available topics:
-
-| Topic | Description |
-|-------|-------------|
-| `overview` | What mu is, mental model |
-| `mu.cue` | Configuration file reference |
-| `plugins` | Writing, loading, distributing plugins |
-| `build` | Building targets: flags, plan mode, manifests |
-| `observe` | Drift detection |
-| `pudl` | mu and pudl integration |
-| `cache` | Content-addressed storage |
-| `secrets` | Sealed inputs and outputs |
-| `secret-gen` | Built-in toolchain for minting secrets |
-| `toolchains` | Bootstrapping toolchains from scratch |
-| `shell` | Built-in shell toolchain |
-| `protocol` | NDJSON plugin protocol |
-| `secret-providers` | Authoring secret-aware plugins |
-| `pith-plugins` | Writing inline plugins with pith VM |
-| `sandbox` | Hermetic execution environments |
-| `advice` | Build lifecycle observers |
-| `plugin <name>` | Plugin-specific guide from GUIDE.md |
-
-## Targets
-
-Targets are declared in `mu.cue` and describe what to build:
-
-```cue
-{
-    target:    "//cmd/server"
-    toolchain: "go"
-    sources: ["go.mod", "go.sum", "cmd/server/*.go"]
-    config: {output: "server", pkg: "./cmd/server"}
-}
-```
-
-Source paths support glob patterns (`*`, `?`, `[...]`). Globs are expanded at config load time relative to the project root, so `cmd/server/*.go` matches all `.go` files in that directory. Literal (non-glob) paths pass through as-is. Recursive `**` patterns are not currently supported.
-
-### Cross-target artifacts
-
-A target can consume artifacts produced by its dependencies. The producing plugin declares what it produces via `declared_outputs` (a map from artifact-type name to a project-relative file path); the consuming plugin sees those entries under `deps[].artifacts` in its plan request and can declare them as inputs.
-
-Producer (`plan` response):
-
-```json
-{
-  "actions": [
-    {"id": "show", "command": ["sh", "-c", "terraform show -json > state.json"],
-     "inputs": {}, "outputs": ["infra/vpc/state.json"], "depends_on": ["apply"]}
-  ],
-  "declared_outputs": {"terraform_state": "infra/vpc/state.json"}
-}
-```
-
-Consumer (`plan` request, received from mu):
-
-```json
-{
-  "method": "plan",
-  "target": {"name": "//pudl/ingest-vpc", "toolchain": "pudl", ...},
-  "deps": [
-    {"target": "//infra/vpc",
-     "artifacts": {"terraform_state": "infra/vpc/state.json"}}
-  ]
-}
-```
-
-Consumer (`plan` response — declare the path as an input):
-
-```json
-{
-  "actions": [
-    {"id": "ingest", "command": ["pudl", "ingest-terraform", "infra/vpc/state.json"],
-     "inputs": {"state": "infra/vpc/state.json"}, "outputs": ["ingested.db"]}
-  ],
-  "declared_outputs": {"catalog": "ingested.db"}
-}
-```
-
-When mu resolves the consumer's actions, it detects that `"infra/vpc/state.json"` is a path produced by `//infra/vpc:show` and:
-
-1. Adds an implicit `DependsOn` edge from `//pudl/ingest-vpc:ingest` to `//infra/vpc:show` so the DAG runs the producer first.
-2. Stores a zero-digest placeholder for that input (the file doesn't exist at plan time).
-3. Runs the producer's action, which materializes `infra/vpc/state.json` on disk.
-4. Runs the consumer's action in the same project root — the file is there, so the command works.
-
-Paths in `declared_outputs` are project-relative. Plugins are free to ignore `deps[].artifacts` entirely if they don't consume upstream outputs.
-
-### Example: terraform → pudl ingest
-
-Build infrastructure with the `terraform` plugin and feed its state into pudl in a single build:
-
-```json
-{
-  "targets": [
-    {
-      "target": "//infra/vpc",
-      "toolchain": "terraform",
-      "sources": ["infra/vpc/*.tf"],
-      "config": {"dir": "infra/vpc", "auto_approve": true}
-    },
-    {
-      "target": "//pudl/vpc-catalog",
-      "toolchain": "pudl",
-      "deps": ["//infra/vpc"],
-      "config": {"from": "terraform_state"}
-    }
-  ]
-}
-```
-
-The `terraform` plugin emits three action types (`init`, `plan`, `apply`) plus a `show` action that writes `state.json` and `outputs.json` via `terraform show -json` and `terraform output -json`. The `show` action declares:
-
-```json
-{
-  "declared_outputs": {
-    "terraform_state":   "infra/vpc/state.json",
-    "terraform_outputs": "infra/vpc/outputs.json"
-  }
-}
-```
-
-A pudl target that depends on `//infra/vpc` receives `{"terraform_state": "infra/vpc/state.json", "terraform_outputs": "infra/vpc/outputs.json"}` in `deps[0].artifacts` and can declare either file as an input. `mu build //pudl/vpc-catalog` will run terraform first and pudl second.
-
-Set `"emit_state": false` in the terraform target config to suppress the `show` action when downstream pudl ingestion isn't wanted. With `"auto_approve": false`, `show` runs after `plan` instead of `apply` (state reflects existing infrastructure rather than newly-applied changes).
-
-### BRICK Classification
-
-Targets can carry optional BRICK metadata for integration with pudl:
-
-```json
-{
-  "target": "//app/api",
-  "toolchain": "k8s",
-  "kind": "component",
-  "implements": "//interface/app",
-  "sources": ["deployment.yaml"],
-  "config": {"namespace": "default"}
-}
-```
-
-- **`kind`** — one of `"relationship"`, `"interface"`, `"component"`, `"kit"`
-- **`implements`** — which interface this component satisfies (components only)
-- **`deps`** — dependencies on other targets (used by kits to compose blocks)
-
-mu passes these fields through in build manifests but does not enforce them — constraint enforcement is pudl's job via CUE schema validation.
-
-### Interfaces and Contract Enforcement
-
-An interface defines a contract that components must satisfy. In pudl, interfaces are CUE definitions with a `contract` field:
-
-```cue
-lint_interface: brick.#Interface & {
-    name: "//interface/lint"
-    kind: "interface"
-    contract: {
-        toolchain: "lint"
-        config: { command: [...string] }
-    }
-}
-```
-
-Components declare which interface they implement:
-
-```cue
-lint_go_vet: brick.#Target & {
-    name:       "//lint/go-vet"
-    kind:       "component"
-    implements: "//interface/lint"
-    toolchain:  "lint"
-    config: { command: ["go", "vet", "./..."] }
-}
-```
-
-pudl validates this relationship via `pudl definition validate` — CUE unification checks that every field in the interface's contract is present and compatible in the component. Violations produce specific errors:
-
-```
-  FAIL  //lint/bad (implements //interface/lint)
-        field "toolchain": conflicting values "lint" and "wrong"
-```
-
-mu does not perform this validation. Its role is to execute targets, not enforce contracts. The split: **pudl validates intent, mu executes it.**
-
-## Plugins
-
-Plugins are external executables that tell mu what to build and how. mu itself has no built-in knowledge of any language or tool — plugins provide all of it.
-
-### Plugin Structure
-
-A plugin is a directory containing a `mu.cue` with a `plugin` key and at least one build target. The `mu.cue` declares how to build the plugin, what files to include, and how to run it:
-
-```cue
-package mu
-
-plugin: {
-    entrypoint: "plugin.bb"
-    toolchain:  "bb"
-    files: ["plugin.bb", "helper.sh"]
-    guide: "GUIDE.md"
-}
-targets: [{
-    target:    "build"
-    toolchain: "shell"
-    sources: ["plugin.bb", "helper.sh"]
-    config: {
-        command: ["true"]
-        impure: false
-    }
-}]
-```
-
-**Plugin manifest fields** (`plugin` key):
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `entrypoint` | yes | Relative path to the executable within the plugin directory |
-| `toolchain` | no | Runtime toolchain needed to execute the plugin (e.g. `"bb"` for Babashka). Omit for compiled binaries. If omitted, inferred from file extension (`.bb` → `bb`) |
-| `files` | no | Files to include in the CAS bundle. If omitted, all non-hidden files are included |
-| `guide` | no | Relative path to a guide file (e.g. `GUIDE.md`). Bundled automatically; surfaced by `mu guide plugin <name>` |
-
-**Build targets**: Every plugin declares its own build targets in its `mu.cue`. For interpreted plugins (Babashka scripts), the build target can be a no-op (`true`). For compiled plugins (Go, Rust), the build target compiles the binary. mu does not dictate how plugins are built — the plugin author is in control.
-
-When `mu build` runs a plugin's build target, the plugin directory is automatically bundled as a deterministic tar and stored in CAS. The bundle is extracted to `~/.mu/plugins/<name>/` for execution.
-
-### Referencing Plugins
-
-Plugins are declared in the consuming project's `mu.cue` `plugins` array. There are four ways to reference a plugin:
-
-**Plugin directory** (preferred) — point `script` at a directory containing a plugin `mu.cue`:
-
-```cue
-{name: "go", script: "plugins/go"}
-```
-
-**Single file** (legacy) — a single script file, hashed and stored in CAS:
-
-```cue
-{name: "go", script: "plugins/go/plugin.bb"}
-```
-
-**Remote file** — fetched by URL with SHA-256 verification, stored in CAS:
-
-```cue
-{name: "go", url: "https://example.com/go-plugin.bb", sha256: "abc123..."}
-```
-
-**CAS digest** — reference a previously built+published plugin by content hash:
-
-```cue
-{name: "go", digest: "sha256:abc123..."}
-```
-
-**Command** — run an arbitrary executable directly (not stored in CAS):
-
-```cue
-{name: "go", command: ["./my-plugin"]}
-```
-
-### Building Plugins
-
-Plugin build targets appear in `mu target list` like any other target. Build them individually or use wildcard patterns:
-
-```bash
-# Build all plugins
-mu build //plugins/...
-
-# Build a single plugin
-mu build //plugins/go/build
-
-# Build everything under a prefix (one level)
-mu build //plugins/*
-```
-
-Building a plugin target bundles the plugin directory into CAS automatically.
-
-### Inspecting Plugins
-
-```bash
-# List plugins declared in mu.cue
-mu plugin list
-
-# List all plugins stored in CAS (across all projects)
-mu plugin list --cached
-
-# List remote plugins from an OCI registry
-mu plugin list --remote
-
-# Start plugins and show their capabilities
-mu plugin list --discover
-
-# Show capabilities, schemas, digest, and path for one plugin
-mu plugin info <name>
-
-# Check plugin health/status
-mu plugin status <name>
-
-# Run plugin test scenarios
-mu plugin test <name>
-```
-
-```
-PLUGIN               DIGEST
-go                   sha256:ea33df5f454a
-cowsay               sha256:ff96f94da42e
-docker               sha256:433d180dbe2e
-```
-
-### Publishing Plugins
-
-```bash
-# Push a plugin to an OCI registry
-mu plugin push <name>
-
-# Add a plugin from a registry by digest
-mu plugin add <name> --digest sha256:...
-```
-
-### Plugin Protocol
-
-Plugins communicate over NDJSON (newline-delimited JSON) on stdin/stdout. Any language works — Babashka, Go, Python, Rust, a shell script.
-
-A plugin implements these methods:
-
-**`discover`** (required) — returns plugin metadata:
-
-```json
-← {"method": "discover"}
-→ {"name": "go", "version": "0.1.0", "protocol_version": 1,
-   "consumes": ["go_source"], "produces": ["executable", "go_library"],
-   "capabilities": ["discover", "plan", "observe"]}
-```
-
-**`plan`** (required) — given a target, returns an action subgraph:
-
-```json
-← {"method": "plan",
-   "target": {"name": "//cmd/server", "toolchain": "go",
-              "sources": ["main.go"], "config": {"output": "server"}},
-   "deps": [
-     {"target": "//lib/crypto",
-      "artifacts": {"go_library": "lib/crypto/libcrypto.a"}}
-   ],
-   "toolchain_artifacts": {"sdk": "sha256:..."}}
-→ {"actions": [{"id": "compile", "command": ["go", "build", "-o", "server", "."],
-   "inputs": {"src": "main.go"}, "outputs": ["server"], "env": {}}],
-   "declared_outputs": {"executable": "server"}}
-```
-
-The coordinator resolves file paths to content digests, merges subgraphs from all targets into a unified DAG, checks the cache, and executes uncached actions in parallel.
-
-`deps[].artifacts` is a map from artifact-type name → project-relative path, populated from each dep's `declared_outputs`. A plugin that needs a dep's output declares the path as one of its action `inputs` — mu wires an implicit DependsOn edge to the producing action (see [Cross-target artifacts](#cross-target-artifacts)). `toolchain_artifacts` carries the active toolchain's content-addressed artifacts (scratch-built) so the plugin can reference them in commands.
-
-**`observe`** *(optional)* — reports current state of a resource for drift detection:
-
-```json
-← {"method": "observe", "target": {...}, "secrets": {"SSH_PASS": "resolved-value"}}
-→ {"current": {"records": [
-    {"_schema": "linux.host", "hostname": "renge", "kernel": "5.10.0", ...},
-    {"_schema": "linux.package", "host": "renge", "name": "acl", ...}
-  ]}}
-```
-
-Observe requests include resolved secrets from the target's `sealed_inputs` (see [Sealed Inputs](#sealed-inputs)). The plugin reports the current state; convergence decisions are made downstream by pudl, not by the plugin.
-
-**Observe response conventions:**
-- `current.records` should be an array of resource instances when the plugin observes multiple resources (e.g. packages, services, users on a host).
-- Each record should include a `_schema` field with a `package.resource_type` value (e.g. `"linux.package"`) so pudl can route it to the correct schema (e.g. `pudl/linux.#Package`).
-- If a plugin observes a single resource, `current` can be a flat map without `records`.
-
-**`resolve_secret`** *(optional)* — resolves a secret reference to its value:
-
-```json
-← {"method": "resolve_secret", "secret_ref": "deploy/registry-password"}
-→ {"value": "s3cr3t"}
-```
-
-Plugins that provide secrets must declare `"resolve_secret"` in their `capabilities` array during discover. See [Sealed Inputs](#sealed-inputs) below.
-
-**`advise`** *(optional)* — lifecycle observer, called after build phases complete:
-
-```json
-← {"method": "advise", "phase": "after-build",
-   "manifest": {"targets": [...], "actions": [...], "summary": {...}},
-   "advise_context": {"project_root": "/path", "targets": ["//cmd/server"],
-                       "duration_s": 12.3, "git_sha": "abc123",
-                       "git_branch": "main", "git_dirty": false},
-   "advise_config": {"webhook_url": "http://..."},
-   "secrets": {"hmac_secret": "resolved-value"}}
-→ {"ok": true}
-```
-
-Advice is non-fatal — errors are logged but never fail the build. Plugins declare `"advise"` in `capabilities` and `advise_phases` (e.g. `["after-build"]`) during discover. Advice config and sealed inputs are declared in `mu.cue`:
-
-```cue
-advice: [{
-    plugin: "void"
-    phases: ["after-build"]
-    config: {webhook_url: "http://void:8080/webhook/ns/repo/mu-build"}
-    sealed_inputs: {hmac_secret: "pass:void/webhook-hmac"}
-}]
-```
-
-**Timeouts:** `discover` 10 seconds, `plan` 5 minutes, `observe` 5 minutes, `resolve_secret` 30 seconds, `advise` 30 seconds.
-
-### Writing a Plugin
-
-A minimal plugin in Bash:
-
-```bash
-#!/usr/bin/env bash
-while IFS= read -r line; do
-  method=$(echo "$line" | jq -r '.method')
-  case "$method" in
-    discover)
-      echo '{"name":"my-plugin","version":"0.1.0","protocol_version":1,"consumes":[],"produces":["text_output"],"capabilities":["discover","plan"]}'
-      ;;
-    plan)
-      echo '{"actions":[{"id":"run","command":["echo","hello"],"inputs":{},"outputs":["out.txt"],"env":{}}],"declared_outputs":{"text_output":"out.txt"}}'
-      ;;
-  esac
-done
-```
-
-Plugins read JSON lines from stdin, dispatch on `method`, and write JSON responses to stdout. That's the entire contract.
-
-To package it as a plugin, create a directory with the script and a `mu.cue`:
-
-```
-my-plugin/
-  mu.cue        # plugin: {entrypoint: "plugin.sh", ...}, targets: [...]
-  plugin.sh     # the script above
-```
-
-### Bundled Plugins
+Shared flags: `--json`, `--verbose`, `--config PATH`.
+
+Run `mu guide` for the topic index. Each topic has its own page:
+`overview`, `mu.cue`, `plugins`, `build`, `observe`, `pudl`, `cache`,
+`secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
+`secret-providers`, `pith-plugins`, `sandbox`, `advice`.
+
+## Topics
+
+| Topic | Where |
+|-------|-------|
+| Conceptual model, primitives, hermeticity | [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) |
+| BRICK ecosystem (mu + pudl) | [`docs/architecture/brick-ecosystem.md`](docs/architecture/brick-ecosystem.md) |
+| BRICK project layout | [`docs/architecture/brick-project-guide.md`](docs/architecture/brick-project-guide.md) |
+| CUE config reference | [`docs/cue-conventions.md`](docs/cue-conventions.md) · `mu guide mu.cue` |
+| Plugin protocol (NDJSON) | `mu guide protocol` · [`docs/plugin-output-schemas.md`](docs/plugin-output-schemas.md) |
+| Writing plugins | `mu guide plugins` |
+| Inline programs (pith VM) | `mu guide pith-plugins` |
+| Sealed inputs/outputs (secrets) | `mu guide secrets` · [`docs/sealed-input-delivery-modes.md`](docs/sealed-input-delivery-modes.md) · [`docs/secrets-write-policy.md`](docs/secrets-write-policy.md) |
+| Secret-gen toolchain | `mu guide secret-gen` · [`docs/secret-gen-toolchain.md`](docs/secret-gen-toolchain.md) |
+| Sandbox model | `mu guide sandbox` |
+| Toolchains from scratch | `mu guide toolchains` |
+| Cache (CAS + OCI remote) | `mu guide cache` |
+| pudl integration | `mu guide pudl` |
+
+## Bundled Plugins
 
 | Plugin | Description |
 |--------|-------------|
-| `aws` | AWS resource observer (EC2, VPC, subnets) via the AWS CLI |
+| `aws` | AWS resource observer (EC2, VPC, subnets) via AWS CLI |
 | `cowsay` | Demo text transformation |
 | `docker` | Docker image builder |
-| `file` | File convergence (write, copy, symlink, delete) and sealed-output capture |
-| `go` | Builds Go binaries (cross-compile, tags, ldflags, race) |
-| `host` | Remote host observer over SSH (OS, packages, services, mounts, network) |
-| `k8s` | Kubernetes resource convergence, drift detection, and Secret capture into sealed outputs |
-| `keypair-gen` | Generates ed25519/ECDSA keypairs into sealed outputs (PRIVATE + PUBLIC) |
+| `file` | File convergence (write/copy/symlink/delete) + sealed-output capture |
+| `go` | Go binaries (cross-compile, tags, ldflags, race) |
+| `host` | Remote host observer over SSH |
+| `k8s` | Kubernetes convergence + drift + Secret capture |
+| `keypair-gen` | ed25519/ECDSA keypair generator → sealed outputs |
 | `lint` | Linter wrapper (observe + fix) |
-| `pass` | Bidirectional secret provider backed by [pass](https://passwordstore.org) |
-| `remote-exec` | Run a command on a remote host via SSH; optional `check` guard, `sudo`, and sealed-output file fetch |
-| `remote-file` | Converge a file on a remote host via SSH (bytes, mode, owner) with observe support |
-| `scratch` | Toolchain bootstrapping from scratch |
-| `sops` | Bidirectional secret provider backed by [SOPS](https://github.com/getsops/sops) |
-| `terraform` | Infrastructure provisioning, drift detection, and sensitive-output capture |
-| `void` | Build result webhook reporter (advice plugin for [void](https://github.com/chazu/void) integration) |
-| `zig` | Zig language toolchain |
-
-## Sealed Inputs
-
-Sealed inputs are secret references that are resolved at runtime and never stored in CAS, cache keys, or logs. They are used in two contexts:
-
-### In build actions
-
-A build plugin's `plan` response can include `sealed_inputs` on any action:
-
-```json
-{
-  "actions": [{
-    "id": "deploy",
-    "command": ["kubectl", "apply", "-f", "deployment.yaml"],
-    "sealed_inputs": {
-      "REGISTRY_PASSWORD": "pass:deploy/registry",
-      "API_TOKEN": "vault:secrets/api-token"
-    }
-  }]
-}
-```
-
-Each value is a reference in the format `scheme:path`, where the scheme maps to a registered plugin name. The coordinator resolves secrets after planning and injects them into the action's environment at execution time.
-
-### In observe targets
-
-Targets can declare `sealed_inputs` directly in `mu.cue` for use during observation (e.g., SSH credentials, API keys):
-
-```cue
-{
-    target:    "//home/server"
-    toolchain: "host"
-    config: {host: "192.168.1.104", user: "root"}
-    sealed_inputs: {
-        SSH_PASS: "pass:servers/root-password"
-    }
-}
-```
-
-The coordinator resolves these before calling the plugin's `observe` method and passes them as a `secrets` map in the observe request. The plugin uses them to authenticate but never persists them.
-
-### Secret resolution flow
-
-1. Parse each reference's `scheme:path` to identify the secret-provider plugin
-2. Call that plugin's `resolve_secret` method with the path
-3. Store the resolved values in memory (never on disk)
-4. Inject into action environments (build) or observe requests (observe)
-
-### Writing a secret-provider plugin
-
-A secret-provider plugin declares the `resolve_secret` and/or `store_secret` capabilities and handles the corresponding methods. The bundled `pass` plugin (`plugins/pass/`) provides a bidirectional reference implementation backed by [password-store](https://passwordstore.org); `sops` (`plugins/sops/`) is a second backend over [SOPS](https://github.com/getsops/sops)-encrypted files. See `mu guide secret-providers` for the authoring walkthrough.
-
-Register the plugin in `mu.cue` and reference secrets using the provider's name as the scheme prefix (e.g., `"pass:deploy/token"` or `"sops:secrets/prod.yaml#db.password"`).
-
-### Security properties
-
-- **Never in CAS.** Secret values are never content-addressed or stored as artifacts.
-- **Never in cache keys.** Changing a secret does not invalidate the cache. Actions with sealed inputs can still be cached based on their non-secret inputs.
-- **Never on disk.** Resolved values exist only in process memory and the spawned action's environment.
-- **Never logged.** Secret values are excluded from `--verbose` output and `--emit-manifest` JSON.
-- **Resolved late.** Secrets are resolved after planning but before execution — the value window is as short as possible.
-
-## Sealed Outputs
-
-Sealed outputs capture action results into secret backends. An action writes a value to `$MU_SEALED_OUT_DIR/<NAME>` (a 0700 directory); on success, mu reads the file and routes the value through the secret provider's `store_secret` method. The value never appears in stdout, cache, or build manifests.
-
-### Declaring sealed outputs
-
-Targets declare `sealed_outputs` in `mu.cue` — a map from output name to a secret reference:
-
-```cue
-{
-    target:    "//bootstrap/admin-password"
-    toolchain: "secret-gen"
-    config: {
-        ref:        "pass:app/admin-password"
-        derivation: ["openssl", "rand", "-base64", "32"]
-    }
-    sealed_outputs: {
-        VALUE: "pass:app/admin-password"
-    }
-    sealed_output_modes: {
-        VALUE: "create_if_absent"
-    }
-}
-```
-
-### Write modes
-
-| Mode | Behavior |
-|------|----------|
-| `"create"` | Fail if the secret already exists |
-| `"overwrite"` | Always write, create intermediate keys |
-| `"create_if_absent"` | No-op if the secret exists; create otherwise (bootstrap pattern) |
-
-### Write policy
-
-Secret providers can restrict which refs are writable. Declare allowed patterns in `mu.cue`:
-
-```cue
-secrets: {
-    writable_refs: ["pass:bootstrap/*", "sops:secrets/generated.yaml#*"]
-}
-```
-
-Patterns are matched against the full ref including scheme. Writes to refs not matching any pattern are rejected.
-
-### Plugin support
-
-Sealed outputs are supported by: `pass`, `sops`, `terraform` (via `sealed_output_outputs`), `keypair-gen`, `remote-exec`, `file`, `k8s`, `remote-file`, and the `secret-gen` built-in toolchain.
-
-## Secret Generation
-
-The built-in `secret-gen` toolchain synthesizes secrets by running a derivation command and routing the output through sealed outputs. No external plugin binary is needed.
-
-```cue
-{
-    target:    "//bootstrap/api-token"
-    toolchain: "secret-gen"
-    config: {
-        ref:        "pass:app/api-token"
-        derivation: ["openssl", "rand", "-hex", "32"]
-        mode:       "create_if_absent"
-    }
-}
-```
-
-### Config fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `ref` | yes | Destination secret ref (e.g., `"pass:app/token"`) |
-| `derivation` | yes | Command whose stdout becomes the stored value |
-| `mode` | no | `"create"`, `"overwrite"`, or `"create_if_absent"` (default) |
-| `env` | no | Extra environment variables for the derivation |
-| `keep_trailing_newline` | no | Keep trailing newline (default: false, trims one) |
-
-The derivation runs through bash. The output is written to `$MU_SEALED_OUT_DIR/VALUE` and routed to the secret provider specified by the ref's scheme. The action is always impure.
-
-## Caching
-
-All artifacts are stored by their SHA-256 content hash in OCI layout (same format locally and remotely).
-
-**Local cache:** `~/.mu/cache/` (OCI layout directory)
-
-**OCI remote cache:** Push/pull blobs and action results to any OCI-compliant registry.
-
-An action's cache key is derived from:
-- The command
-- Sorted input digests
-- Environment variables
-- Network flag
-
-Sealed inputs (secrets) are deliberately excluded from the cache key. If the key matches, the action is skipped and outputs are restored from cache.
-
-## Hermetic Sandbox
-
-Actions execute inside an isolated sandbox that restricts file system access, environment variables, and (optionally) network. The sandbox creates four standard directories: `bin/` (toolchain binaries), `work/` (source files), `out/` (outputs), and `tmp/` (per-action temporary storage).
-
-### Isolation levels
-
-mu auto-detects the strongest isolation available on the current platform:
-
-| Level | Platform | Mechanism |
-|-------|----------|-----------|
-| **Namespace** | Linux | User, mount, PID, IPC, UTS, and (optionally) network namespaces. Bind-mounts rootDir, sets up minimal `/dev`, remounts everything except `/work`, `/out`, `/tmp` read-only. |
-| **Seatbelt** | macOS | `sandbox-exec` with a deny-default SBPL profile. Allows read/write only to declared directories. Network access controlled per-action. |
-| **Copy** | All | Temp directory with restricted `PATH` and environment. Fallback when OS-level isolation is unavailable. |
-
-### Sandbox environment
-
-All isolation levels provide:
-
-- `PATH` restricted to the sandbox `bin/` directory (toolchain binaries only)
-- `TMPDIR` set to the sandbox's isolated `tmp/` directory
-- Source files copied into `work/`
-- Toolchain artifacts unpacked into the sandbox rootfs
-- Output files written to `out/`
-
-Network access is controlled per-action. Actions that need network (e.g., `go mod download`) must declare `network: true` in their action spec.
-
-## Inline Programs (pith VM)
-
-mu embeds [pith](https://github.com/chazu/pith), a concatenative
-(stack-based) virtual machine. Programs are JSON arrays of words
-stored in CUE — no compiled plugins needed for simple logic.
-
-### Three Integration Points
-
-Targets gain three optional fields, each holding a `pith.#Program`:
-
-**`plan`** — inline planning. The coordinator interprets the program
-instead of dispatching to a plugin. `action/emit` collects actions
-into the DAG:
-
-```cue
-import "github.com/chazu/pith"
-
-targets: [{
-    target: "//infra/dns"
-    plan: pith.#Program & [
-        "target/config",
-        "dup", "'record_type", "get", "'A", "eq",
-        [
-            "dup", "'host", "get", "swap", "'ip", "get",
-            {"type": "dns/create-a"}, "merge",
-            "action/emit",
-        ],
-        [
-            "dup", "'host", "get", "swap", "'target", "get",
-            {"type": "dns/create-cname"}, "merge",
-            "action/emit",
-        ],
-        "if",
-    ]
-}]
-```
-
-**`transform`** — inter-target data reshaping. Runs after dependencies
-complete, before own actions. The stack result is automatically
-available to subsequent actions via `target/output` under the
-`_result` key:
-
-```cue
-targets: [{
-    target: "//deploy/config"
-    depends: ["//infra/vpc", "//infra/db"]
-    transform: pith.#Program & [
-        "'//infra/vpc", "target/output", "'vpc_id", "get",
-        "'//infra/db", "target/output", "'endpoint", "get",
-        {"vpc_id": null, "db_endpoint": null},
-        "swap", "'db_endpoint", "swap", "set",
-        "swap", "'vpc_id", "swap", "set",
-    ]
-    plan: pith.#Program & [
-        // reads transform result:
-        "'//deploy/config", "target/output", "'_result", "get",
-        {"id": "write-config", "type": "file/write"}, "merge",
-        "action/emit",
-    ]
-}]
-```
-
-**`body`** on actions — replaces shell commands. The executor
-interprets the program instead of running a subprocess:
-
-```cue
-// In a plugin's plan response or inline plan:
-{
-    id: "fetch-data"
-    body: pith.#Program & [
-        "'https://api.example.com/data", "http/get",
-        "'items", "get",
-        ["'status", "get", "'active", "eq"], "filter",
-        "format/json",
-    ]
-}
-```
-
-### Phase-Scoped Vocabularies
-
-Each execution phase registers a different set of driver words.
-Words unavailable in a phase produce "unknown word" errors:
-
-| Word | Plan | Transform | Execute |
-|------|:----:|:---------:|:-------:|
-| `action/emit` | yes | | |
-| `target/config` | yes | yes | yes |
-| `target/output` | | yes | yes |
-| `http/get`, `http/post` | | | yes |
-| `exec/run`, `exec/shell` | | | yes |
-| `cas/store`, `cas/fetch` | | | yes |
-| `format/json`, `format/compact` | | | yes |
-
-### Driver Words
-
-**DAG construction (plan phase only):**
-
-```
-action/emit     ( spec -- )         Emit ActionSpec into DAG
-target/config   ( -- config )       Current target config
-```
-
-**Cross-target (transform + execute):**
-
-```
-target/output   ( name -- data )    Read dependency outputs
-```
-
-**HTTP (execute only):**
-
-```
-http/get     ( url -- response )          GET, parse JSON response
-http/post    ( url body -- response )     POST JSON, parse response
-```
-
-**Process execution (execute only):**
-
-```
-exec/run     ( [args] -- stdout )    Run command, parse output
-exec/shell   ( cmd -- stdout )       Run shell command, parse output
-```
-
-**Content-addressed store (execute only):**
-
-```
-cas/store    ( data -- digest )      Store data, return digest
-cas/fetch    ( digest -- data )      Fetch data by digest
-```
-
-**Formatting (execute only):**
-
-```
-format/json      ( value -- string )    Pretty-printed JSON
-format/compact   ( value -- string )    Minified JSON
-```
-
-### Transform Output Passing
-
-When a transform program completes, its stack result is automatically
-stored and made available to the target's subsequent actions. Access
-it via `target/output` with your own target name — the result appears
-under the `_result` key in the output map.
-
-This eliminates the need to declare file-based outputs for transforms.
-The data flows in-memory from the transform to downstream actions.
-
-### When to Use Inline Programs vs Plugins
-
-| Use Case | Inline (pith) | Plugin Binary |
-|----------|:---:|:---:|
-| API call + transform | yes | |
-| Conditional action selection | yes | |
-| Data reshaping between targets | yes | |
-| Config templating | yes | |
-| Go/Rust compilation | | yes |
-| Docker build | | yes |
-| Terraform apply | | yes |
-| Streaming I/O | | yes |
-| Persistent state across actions | | yes |
-
-Rule of thumb: if the logic is "call API, transform data, emit
-result" — pith program. If it needs a toolchain, long-running
-process, or complex I/O — plugin binary.
-
-### Coexistence with Plugins
-
-Pith and the NDJSON plugin protocol coexist. A target can use both:
-`toolchain: "go"` dispatches to the Go plugin for compilation, while
-a `transform` pith program reshapes output for downstream targets.
-Targets with `plan` fields skip plugin dispatch entirely.
-
-### Caching
-
-Pith actions cache identically to shell actions. The cache key is
-`hash(canonical(body) + input_digests)`. Programs are deterministic
-— same program + same inputs = same outputs. Actions with side effects
-(e.g. `http/get`) should be marked `impure: true` to skip caching.
-
-### CUE Validation
-
-Import `pith.#Program` to validate programs at config load time:
-
-```cue
-import "github.com/chazu/pith"
-
-plan?: pith.#Program
-transform?: pith.#Program
-```
-
-Unknown words, malformed ops, and type errors are caught during CUE
-evaluation — before the coordinator starts.
-
-## Toolchains
-
-Toolchains are built from scratch — mu downloads, verifies, extracts, and registers them as content-addressed artifacts:
-
-```json
-{
-  "toolchains": [
-    {
-      "toolchain": "go",
-      "from": "scratch",
-      "config": {
-        "version": "1.25.7",
-        "url": "https://go.dev/dl/go1.25.7.linux-amd64.tar.gz",
-        "sha256": "abc123...",
-        "strip_prefix": "go"
-      }
-    }
-  ]
-}
-```
-
-Downloads are verified against the declared SHA-256 hash. Extracted binaries are registered in a toolchain registry and stored as content-addressed artifacts. Downstream plugins receive toolchain artifacts automatically in plan requests.
-
-## Config Formats
-
-mu natively reads CUE (`mu.cue`). The root config is required; per-package `mu.cue` files in subdirectories are auto-discovered and merged.
-
-For other formats (TOML, YAML, custom DSLs), declare an external preprocessor at the root that converts `mu.<ext>` files to JSON before they're loaded:
-
-```cue
-preprocessor: {
-    extension: "toml"
-    command: ["yj", "-tj"]
-}
-```
-
-mu then discovers `mu.<ext>` files in subdirectories, pipes them through the preprocessor, and merges the JSON output.
-
-## Project Structure
-
-```
-cmd/mu/              CLI entry point
-internal/
-├── builtin/         Built-in fetch, shell, and secret-gen toolchains
-├── cas/             Content-addressed store interface
-│   └── oci/         OCI layout backend (local + remote)
-├── config/          Config loading, validation, preprocessor dispatch
-├── coordinator/     Build orchestration pipeline
-│   └── discovercache/  Plugin discover response caching
-├── dag/             DAG construction, topological sort, parallel executor
-├── pithvm/          pith VM driver word registration
-├── plugin/          Plugin lifecycle, NDJSON protocol, process management
-│   └── scenario/    Plugin test scenarios
-├── sandbox/         Hermetic execution (copy, Seatbelt, namespace isolation)
-├── schemacache/     Plugin schema caching
-└── scratch/         Toolchain download, verify, extract, register
-plugins/             Bundled plugins (aws, cowsay, docker, file, go, host, k8s, keypair-gen, lint, pass, remote-exec, remote-file, scratch, sops, terraform, void, zig)
-examples/            Example projects
-docs/                Architecture references, plans, brainstorms
-```
-
-## Current Status (v0.1.0)
-
-The build coordinator is functional end-to-end:
-
-- [x] Content-addressed store with OCI layout (local + remote)
-- [x] DAG construction with topological sort and cycle detection
-- [x] Parallel executor with configurable worker pool
-- [x] Hermetic sandbox isolation (Linux namespaces + macOS Seatbelt, auto-detected)
-- [x] Plugin lifecycle management (discover, plan, observe, resolve_secret, advise)
-- [x] Script-based plugins via bootstrapped bb toolchain
-- [x] NDJSON wire protocol
-- [x] Config loading with external preprocessor support
-- [x] CUE-based configuration with validation
-- [x] Toolchain scratch builds (download, verify, extract, register)
-- [x] Go toolchain plugin (build, cross-compile, tags, ldflags, race)
-- [x] `mu build` command with cache integration
-- [x] Cross-toolchain artifact composition
-- [x] Plugin distribution via CAS digests (`mu plugin add`, `mu plugin list --cached`)
-- [x] Sealed inputs for secret injection (`resolve_secret` protocol, excluded from CAS/cache/logs)
-- [x] Sealed outputs for secret capture (`store_secret` protocol, write modes, write policy)
-- [x] Secret-gen built-in toolchain for minting secrets from derivation commands
-- [x] Bidirectional secret providers: `pass` (password-store) and `sops` (Mozilla SOPS)
-- [x] Advice protocol for build lifecycle observers (`advise` method, non-fatal)
-- [x] Inline programs via pith VM (plan, transform, action body execution)
-- [x] Plugin output schema declarations and CUE validation
-- [x] Plugin discover caching (`--no-discover-cache` to bypass)
-- [x] `mu cache clean` for garbage collection of unreachable blobs
-- [x] `mu verify` for cache integrity and schema namespace compliance
-- [x] `mu graph` for dependency chain visualization (ASCII, DOT, JSON)
-- [x] `mu guide` quick-reference help system
-
-## Roadmap
-
-### Core
-
-- [ ] **Tiered cache composition** — Chain local + OCI backends with read-repair and write-through policies
-- [ ] **CLI polish** — Color output, consistent `--json` across subcommands
-
-### Build intelligence
-
-- [ ] **GOCACHEPROG bridge** — Fine-grained Go build cache integration with mu's CAS
-- [ ] **Incremental compilation support** — Bridge language-specific caches (Go, Rust) with mu's CAS
-
-### Plugin ecosystem
-
-- [ ] **1Password plugin** — `op` backend for the `resolve_secret` / `store_secret` protocol
-- [ ] **Policy plugin** — OPA/conftest for runtime policy enforcement via observe
-- [ ] **Container image plugins** — `buildpack` and `ko` as alternatives to the Docker plugin
-- [ ] **Developer standards plugins** — `structure`, `docs`, `convention` for project layout and documentation enforcement
-
-### Infrastructure
-
-- [ ] **Remote execution** — Distribute actions to worker pools
-- [ ] **Protocol extensions** — Streaming progress, async planning, format negotiation
-
-### Architecture references
-
-- [Conceptual model](docs/architecture/mu-conceptual-model.md) — mu's primitives, hermeticity model, and execution flow
-- [BRICK ecosystem](docs/architecture/brick-ecosystem.md) — how mu and pudl work together (BRICK/IDEA/ACUTE frameworks)
-- [BRICK project guide](docs/architecture/brick-project-guide.md) — practical guide to structuring a BRICK project
+| `pass` | Bidirectional secret provider over [pass](https://passwordstore.org) |
+| `remote-exec` | Run commands over SSH with sealed-output fetch |
+| `remote-file` | Converge a file on a remote host over SSH |
+| `scratch` | Toolchain bootstrapping |
+| `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
+| `terraform` | Infra provisioning + drift + sensitive-output capture |
+| `void` | Build webhook reporter (advice plugin) |
+| `zig` | Zig toolchain |
+
+## Project Status
+
+v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, pith VM, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
+
+### Roadmap
+
+- Tiered cache composition (read-repair, write-through)
+- CLI polish: color output, consistent `--json`
+- GOCACHEPROG bridge
+- 1Password / OPA / buildpack / ko plugins
+- Remote execution (worker pools)
+- Protocol extensions (streaming progress, async planning)
 
 ## License
 
