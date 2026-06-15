@@ -1,0 +1,16 @@
+# union project manifest
+[harnesses]
+  [harnesses.claude]
+    settings = ".claude/settings.json"
+  [harnesses.codex]
+    settings = "codex.toml"
+  [harnesses.jcode]
+    settings = ".jcode/settings.json"
+  [harnesses.opencode]
+    settings = ".opencode/plugins/union-hooks.mjs"
+
+[hooks]
+
+[skills]
+
+[pointers]
