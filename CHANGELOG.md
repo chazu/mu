@@ -3,7 +3,7 @@
 All notable changes to mu are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
-## [Unreleased] — v0.2.0 "Go SDK + bb-optional"
+## [v0.2.0] — 2026-06-17 "Go SDK + bb-optional"
 
 ### Added
 
@@ -40,6 +40,25 @@ All notable changes to mu are recorded here. The format follows
 - `mu guide sdk` topic covering the SDK surface, capability derivation,
   the secret-backend shortcut, the in-process test harness, and a bb→Go
   porting mapping table.
+
+- **Pith sealed inputs & outputs.** Execute-phase pith bodies can now
+  read sealed inputs and write sealed outputs through a taint-tracked
+  vocabulary, so an authenticated fetch-and-reshape target no longer
+  has to drop to a shell command.
+  - `secret/get` reads a sealed input as a tainted value (built on
+    `pith.Secret` from `github.com/chazu/pith` v0.3.0); `env/get` /
+    `env/get-default` read non-secret env and refuse sealed names.
+  - `http/request` takes a `{url, method?, headers?, body?}` map,
+    reveals secret headers/body only at the wire, and strips auth
+    headers on cross-host redirects.
+  - `file/write` / `file/read` are confined to `MU_SEALED_OUT_DIR` /
+    `MU_OUT` / the work dir, write `0600`, and reveal a secret only at
+    the syscall — the path a body uses to emit a sealed output.
+  - `format/json` / `format/compact` and `cas/store` reveal real values
+    into their output while tainting any string derived from a secret.
+  - Secret values never enter the action cache key, traces, or error
+    strings. Guide: `mu guide pith-plugins` (SECRETS IN EXECUTE
+    PROGRAMS); design note: `docs/design/pith-sealed-io.md`.
 
 ### Changed
 

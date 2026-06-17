@@ -126,3 +126,55 @@ func TestActionKey_ConfigFormatInvariant(t *testing.T) {
 		t.Fatalf("config-format invariance violated: json-loader key %v != cue-loader key %v", kJSON, kCUE)
 	}
 }
+
+// --- S1: sealed-input/output secret values must never enter the cache key ---
+
+func sealedBodyAction() *dag.Action {
+	return &dag.Action{
+		ID:   "fetch:run",
+		Body: []any{"'TOKEN", "secret/get"},
+		Env:  map[string]string{"BASE": "https://gitlab.com"},
+		SealedInputs:     map[string]string{"TOKEN": "pass:gitlab/token"},
+		SealedInputModes: map[string]string{"TOKEN": "env"},
+		Impure:           true, // bodies that touch secrets are impure in practice
+	}
+}
+
+// The resolved secret value is injected into execEnv at exec time and is never a
+// field of Action, so it cannot reach ComputeActionKey. Two keys computed from
+// the same action (which carries only the ref, not the value) must match — the
+// load-bearing security property: a rotated secret with the same ref does not
+// change the key.
+func TestActionKey_SealedValueNotInKey(t *testing.T) {
+	k1 := dag.ComputeActionKey(sealedBodyAction())
+	k2 := dag.ComputeActionKey(sealedBodyAction())
+	if k1 != k2 {
+		t.Fatalf("sealed body action key not stable: %v vs %v", k1, k2)
+	}
+	// Sanity: the key is computed without any value material — confirm the
+	// struct carries only the ref, never a value field.
+	a := sealedBodyAction()
+	if got := a.SealedInputs["TOKEN"]; got != "pass:gitlab/token" {
+		t.Fatalf("sealed input should hold a ref, got %q", got)
+	}
+}
+
+// Changing the sealed-input REF changes the key (refs are observable metadata).
+func TestActionKey_SealedRefAffectsKey(t *testing.T) {
+	a1 := sealedBodyAction()
+	a2 := sealedBodyAction()
+	a2.SealedInputs = map[string]string{"TOKEN": "pass:gitlab/token-v2"}
+	if dag.ComputeActionKey(a1) == dag.ComputeActionKey(a2) {
+		t.Fatal("changing the sealed-input ref should change the key")
+	}
+}
+
+// Changing the delivery MODE changes the key (env vs file is observable).
+func TestActionKey_SealedModeAffectsKey(t *testing.T) {
+	a1 := sealedBodyAction()
+	a2 := sealedBodyAction()
+	a2.SealedInputModes = map[string]string{"TOKEN": "file"}
+	if dag.ComputeActionKey(a1) == dag.ComputeActionKey(a2) {
+		t.Fatal("changing the sealed-input mode should change the key")
+	}
+}

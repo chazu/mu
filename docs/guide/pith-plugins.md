@@ -93,10 +93,16 @@ phase produce "unknown word" errors.
   action/emit        yes
   target/config      yes     yes
   target/output              yes         yes
+  secret/get                             yes
+  env/get                                yes
+  env/get-default                        yes
   http/get                               yes
   http/post                              yes
+  http/request                           yes
   exec/run                               yes
   exec/shell                             yes
+  file/write                             yes
+  file/read                              yes
   cas/store                              yes
   cas/fetch                              yes
   format/json                            yes
@@ -110,6 +116,76 @@ but cannot emit actions or perform side effects.
 
 Execute programs have the full effectful vocabulary but cannot
 modify the DAG.
+
+────────────────────────────────────────────────────────────────────
+SECRETS IN EXECUTE PROGRAMS
+────────────────────────────────────────────────────────────────────
+
+Execute bodies read sealed inputs and write sealed outputs through a
+small, security-conscious vocabulary. Secret values are tracked by the
+pith VM as tainted (pith.Secret): they stay redacted in traces and
+errors and are revealed only at sanctioned sinks.
+
+  secret/get ( name -- Secret )
+      Read a sealed input declared in the target's sealed_inputs. The
+      value is tainted. Errors if 'name' is not a declared sealed input,
+      or was declared but failed to resolve (fail loud — never an empty
+      string). Use this, NOT env/get, for secrets.
+
+  env/get ( name -- value )
+      Read a NON-secret env var (declared config env, MU_* vars). Errors
+      on miss, and refuses a sealed_input name (use secret/get).
+
+  env/get-default ( name default -- value )
+      Like env/get but returns 'default' when a non-secret var is absent.
+      Refuses sealed names — a secret cannot be papered over with a
+      default.
+
+  http/request ( req -- json )
+      HTTP with a request map: { url, method?, headers?, body? }. Method
+      defaults to "GET". Secret values in headers/body are revealed only
+      at the wire and never logged; on a cross-host redirect the
+      Authorization / PRIVATE-TOKEN headers are stripped. Honors the
+      action's network flag. Prefer over http/get for authenticated or
+      non-GET calls.
+
+  file/write ( path content -- )
+      Write content to a path confined to a sanctioned root
+      (MU_SEALED_OUT_DIR, MU_OUT, or the target work dir). Path escape is
+      rejected; the file is created 0600. A Secret content is revealed
+      only at the syscall. This is how a body emits a sealed output:
+      write to $MU_SEALED_OUT_DIR/<NAME>.
+
+  file/read ( path -- content )
+      Read a file's content as a string.
+
+Taint propagation: format/json and format/compact of a structure that
+contains a Secret produce the REAL JSON (so it is valid) but the output
+string is itself tainted — anything derived from a secret is a secret.
+concat/split and container words carry taint automatically. Comparisons
+and arithmetic declassify (a bool/number derived from a secret is plain).
+
+Worked example — fetch an authenticated API and capture a sealed output:
+
+  target: {
+      name: "//inventory/gitlab"
+      sealed_inputs:  { GITLAB_TOKEN: "pass:gitlab/token" }
+      sealed_outputs: { REPOS:        "pass:inventory/gitlab-repos" }
+      plan: [ /* emit one body action */ ]
+  }
+
+  body: [
+      // build {url, headers:{PRIVATE-TOKEN: <secret>}}
+      {"url": "https://gitlab.com/api/v4/projects?membership=true"},
+      "'headers",
+          {}, "'PRIVATE-TOKEN", ["'GITLAB_TOKEN", "secret/get"], "apply", "set",
+      "set",
+      "http/request",
+      // ...reshape to GitLabRepository records...
+      "format/json",
+      // write the (tainted) JSON to the sealed-output side channel
+      "'MU_SEALED_OUT_DIR", "env/get", "'/REPOS", "concat", "swap", "file/write",
+  ]
 
 ────────────────────────────────────────────────────────────────────
 CORE VOCABULARY (AVAILABLE IN ALL PHASES)

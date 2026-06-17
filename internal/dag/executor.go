@@ -522,7 +522,26 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 		return result, nil
 	}
 
-	pithvm.RegisterExecDrivers(vm, env, getOutput, e.Store)
+	// sealedNames lets the secret/env words partition the namespace: secret/get
+	// serves only these names; env/get refuses them. Names only — never values.
+	sealedNames := make(map[string]bool, len(a.SealedInputs))
+	for name := range a.SealedInputs {
+		sealedNames[name] = true
+	}
+
+	// Expose WorkDir as a sanctioned file/write root for pith bodies, alongside
+	// MU_SEALED_OUT_DIR / MU_OUT (added earlier in runAction). Copy first so we
+	// never mutate the caller's env map.
+	if a.WorkDir != "" && env["MU_WORK_DIR"] == "" {
+		cp := make(map[string]string, len(env)+1)
+		for k, v := range env {
+			cp[k] = v
+		}
+		cp["MU_WORK_DIR"] = a.WorkDir
+		env = cp
+	}
+
+	pithvm.RegisterExecDrivers(vm, env, sealedNames, getOutput, e.Store)
 	if err := vm.Run(a.Body); err != nil {
 		return 1, err
 	}
