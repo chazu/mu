@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // SchemaVersion is the top-level cache schema version. Bumping this value

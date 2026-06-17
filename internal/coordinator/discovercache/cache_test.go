@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/coordinator/discovercache"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/coordinator/discovercache"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 func sampleResp() *plugin.DiscoverResponse {

@@ -4,7 +4,7 @@ package dag
 import (
 	"fmt"
 
-	"github.com/chau/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas"
 )
 
 // Action describes a single build step in the DAG.

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chau/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/cas/oci"
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/errdef"

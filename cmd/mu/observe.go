@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/coordinator"
-	"github.com/chau/mu/internal/scratch"
+	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/scratch"
 )
 
 func runObserve(args []string) int {

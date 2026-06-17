@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 // TestPlan_CrossTargetArtifact exercises the full cross-target artifact

@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
 
 	// Pull in backend registrations (disk, oci-stub).
-	_ "github.com/chau/mu/internal/cas/oci"
+	_ "github.com/chazu/mu/internal/cas/oci"
 )
 
 // buildCacheStore constructs the CAS store from mu.cue cache config. When

@@ -3,7 +3,7 @@ package oci
 import (
 	"testing"
 
-	"github.com/chau/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas"
 )
 
 func TestBuildDiskStore_RejectsEmptyPath(t *testing.T) {

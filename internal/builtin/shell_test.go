@@ -3,7 +3,7 @@ package builtin
 import (
 	"testing"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 func TestShellPlan_BasicCommand(t *testing.T) {

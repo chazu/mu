@@ -6,8 +6,8 @@ package builtin
 import (
 	"fmt"
 
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // ShellPlan synthesizes ActionSpecs from a shell target's config.

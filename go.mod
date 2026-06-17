@@ -1,4 +1,4 @@
-module github.com/chau/mu
+module github.com/chazu/mu
 
 go 1.25.8
 
@@ -8,11 +8,12 @@ require (
 	oras.land/oras-go/v2 v2.6.0
 )
 
-require github.com/chazu/pith v0.0.0-00010101000000-000000000000
+require github.com/chazu/pith v0.2.0
 
 require golang.org/x/sync v0.19.0
 
 require (
+	charm.land/lipgloss/v2 v2.0.3
 	cuelang.org/go v0.16.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
@@ -21,7 +22,6 @@ require (
 )
 
 require (
-	charm.land/lipgloss/v2 v2.0.3 // indirect
 	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 // indirect
@@ -50,5 +50,3 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 )
-
-replace github.com/chazu/pith => ../pith

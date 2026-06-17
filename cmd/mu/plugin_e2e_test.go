@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chau/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/cas/oci"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	ocilayout "oras.land/oras-go/v2/content/oci"
 )

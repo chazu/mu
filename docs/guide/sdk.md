@@ -6,7 +6,7 @@ WHAT THIS IS
   literal and one Main() call. The SDK handles the NDJSON loop,
   capability advertisement, error envelopes, and request dispatch.
 
-  Import path: github.com/chau/mu/sdk/muplugin
+  Import path: github.com/chazu/mu/sdk/muplugin
 
 MINIMAL PLUGIN (30 LINES)
 
@@ -14,7 +14,7 @@ MINIMAL PLUGIN (30 LINES)
 
   import (
       "context"
-      "github.com/chau/mu/sdk/muplugin"
+      "github.com/chazu/mu/sdk/muplugin"
   )
 
   func main() {
@@ -123,7 +123,7 @@ WIRE TYPES
   All wire types live in sdk/muplugin/types.go. They are the single
   source of truth — internal/plugin in the mu codebase re-exports
   them via type aliases. See `mu guide protocol` for the full NDJSON
-  spec; see `go doc github.com/chau/mu/sdk/muplugin` for the Go API.
+  spec; see `go doc github.com/chazu/mu/sdk/muplugin` for the Go API.
 
 PORTING A BB PLUGIN
 

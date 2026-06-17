@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chau/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas"
 )
 
 // fakeStore is an in-memory cas.Store with injectable failure hooks.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas/oci"
 )
 
 func newTestStore(t *testing.T) cas.Store {

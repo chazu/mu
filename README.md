@@ -40,13 +40,13 @@ See [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual
 ## Installation
 
 ```bash
-go install github.com/chau/mu/cmd/mu@latest
+go install github.com/chazu/mu/cmd/mu@latest
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/chau/mu.git
+git clone https://github.com/chazu/mu.git
 cd mu && go build -o mu ./cmd/mu
 ```
 
@@ -61,7 +61,7 @@ package main
 
 import (
     "context"
-    "github.com/chau/mu/sdk/muplugin"
+    "github.com/chazu/mu/sdk/muplugin"
 )
 
 func main() {

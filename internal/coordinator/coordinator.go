@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chau/mu/internal/builtin"
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/coordinator/discovercache"
-	"github.com/chau/mu/internal/dag"
-	"github.com/chau/mu/internal/pithvm"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/builtin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/coordinator/discovercache"
+	"github.com/chazu/mu/internal/dag"
+	"github.com/chazu/mu/internal/pithvm"
+	"github.com/chazu/mu/internal/plugin"
 	"github.com/chazu/pith"
 )
 

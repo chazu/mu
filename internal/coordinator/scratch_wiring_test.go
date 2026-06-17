@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 // mockBuilder records calls and can be configured to return errors.

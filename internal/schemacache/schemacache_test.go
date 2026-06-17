@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chau/mu/internal/schemacache"
+	"github.com/chazu/mu/internal/schemacache"
 )
 
 func newCache(t *testing.T) *schemacache.Cache {

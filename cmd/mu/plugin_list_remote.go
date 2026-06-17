@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/cas/oci"
 )
 
 // remotePlugin is a row in `mu plugin list --remote` output.

@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chau/mu/internal/builtin"
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/builtin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // ResolvedPlugin holds a plugin definition with its CAS digest and resolved

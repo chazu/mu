@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas"
 )
 
 // IsolationLevel describes the strength of sandbox isolation.

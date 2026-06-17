@@ -16,10 +16,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/builtin"
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/builtin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/coordinator"
 )
 
 // Builder fetches, extracts, verifies, and registers toolchains.

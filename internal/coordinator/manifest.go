@@ -3,8 +3,8 @@ package coordinator
 import (
 	"time"
 
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/dag"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/dag"
 )
 
 // ManifestTarget describes a target that was part of the build.

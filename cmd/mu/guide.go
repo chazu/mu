@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/docs/guide"
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/docs/guide"
+	"github.com/chazu/mu/internal/config"
 )
 
 func runGuide(args []string) int {

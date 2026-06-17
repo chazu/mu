@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/chau/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas"
 )
 
 // ToolchainManifest records the artifacts produced by building from scratch a toolchain.

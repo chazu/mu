@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 

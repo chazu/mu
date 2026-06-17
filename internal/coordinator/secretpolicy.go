@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 // secretWritePolicy decides whether a given ref may be written to.

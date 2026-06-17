@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // SecretGenPlan synthesizes the action for a "secret-gen" target. The

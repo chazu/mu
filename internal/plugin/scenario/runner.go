@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // Result reports the outcome of a single scenario.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 // TestUpdateMuCuePlugin_AddNew adds a plugin entry to a mu.cue that has

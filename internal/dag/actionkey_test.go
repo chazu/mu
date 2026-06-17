@@ -3,8 +3,8 @@ package dag_test
 import (
 	"testing"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/dag"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/dag"
 )
 
 func baseAction() *dag.Action {

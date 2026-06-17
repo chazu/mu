@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chau/mu/internal/sandbox"
+	"github.com/chazu/mu/internal/sandbox"
 )
 
 func main() {

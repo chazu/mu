@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chau/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/cas/oci"
 )
 
 func TestListPluginsInBackend(t *testing.T) {

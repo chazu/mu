@@ -52,7 +52,7 @@ WRITING A PLUGIN
 
       import (
           "context"
-          "github.com/chau/mu/sdk/muplugin"
+          "github.com/chazu/mu/sdk/muplugin"
       )
 
       func main() {

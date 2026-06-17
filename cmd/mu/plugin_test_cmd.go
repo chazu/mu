@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chau/mu/internal/plugin"
-	"github.com/chau/mu/internal/plugin/scenario"
+	"github.com/chazu/mu/internal/plugin"
+	"github.com/chazu/mu/internal/plugin/scenario"
 )
 
 // runPluginTest implements `mu plugin test <plugin-path> [flags]`.

@@ -166,9 +166,9 @@ import (
     "io"
     "log"
 
-    "github.com/chau/mu/internal/cas"
-    "github.com/chau/mu/internal/config"
-    "github.com/chau/mu/internal/coordinator"
+    "github.com/chazu/mu/internal/cas"
+    "github.com/chazu/mu/internal/config"
+    "github.com/chazu/mu/internal/coordinator"
 )
 
 const (

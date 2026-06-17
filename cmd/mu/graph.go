@@ -7,7 +7,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 func runGraph(args []string) int {

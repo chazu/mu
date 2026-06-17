@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chau/mu/internal/coordinator"
-	"github.com/chau/mu/internal/dag"
-	"github.com/chau/mu/internal/scratch"
+	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/dag"
+	"github.com/chazu/mu/internal/scratch"
 )
 
 func runBuild(args []string) int {

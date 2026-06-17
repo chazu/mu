@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/schemacache"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/schemacache"
 )
 
 // VendoredSchema is one schema module shipped with a plugin: the

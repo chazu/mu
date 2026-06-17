@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 func TestActionSpecImpureJSONRoundTrip(t *testing.T) {

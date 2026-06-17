@@ -13,11 +13,11 @@ import (
 
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/cas/oci"
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/coordinator"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // runPluginInfo implements `mu plugin info <name>`.

@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/pithvm"
-	"github.com/chau/mu/internal/sandbox"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/pithvm"
+	"github.com/chazu/mu/internal/sandbox"
 	"github.com/chazu/pith"
 )
 

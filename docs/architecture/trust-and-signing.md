@@ -183,7 +183,7 @@ The resolved configuration is printed to stderr once at startup so
 users see what `auto` chose:
 
 ```
-trust: auto resolved to backend=sigstore identity=https://github.com/chau/mu/.github/workflows/build.yml@refs/heads/main
+trust: auto resolved to backend=sigstore identity=https://github.com/chazu/mu/.github/workflows/build.yml@refs/heads/main
 ```
 
 ### Explicit backend block

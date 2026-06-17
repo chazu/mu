@@ -370,7 +370,7 @@ Dagger *replaced* CUE with Go/Python SDKs in 2022. Lessons:
 
 - Replacing the `preprocessor` escape hatch: unnecessary post-CUE for most cases, but users with `.edn`/`.dhall`/`.jsonnet` still need it for a migration window.
 - Multi-package CUE layouts (`mu/config` as a shared package). Worth a follow-up once the single-file MVP ships.
-- Schema publishing: should `#ProjectConfig` live in a `cue.mod/pkg/github.com/chau/mu` namespace for third-party tooling to import? Defer until someone asks.
+- Schema publishing: should `#ProjectConfig` live in a `cue.mod/pkg/github.com/chazu/mu` namespace for third-party tooling to import? Defer until someone asks.
 
 ---
 

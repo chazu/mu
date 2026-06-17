@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chau/mu/sdk/muplugin"
+	"github.com/chazu/mu/sdk/muplugin"
 )
 
 var curveBits = map[string]string{

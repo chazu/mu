@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
 )
 
 const (

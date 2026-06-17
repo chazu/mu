@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chau/mu/internal/dag"
+	"github.com/chazu/mu/internal/dag"
 )
 
 func TestImpureActionSkipsCacheLookup(t *testing.T) {

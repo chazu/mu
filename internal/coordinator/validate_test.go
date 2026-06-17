@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chau/mu/internal/config"
+	"github.com/chazu/mu/internal/config"
 )
 
 func TestValidateTargetConfig_Valid(t *testing.T) {

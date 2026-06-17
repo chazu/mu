@@ -8,7 +8,7 @@
 // public sdk/muplugin package.
 package plugin
 
-import "github.com/chau/mu/sdk/muplugin"
+import "github.com/chazu/mu/sdk/muplugin"
 
 // ProtocolVersion is the current version of the plugin protocol.
 const ProtocolVersion = muplugin.ProtocolVersion

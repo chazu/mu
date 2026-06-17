@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"os/exec"
 
-	"github.com/chau/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/pith"
 )
 

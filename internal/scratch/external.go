@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 // External runs an external scratch build plugin specified by execPath.

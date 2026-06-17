@@ -78,7 +78,7 @@ sdk/muplugin/
 
 **Acceptance:**
 
-- `go doc github.com/chau/mu/sdk/muplugin` fits on one screen.
+- `go doc github.com/chazu/mu/sdk/muplugin` fits on one screen.
 - Hello-world plugin compiles and round-trips a `discover` + `plan` request in under 30 lines of user code.
 - `sdk/muplugin/test.go` lets plugin authors write Go unit tests without spawning a subprocess.
 
@@ -216,7 +216,7 @@ Each port and SDK milestone is incomplete until docs land alongside the code.
 
 ## Done definition
 
-- [ ] A fresh user can `go install github.com/chau/mu/cmd/mu@latest`, drop a `mu.cue` that references only Go plugins, and `mu build //foo` succeeds without ever downloading bb. *Blocked on the Phase 4 entrypoint flip — today the bundled plugins still bundle and run their `plugin.bb` even though the Go ports exist alongside.*
+- [ ] A fresh user can `go install github.com/chazu/mu/cmd/mu@latest`, drop a `mu.cue` that references only Go plugins, and `mu build //foo` succeeds without ever downloading bb. *Blocked on the Phase 4 entrypoint flip — today the bundled plugins still bundle and run their `plugin.bb` even though the Go ports exist alongside.*
 - [x] README Quick Start uses the Go plugin path.
 - [x] `sdk/muplugin` is documented and used by seven in-tree plugins. *Tagging awaits the v0.2.0 cut.*
 - [x] bb remains a supported plugin runtime; nothing about authoring bb plugins regresses (all 438 existing tests still pass; bb scripts untouched).

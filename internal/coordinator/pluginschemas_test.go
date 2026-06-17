@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chau/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/coordinator"
 )
 
 func TestLoadVendoredSchemas(t *testing.T) {

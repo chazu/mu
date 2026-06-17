@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chau/mu/internal/dag"
+	"github.com/chazu/mu/internal/dag"
 )
 
 // flakyScript writes a shell script at path that fails for the first

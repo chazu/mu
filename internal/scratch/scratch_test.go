@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chau/mu/internal/cas/oci"
-	"github.com/chau/mu/internal/config"
-	"github.com/chau/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/coordinator"
 )
 
 func sha256Hex(data []byte) string {

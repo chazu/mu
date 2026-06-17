@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chau/mu/internal/cas"
-	"github.com/chau/mu/internal/plugin"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/plugin"
 )
 
 func TestResolveFileInputs(t *testing.T) {
