@@ -29,3 +29,12 @@ examples/*/hello
 
 # Misc
 greeting.txt
+
+# The global ~/.gitignore has a `*secret*` rule that would swallow the
+# envsecret provider plugin and the env-secret test fixture. Both are
+# intentional source, not secrets — re-include them.
+!plugins/envsecret/
+!plugins/envsecret/**
+!internal/coordinator/testdata/mock_env_secret.sh
+# ...but never the compiled plugin binary.
+plugins/envsecret/envsecret

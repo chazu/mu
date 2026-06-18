@@ -3,6 +3,28 @@
 All notable changes to mu are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
+## [v0.2.2] — 2026-06-17
+
+### Fixed
+
+- **Pith `plan` actions now inherit the target's `sealed_inputs`.** Targets
+  planned by a pith `plan` program emit bare action specs; the coordinator
+  previously attached only `sealed_outputs` to them, so a pith body could never
+  receive a sealed input (`secret/get` and env-mode injection both require the
+  action to carry `SealedInputs`). The coordinator now fills in the target's
+  `sealed_inputs`/`sealed_input_modes` on any emitted action that did not
+  declare its own. `mapToActionSpec` also parses `sealed_inputs`,
+  `sealed_input_modes`, and `sealed_outputs` from emitted action maps, so a pith
+  plan can set per-action secrets explicitly. Regression-tested in
+  `internal/coordinator/sealed_plan_test.go`.
+
+### Added
+
+- **`envsecret` plugin** (`plugins/envsecret/`) — a minimal read-only secret
+  provider that resolves `env:NAME` to `$NAME`. Lets an existing environment
+  variable flow through the sealed-input machinery without a keyring, for local
+  dev/CI/demos. Guide: `mu guide plugin envsecret`.
+
 ## [v0.2.0] — 2026-06-17 "Go SDK + bb-optional"
 
 ### Added

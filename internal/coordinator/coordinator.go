@@ -310,6 +310,23 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			planActions = append([]plugin.ActionSpec{transformAction}, planActions...)
 		}
 
+		// Apply target-level sealed_inputs to plan/transform-emitted actions.
+		// The plugin path threads these through TargetInfo, but pith plan
+		// programs emit bare action specs, so the coordinator attaches the
+		// target's sealed_inputs (and modes) to any emitted action that did
+		// not declare its own. This is what lets a pith body read a secret via
+		// secret/get / env-mode injection.
+		if len(t.SealedInputs) > 0 {
+			for i := range planActions {
+				if len(planActions[i].SealedInputs) == 0 {
+					planActions[i].SealedInputs = cloneStringMap(t.SealedInputs)
+					if len(t.SealedInputModes) > 0 {
+						planActions[i].SealedInputModes = cloneStringMap(t.SealedInputModes)
+					}
+				}
+			}
+		}
+
 		// Apply target-level sealed_outputs as a convenience: if the target
 		// declares them and no plan action set its own, attach them to the
 		// single action in the plan. Multi-action plans must have the
@@ -974,6 +991,30 @@ func mapToActionSpec(m map[string]any) plugin.ActionSpec {
 	}
 	if wd, ok := m["work_dir"].(string); ok {
 		spec.WorkDir = wd
+	}
+	if si, ok := m["sealed_inputs"].(map[string]any); ok {
+		spec.SealedInputs = make(map[string]string, len(si))
+		for k, v := range si {
+			if s, ok := v.(string); ok {
+				spec.SealedInputs[k] = s
+			}
+		}
+	}
+	if sm, ok := m["sealed_input_modes"].(map[string]any); ok {
+		spec.SealedInputModes = make(map[string]string, len(sm))
+		for k, v := range sm {
+			if s, ok := v.(string); ok {
+				spec.SealedInputModes[k] = s
+			}
+		}
+	}
+	if so, ok := m["sealed_outputs"].(map[string]any); ok {
+		spec.SealedOutputs = make(map[string]string, len(so))
+		for k, v := range so {
+			if s, ok := v.(string); ok {
+				spec.SealedOutputs[k] = s
+			}
+		}
 	}
 	if imp, ok := m["impure"].(bool); ok {
 		spec.Impure = imp
