@@ -121,7 +121,7 @@ below for what `pudl run` converges to in each mode.
 
 The populator is the part that needs real expressiveness, and it is exactly the
 GitLab gist generalized. It runs as an **action body of kind `ewe`** (see
-[expressiveness-sketches.md](expressiveness-sketches.md) for the body-kind
+[expressiveness-sketches.md](../expressiveness-sketches.md) for the body-kind
 integration): a CUE program fragment mu keeps unevaluated and runs through the
 ewe evaluator at execute time, with the privileged effect registry bound to the
 sandbox + sealed env. Effect ordering falls out of CUE data dependencies; taint
@@ -368,6 +368,12 @@ Compare to the original gist: ~200 lines of copy-pasted stack ops → a readable
 CUE bundle that is *also* the model's documentation. The Proxmox example is the
 same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", …}]}`.
 
+For five fuller walkthroughs — remote-server provisioning, Kubernetes policy
+compliance, TLS certificate lifecycle, DNS zone convergence, and repo
+governance — see [examples.md](examples.md). They span both fixed points
+(observe-only and convergence) and exercise the full ewe / `#Plugin` / Datalog
+surface.
+
 ## Running a model: `pudl run`
 
 swamp's value is one coherent loop: define → run → catalog → check → report,
@@ -412,7 +418,7 @@ win, so the trade favours `pudl run`.
 ## Fixed points & the ACUTE mapping
 
 `#SystemModel` is a packaging of the **IDEA** layers and **ACUTE** phases (see
-[`architecture/brick-ecosystem.md`](../architecture/brick-ecosystem.md)) behind
+[`architecture/brick-ecosystem.md`](../../architecture/brick-ecosystem.md)) behind
 one declaration. Connecting it to that frame pins down *what `pudl run`
 converges to* — because the BRICK loop is defined by its fixed point.
 
