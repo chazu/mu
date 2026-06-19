@@ -78,6 +78,16 @@ the ewe populator.
     // CHECK — the "flag anything without monitoring" queries (pudl Datalog).
     checks: [...#Check]
 
+    // DESIRED — declared desired state (IDEA Definition layer). Optional:
+    //   present  → model can CONVERGE (drive the system toward this state).
+    //   absent   → model is OBSERVE-ONLY (inventory + flag, the swamp case).
+    desired?: [...#Definition]
+
+    // CONVERGE — close drift between desired and observed (ACUTE Transform +
+    //   Execute). Typically `pudl export-actions` → `mu build`. Only meaningful
+    //   alongside `desired`.
+    converge?: #EweTarget | #PluginPlan
+
     // FRESHNESS — how the model stays current (mu observe + drift cadence).
     freshness?: #Freshness
 
@@ -102,8 +112,10 @@ the ewe populator.
 
 A model is then evaluated as a small mu build: `populate` runs (a target),
 `relations` load, `checks` evaluate via `pudl query`, `freshness` schedules
-re-observation. The model *is* the swamp "Model + Workflow + Data + Vault +
-Report" bundle, assembled from parts already shipped.
+re-observation, and — when `desired`/`converge` are present — drift is closed.
+The model *is* the swamp "Model + Workflow + Data + Vault + Report" bundle,
+assembled from parts already shipped. See **Fixed points & the ACUTE mapping**
+below for what `pudl run` converges to in each mode.
 
 ## The populator surface: ewe-in-CUE
 
@@ -397,6 +409,71 @@ run` keeps mu dumb and keeps model knowledge — shape, relations, checks, repor
 — in pudl. The cost is one orchestration command in pudl, which is also the UX
 win, so the trade favours `pudl run`.
 
+## Fixed points & the ACUTE mapping
+
+`#SystemModel` is a packaging of the **IDEA** layers and **ACUTE** phases (see
+[`architecture/brick-ecosystem.md`](../architecture/brick-ecosystem.md)) behind
+one declaration. Connecting it to that frame pins down *what `pudl run`
+converges to* — because the BRICK loop is defined by its fixed point.
+
+### Two fixed points
+
+1. **Observation fixed point** (`pudl verify`-style idempotency). Re-observing a
+   system whose reality is unchanged yields the *same* catalog: content-hash
+   dedup, no new versions, drift = ∅. The inventory is a pure function of the
+   external system. This is the model being *stable*, not the system being
+   *correct*.
+2. **Convergence fixed point** (the full BRICK loop). The ACUTE cycle repeats
+   until **observed == desired**: Unify finds no drift, Transform emits no
+   actions, Execute is a no-op. Same "stop when no new rows" idea as the Datalog
+   fixed point, lifted to infrastructure.
+
+### How the fields map
+
+| `#SystemModel` field | IDEA layer | ACUTE phase |
+|---|---|---|
+| `schema` | Intention | — |
+| `desired` *(optional)* | **Definition** | — |
+| `populate` | → produces **Application** | **Accumulate** (+ Configure via inference) |
+| `relations` / `checks` | — | **Unify** (read-only: query/flag) |
+| `converge` *(optional)* | — | **Transform + Execute** |
+| `freshness` | — | loop cadence |
+
+### Two modes, two fixed points
+
+`pudl run` iterates a model; which fixed point it converges to depends on
+whether the model declares a desired state.
+
+**Observe-only** (no `desired`/`converge` — the swamp "inventory and flag"
+case, and the GitLab model):
+
+```
+populate (Accumulate) → checks/drift (Unify) → freshness re-observe → populate …
+   └── converges to the OBSERVATION fixed point: catalog stable, checks evaluated.
+```
+
+**Convergence** (`desired` + `converge` present — a known target state):
+
+```
+populate (Accumulate) → drift vs desired (Unify) → converge (Transform+Execute) → populate …
+   └── converges to the CONVERGENCE fixed point: observed == desired, drift = ∅.
+```
+
+`converge` is the natural home for the existing `pudl export-actions → mu build`
+path — the BRICK loop already does this; the model just bundles it. The fixed
+point is not bolted on: it is precisely what `pudl run`'s iteration settles into.
+
+### Design intent
+
+The model concept must be **able to** encapsulate convergence when the target
+state is known, without *forcing* it. Observe-only models (most inventories)
+declare neither `desired` nor `converge` and reach the observation fixed point.
+Models with a known desired state add both and reach the convergence fixed point
+— *the same artifact, the same `pudl run`*, one loop that does or does not have a
+converge arm. This is an area to iterate on: the `desired`/`converge` shape,
+how drift severity gates whether convergence fires (vs. only flags), loop
+termination guarantees, and convergence-failure reporting are all open.
+
 ## Implementation phases
 
 1. **ewe action body kind.** Add `Ewe` to the `Action` struct (`dag/graph.go`),
@@ -435,6 +512,11 @@ win, so the trade favours `pudl run`.
   both. Leaning a shared `brick`-adjacent module both import.
 - **Pagination `until` vocabulary.** `"empty"` covers offset paging; add
   `"cursor"`/`"link-header"` forms for GitHub/GitLab-style cursors.
+- **Convergence semantics (iterate here).** With `desired`/`converge` present:
+  what gates convergence vs. flag-only (drift severity? an explicit opt-in?);
+  how does `pudl run` guarantee loop termination (max iterations, drift must
+  monotonically shrink); and how is a convergence *failure* reported distinctly
+  from drift? The observe-only path is well-defined; the converge path is not.
 - **Does pith get a CUE-free execution IR reprieve?** Measure per-action ewe
   evaluation cost (CUE parse + unify) against pith's `[]any` interpreter on a
   many-small-actions build. If ewe is materially slower at action scale, pith
