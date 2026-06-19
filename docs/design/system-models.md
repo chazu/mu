@@ -356,6 +356,47 @@ Compare to the original gist: ~200 lines of copy-pasted stack ops → a readable
 CUE bundle that is *also* the model's documentation. The Proxmox example is the
 same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", …}]}`.
 
+## Running a model: `pudl run`
+
+swamp's value is one coherent loop: define → run → catalog → check → report,
+behind a single verb. A `#SystemModel` spans both tools — `populate` is a mu
+target (ewe body → catalog), `relations`/`checks` are pudl Datalog, the report is
+pudl — so *something* must drive the round trip. That driver is the loop's entry
+point: **`pudl run <model>`**.
+
+```
+pudl run gitlab
+  ├─ populate → delegates to `mu build //models/gitlab`   (mu executes the DAG)
+  ├─ relations → load Datalog rules
+  ├─ checks   → evaluate via pudl's Datalog engine, apply severities
+  └─ report   → structured markdown + JSON
+```
+
+**pudl is the ergonomic entry point into mu's action graph.** mu is the more
+abstract, harder-to-approach system; most users should drive their models
+through pudl and never touch mu directly — *unless they choose to*, at which
+point `mu build //models/<name>` is right there, doing exactly what `pudl run`
+delegated to. pudl is a shortcut, not a wall: it does not hide mu, it spares you
+from needing it.
+
+This is **charter-consistent**. pudl's rule is *"pudl doesn't execute —
+execution is mu's job."* `pudl run` *orchestrates*; the work happens in
+`mu build`. Orchestration ≠ execution, and the precedent already ships: `pudl
+memory cycle` shells to `mu build //memory:cycle` today. `pudl run` generalizes
+that one-off into the model loop, and **replaces `pudl exec`** — the unit of
+"run" rises from *a raw program* to *a model*.
+
+### The fork, recorded
+
+A model loop could instead be driven entirely by mu: make `checks` mu targets (a
+Datalog-query ewe func / plugin that fails the build) so `mu build
+//models/gitlab` runs everything — one executor, one entry point. Rejected:
+that pushes reporting and temporal Datalog checks into mu, where they do not
+belong (mu is the dumb executor; pudl is the modeling/reporting brain). `pudl
+run` keeps mu dumb and keeps model knowledge — shape, relations, checks, reports
+— in pudl. The cost is one orchestration command in pudl, which is also the UX
+win, so the trade favours `pudl run`.
+
 ## Implementation phases
 
 1. **ewe action body kind.** Add `Ewe` to the `Action` struct (`dag/graph.go`),
@@ -366,15 +407,17 @@ same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", �
    driver words and ewe funcs call the *same* http/file/secret implementations.
 3. **`#Plugin` ewe function** (start with `op: "observe"`, dataflow form first).
 4. **Tier-2 lake functions** in pudl; `#DatalogQuery` bridge.
-5. **`#SystemModel` schema** + a `mu`/`pudl` driver that evaluates a model
-   (populate → relations → checks → freshness).
+5. **`#SystemModel` schema** + `pudl run <model>`: orchestrate populate (delegate
+   to `mu build`), then relations → checks → report. Generalizes the existing
+   `pudl memory cycle` shell-out.
 6. **Tier-3 helpers** only as friction demands.
 7. **pith disposition (deprecate, don't freeze):** extract the taint type to its
-   own Go package immediately (the one piece worth saving). Migrate or drop
-   `pudl exec`. Once the ewe body kind ships and `pudl exec` is handled, **delete
-   pith** — unless the execute-time-cost question (CUE-free IR) proves real. Do
-   **not** build the earlier pith authoring sugar (`format`/`with`/records);
-   ewe-CUE supersedes it.
+   own Go package immediately (the one piece worth saving). `pudl exec` is
+   **retired, not ported** — querying is `pudl query` (Datalog), running is
+   `pudl run` (models). Once the ewe body kind ships and `pudl run` lands,
+   **delete pith** — unless the execute-time-cost question (CUE-free IR) proves
+   real. Do **not** build the earlier pith authoring sugar
+   (`format`/`with`/records); ewe-CUE supersedes it.
 
 ## Open questions
 
