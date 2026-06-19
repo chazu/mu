@@ -250,24 +250,47 @@ So the demand for a runtime function-authoring *language* is **weak for pure**
 - zygomys/let-go are fine libraries; the objection is architectural, not about
   the implementations.
 
-**Where pith actually survives:** as the **runtime-loadable, data-as-program
-escape hatch** — an implementation substrate for the occasional leaf function
-that warrants neither Go nor a plugin, and that an *agent* (not a human) emits.
-pith is already built, already taint-aware, already wired to mu's effect
-drivers. An ewe function whose body is a pith program, loaded at runtime, gives
-"add a helper without recompiling" *without* a new runtime. It stays small,
-unread by humans, agent-authored — which is precisely the niche it is good at.
-
 **Recommendation.**
 - *Logic extensibility* → CUE composition. No code.
 - *Capability extensibility* → mu plugins via `#Plugin`. No mu/pudl Go.
-- *Occasional runtime leaf function* → pith body behind an ewe func, agent-authored.
 - *Embedded Lisp* → **do not adopt.** Revisit only if a concrete need appears
   that none of the above can serve (none is currently identified).
 
 This keeps exactly two human-facing notations — **CUE/ewe** (author models and
-pipelines) and **Datalog** (query relations) — plus pith demoted to an
-agent/codegen substrate carrying the taint primitives.
+pipelines) and **Datalog** (query relations).
+
+## What about pith itself?
+
+The honest conclusion of this design is that **pith has no irreducible role once
+ewe-CUE lands and the taint type is extracted.** Each prior justification fails
+on its merits:
+
+- *"Custodian of the taint type."* `Secret`/`Redact`/`Reveal` is a plain Go
+  package — it does not need the VM. Extract it and taint survives without pith.
+- *"Agent codegen target / data-as-program."* ewe effects are `op.#Func &
+  {args:[…]}` — pure struct data, no syntax, equally machine-emittable **and**
+  human-readable. CUE/ewe dominates pith here too.
+- *"Runtime-loadable leaf-function substrate."* No concrete case exists. Pure
+  helpers → CUE covers; effectful → plugins cover. Speculative.
+
+The only **real** reasons to keep pith are transitional, not permanent:
+
+1. **It works today; ewe does not yet.** Adopting ewe *swaps* the execute-time
+   interpreter (pith VM → ewe evaluator) — it does not add a runtime. Keep pith
+   running until ewe proves out end to end.
+2. **pudl already imports it** (`pudl exec` + driver words). Removal means
+   migrating or dropping that path.
+
+One open question *could* justify permanent survival: **execute-time cost.** ewe
+runs CUE evaluation (parse + unify) per action body; pith is a ~450-line
+interpreter over `[]any` with no CUE dependency at execute time. If models
+produce many tiny actions, a cheap CUE-free execution IR has value. This is
+unproven and the *only* non-sentimental case for keeping pith.
+
+**So: treat pith as deprecated-on-arrival of ewe, not a fixture.** Extract the
+taint package now (worth saving regardless), build the ewe body kind, migrate or
+drop `pudl exec`, then delete pith — unless the execute-time-cost question turns
+up a real need for a CUE-free IR.
 
 ## Worked example: the GitLab model, end to end
 
@@ -346,10 +369,12 @@ same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", �
 5. **`#SystemModel` schema** + a `mu`/`pudl` driver that evaluates a model
    (populate → relations → checks → freshness).
 6. **Tier-3 helpers** only as friction demands.
-7. **pith disposition:** freeze scope; extract taint to a shared package; keep
-   `pudl exec` as the agent/escape-hatch path or retire it once models cover the
-   interactive case. Do **not** build the earlier pith authoring sugar
-   (`format`/`with`/records) — ewe-CUE supersedes it.
+7. **pith disposition (deprecate, don't freeze):** extract the taint type to its
+   own Go package immediately (the one piece worth saving). Migrate or drop
+   `pudl exec`. Once the ewe body kind ships and `pudl exec` is handled, **delete
+   pith** — unless the execute-time-cost question (CUE-free IR) proves real. Do
+   **not** build the earlier pith authoring sugar (`format`/`with`/records);
+   ewe-CUE supersedes it.
 
 ## Open questions
 
@@ -367,3 +392,8 @@ same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", �
   both. Leaning a shared `brick`-adjacent module both import.
 - **Pagination `until` vocabulary.** `"empty"` covers offset paging; add
   `"cursor"`/`"link-header"` forms for GitHub/GitLab-style cursors.
+- **Does pith get a CUE-free execution IR reprieve?** Measure per-action ewe
+  evaluation cost (CUE parse + unify) against pith's `[]any` interpreter on a
+  many-small-actions build. If ewe is materially slower at action scale, pith
+  survives as a compile target / cheap IR; otherwise it is deleted. This is the
+  single decision that determines whether pith lives.
