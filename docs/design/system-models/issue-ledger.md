@@ -62,7 +62,13 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 
 | ID | Folds in | Issue | Status |
 |----|----------|-------|--------|
-| V1 | M2 | No reconcile loop exists anywhere; convergence half is unimplemented end-to-end | ⬜ |
+| V1 | M2 | No reconcile loop exists; convergence half unimplemented end-to-end — **expanded into V1.1–V1.6 below** | ⬜ open (scoping done) |
+| V1.1 | M2 | **The loop** — re-observe → drift → transform → execute → repeat, in `pudl run` | ⬜ |
+| V1.2 | M2 | **Termination / fixed-point** — stop at drift = ∅ + guard (max iters; drift must monotonically shrink) | ⬜ **HARD** |
+| V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ⬜ |
+| V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ⬜ |
+| V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ⬜ **HARD** |
+| V1.6 | — | **`converge` field paths** — `#PluginPlan` (≈ exists via `export-actions`) + the ewe-converge path (`#EweTarget` emitting actions) | ⬜ |
 | V2 | m1 | `pudl run` error handling / per-target status / partial-failure | ✅ scoped to observe (below) |
 | V3 | m4 | "Delete pith" premature — sequence behind a working observe-only spike | ✅ defer deletion (below) |
 
@@ -522,3 +528,57 @@ match of `_schema` against `resource_type` (`inference/heuristics.go:94`). Exact
 binding is stronger — the model declares the shape; ingest validates against it
 rather than guessing. The inference heuristic remains for *untagged* imported data;
 tagged populator output binds exactly.
+
+---
+
+# V1 — convergence: remaining surface (OPEN, scoping only)
+
+Not resolved — this records the *shape and rough size* of the convergence work, so
+V1 can be opened later with a clear agenda. Convergence is **out of v1** (ship
+observe-only first); everything below is the post-v1 design.
+
+## What already exists — convergence reuses, does not build
+
+The single-iteration ACUTE primitives mostly ship today (verified earlier under
+M2 + the P1 grounding):
+
+- **Accumulate** (observe) — `mu observe` / the populate path (now specced).
+- **Unify** (drift) — `pudl drift check` exists (one-shot, `drift/checker.go:117-123`).
+- **Transform** (drift → actions) — `pudl export-actions` exists (emits mu.json
+  once, marks defs `"converging"`, `cmd/export_actions.go:151-167`).
+- **Execute** — `mu build` runs the actions.
+- **`desired`** declaration + convergence **plugins** (`plan` op) + catalog/versioning.
+
+So *one turn of the crank* is largely assembled. This is why convergence is **less
+net-new machinery than observe-only was** — the gap is orchestration + policy +
+safety, not new execution primitives.
+
+## What's genuinely unspecified (the six open points)
+
+| ID | Surface | Size | Risk |
+|----|---------|------|------|
+| V1.1 | **The loop** in `pudl run` (re-observe→drift→transform→execute→repeat) | medium | mostly wiring existing one-shots into a cycle |
+| V1.2 | **Termination / fixed-point** (stop at drift=∅; guard: max iters, drift monotonically shrinks) | small code | **HIGH** — correctness/safety, not LOC |
+| V1.3 | **Drift-gating** (fire vs flag; severity threshold / opt-in) | small | medium policy |
+| V1.4 | **Failure reporting** (applied-but-still-drifts / drift-grew / mid-loop action fail; distinct from drift) | medium | medium |
+| V1.5 | **Partial-apply / rollback** (execute fails halfway against a live system) | medium | **HIGH** — touches production mutation |
+| V1.6 | **`converge` field paths** (`#PluginPlan` ≈ exists via export-actions; ewe-converge `#EweTarget` newer) | small–medium | low–medium |
+
+## Rough size (approximation, not commitment)
+
+- **Breadth: ~40–50% of the observe-only effort** — fewer points (6 vs ~13),
+  several reuse shipped pieces.
+- **Difficulty: front-loaded with the project's two hardest cells.** Observe-only
+  was broad-but-mechanical; convergence is narrow-but-sharp. **V1.2 (loop
+  termination/correctness)** and **V1.5 (failure/rollback against live systems)**
+  carry the real risk, because convergence is the **first place the system mutates
+  production** — observe-only could never leave the world worse, convergence can.
+  Both likely warrant a dialectic before any code.
+
+## One grounding caveat to check when V1 opens
+
+This sizing assumes `pudl drift check` + `export-actions` are **loop-ready as-is**.
+If their one-shot internals bake in assumptions that fight iteration (e.g. the
+`"converging"` state is not re-enterable), V1.1 grows. Verify with a grounding pass
+at the start of V1; it would not change the overall "small surface, two hard cells"
+shape.
