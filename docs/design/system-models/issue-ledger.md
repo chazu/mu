@@ -64,7 +64,7 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 |----|----------|-------|--------|
 | V1 | M2 | No reconcile loop exists; convergence half unimplemented end-to-end — **expanded into V1.1–V1.6 below** | ⬜ open (scoping done) |
 | V1.1 | M2 | **The loop** — re-observe → drift → transform → execute → repeat, in `pudl run` | ⬜ (loop-owner fork resolved: **pudl-driven**, extends observe-only) |
-| V1.2 | M2 | **Termination / fixed-point** — stop at drift = ∅ + guard (max iters; drift must monotonically shrink) | ⬜ **HARD** |
+| V1.2 | M2 | **Termination / fixed-point** — stop at drift = ∅ + guard (max iters; drift must monotonically shrink) | ✅ **resolved** — drift==∅ fixed point + hard cap; **monotonic guard DEFERRED** (dialectic: [`v1-2-loop-termination.ndjson`](../dialectics/v1-2-loop-termination.ndjson)) |
 | V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ✅ **resolved** — explicit opt-in via `--converge`; no severity magic |
 | V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ⬜ |
 | V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ❌ **CUT** — out of scope (owner decision, V1 session) |
@@ -581,6 +581,39 @@ Rules:
 - **`--only` selects on definition name** (the unit drift / `export-actions` already key on).
 - **`--dry-run` is inherently single-pass.** Iterations 2+ depend on execution actually changing live state, which dry-run doesn't do — so it can only show "what iteration 1 would hand mu." `--dry-run` respects `--only`.
 - Flag-name leans (not yet locked): selector = `--only` (rejected `--target`: collides with mu/build vocab).
+
+## Decided (V1 session) — V1.2 termination + V1.1 loop structure
+
+**Fixed point:** `drift == ∅` (every definition clean) → mark `"converged"`.
+**Termination guarantee:** a hard **max-iter cap** (default 5, override `--max-iters`).
+Hit cap with residual drift → mark `"failed"` (→ V1.4). The cap is the halting proof.
+
+**Why loop (not apply-once):** re-observe after execute (a) *verifies* the live
+system actually reached desired — mu reporting an action ran ≠ world changed — and
+(b) handles dependency chains (create parent → child now appliable).
+
+**Loop structure** (also closes the V1.1 re-observe-placement question):
+```
+populate                       # initial observe (observe-only setup already does this)
+loop:
+  drift
+  if drift == ∅:  → converged, break        # fixed-point test at TOP
+  if iters >= cap: → failed, break          # safety stop
+  converge → execute
+  populate                                   # re-observe at BOTTOM
+```
+
+**Monotonic-drift-shrink guard: DEFERRED** (not cut — revisit-trigger: *first real
+oscillating consumer*). Argued out via dlktk dialectic
+([`../dialectics/v1-2-loop-termination.ndjson`](../dialectics/v1-2-loop-termination.ndjson),
+4 personas). Grounded semantics independently confirmed the lean: **cap + drift==∅
+justified (IN), guard defeated (OUT).** The decisive, robust-through-steelman
+arguments — (1) no worked consumer oscillates (examples 1/3/4 are all set-difference),
+and (2) the cap already bounds any *future* oscillator, so the guard's only value is
+saving iterations no consumer needs. Even after steelmanning the guard (set-identity
+metric to kill the ambiguity objection; future-consumer "insurance" defense), CAP
+re-won once the cap-subsumes-insurance counter landed. **Basis on record:** YAGNI +
+cap-as-halting-guarantee.
 
 ## Rough size (approximation, not commitment)
 
