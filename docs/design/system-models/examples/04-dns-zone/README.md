@@ -23,8 +23,8 @@ is deferred (ledger V1).
 ## What `pudl run dns-example-com` does
 
 **v1 (observe + flag):**
-1. **Accumulate** — the ewe program paginates the Cloudflare API → one `dns.record`
-   per row → `records.json` → catalog.
+1. **Accumulate** — the ewe program paginates the Cloudflare API → one `dns.#Record`
+   per row (model-shipped schema, D2) → `records.json` → catalog.
 2. **Unify** — the `dns_drift` relation diffs `desired` vs actual (add/delete/update).
 3. **Check** — `zone_in_sync` warns on any drift; report lists the differences.
 

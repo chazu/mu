@@ -451,3 +451,74 @@ uncovered:**
 
 Error handling beyond this (convergence-loop failures, "drift didn't shrink"
 reporting) is uncovered as we build, and defers with V1.
+
+---
+
+# Decided design points (beyond the review findings)
+
+Points settled while writing the worked examples. These are *decisions*, not review
+findings, but they pin down `#SystemModel` shape and resolve a README open question.
+
+## D1 — `#SystemModel` lives in pudl
+
+Settled. pudl is the modeling/catalog/Datalog brain; mu is the dumb executor.
+A model binds catalog schemas (pudl), relations (pudl Datalog), checks (pudl),
+report (pudl) — all pudl — and delegates only *populator execution* to mu. **mu
+never imports `#SystemModel`:** `pudl run` compiles a model down to a mu build
+(eweSource digest + sealed inputs + outputs); mu just runs the DAG. Closes the
+README open question "does `#SystemModel` live in mu, pudl, or a shared module?"
+
+**Repo split, recorded:**
+- **ewe** (library) — the CUE rewrite engine (arg resolution, `#Secretf`, guard).
+- **mu** — the ewe *runtime*: the `ewe` body kind + the effect **sink registry**
+  (`op.#Http`/`#Secret`/`#HttpAll`/`auth`/…) + executes populator programs.
+- **pudl** — `#SystemModel`, the model definitions **including their `populate.cue`
+  programs**, relations, checks, `pudl run`. Populator programs are pudl-authored
+  but written against the `op.#*` vocabulary mu registers.
+
+## D2 — every record has a pudl schema; custom schemas live in pudl
+
+User/custom schemas live in pudl — **repo-scoped `.pudl/`** or the **global
+`~/.pudl`** schema repo. A model that *reuses* a shipped schema references it
+(`pudl/linux`, `pudl/git`); a model that *introduces* one (tls/dns/k8s) **ships its
+own pudl schema package** alongside the model (in `.pudl/`). Nothing is untyped:
+every catalog record is an instance of some pudl schema definition.
+
+## D3 — `#SystemModel.schema` carries `#SchemaRef` definition references
+
+The `schema:` field is a list of **schema-definition references**
+(`pudl/linux.#Package`), **not** dotted resource-type strings. This is the *same
+identifier the plugin SDK already uses*: `DiscoverResponse.OutputSchema *SchemaRef`
+(`mu/sdk/muplugin/types.go:66,82`) is a `{module, version, #definition}` pointer
+"consumed by downstream tools (notably pudl) to classify imported data without
+re-inferring." So the two populate kinds converge on one identifier:
+- **`#EweTarget`** — the model declares `schema: [linux.#Package, …]`.
+- **`#PluginObserve`** — the schema comes from the plugin's declared `OutputSchema`.
+
+Why def references over strings: the model declares the actual CUE *shape* its
+records must satisfy (validatable, not just tag-matched), and a typo fails at load
+(`pudl/linux.#Pakage`) instead of silently at ingest (`"linux.pakage"`).
+
+## D4 — no author-facing `resource_type`; records self-tag with a def reference
+
+`resource_type` is **not a distinct concept** — verified: it appears *only* inside a
+schema's `_pudl` metadata (`schemagen` generates it *from* the definition; it is
+never a free-standing taxonomy). It is a schema's **internal derived identity
+string**. A resource is always an instance of a schema; there is no resource-type
+that isn't "which schema."
+
+Therefore the authoring surface names **schema definitions only**; the dotted
+`resource_type` is an internal handle authors never type. Concretely (decision (a)):
+- A populator record self-identifies with a **`_schema` definition reference** —
+  the `"pudl/<module>.#<Def>"` string form already used by `base_schema`
+  (`pudl/git.git.cue:63`). Example: `_schema: "pudl/linux.#Package"`.
+- (a) over (b "no `_schema`, infer from the model"): one populator can emit
+  **multiple** schemas into one output (example 1: packages + users + services +
+  files), so each record must self-identify.
+
+**Implied pudl change:** the catalog binding resolves `_schema` as an **exact
+definition reference** (bind directly to the def), superseding the current fuzzy
+match of `_schema` against `resource_type` (`inference/heuristics.go:94`). Exact
+binding is stronger — the model declares the shape; ingest validates against it
+rather than guessing. The inference heuristic remains for *untagged* imported data;
+tagged populator output binds exactly.

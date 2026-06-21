@@ -10,7 +10,8 @@ only** — the converge arm and the reconcile loop are deferred (ledger V1).
 
 - **Populate is `#PluginObserve`, not inline `op.#Plugin`** (P2). The shipped
   `host` SSH observer runs as its own action; its observed packages/users/files/
-  services are ingested into the catalog under `host.*`. No ewe program file — the
+  services are ingested under `pudl/linux.*` + `pudl/fs.#File` (the host plugin's
+  declared `OutputSchema`, D3). No ewe program file — the
   populator *is* the plugin observe.
 - **Secret** (`ROOT_SSH_KEY`) is resolved and used plugin-side; it never enters CUE.
 - **`desired` + `converge`** are written but the converge field is flagged
@@ -19,7 +20,7 @@ only** — the converge arm and the reconcile loop are deferred (ledger V1).
 ## What `pudl run odroid-hc2` does
 
 **v1 (observe + flag):**
-1. **Accumulate** — `host observe` SSHes in → catalog under `host.*`.
+1. **Accumulate** — `host observe` SSHes in → catalog under `pudl/linux.*` + `pudl/fs.#File`.
 2. **Flag** — drift relation (`host_drift`) diffs `desired` vs observed; the
    `no_residual_drift` check reports what's off (podman missing, `svc` absent, …).
 3. **Report** — markdown + JSON of the drift. No mutation.

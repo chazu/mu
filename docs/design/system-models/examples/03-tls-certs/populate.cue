@@ -31,7 +31,7 @@ _info: op.#ExecBatch & {args: [_specs]}
 // pure CUE — join domain ↔ its notAfter. `not_after` is the raw `notAfter=...`
 // line; days-to-expiry is computed downstream by the cert_expiry Datalog rule.
 _certs: [for i, d in _domains {
-	_schema:   "tls.certificate"
+	_schema:   "tls.#Certificate" // def reference (D4), bound exactly at ingest
 	domain:    d
 	not_after: _info.result[i].value.stdout // .value: the E4 envelope payload
 }]

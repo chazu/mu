@@ -24,7 +24,7 @@ deferred (ledger V1).
 
 **v1 (observe + flag):**
 1. **Accumulate** — the ewe program runs openssl over each cert, writes
-   `certs.json` → ingested as `tls.certificate`.
+   `certs.json` → ingested as `tls.#Certificate` (model-shipped schema, D2).
 2. **Unify** — `cert_expiry.cue` derives `cert_expiring` (under 30 days).
 3. **Check** — `none_expiring_soon` warns on anything inside the window. Most days:
    empty → nothing to do.

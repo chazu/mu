@@ -17,7 +17,8 @@ limits and have a PodDisruptionBudget. Audit a system you may not own end-to-end
 
 ## What `pudl run k8s-resource-policy` does
 
-1. **Accumulate** — `k8s observe` → catalog (`k8s.workload`, `k8s.pdb`).
+1. **Accumulate** — `k8s observe` → catalog (`k8s.#Workload`, `k8s.#PDB`,
+   model-shipped schemas — D2).
 2. **Configure** — schema inference types each record.
 3. **Unify** — `datalog.Evaluate` runs `rules/k8s_policy.cue` to a fixed point,
    deriving `workload_missing_resources` and `workload_without_pdb`.

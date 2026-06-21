@@ -563,8 +563,10 @@ open under ledger **V1**.
 
 *(Resolved questions removed; see the ledger. What genuinely remains:)*
 
-- **Does `#SystemModel` live in mu, pudl, or a shared CUE module?** It binds
-  both. Leaning a shared `brick`-adjacent module both import. (Open.)
+- ~~**Does `#SystemModel` live in mu, pudl, or a shared CUE module?**~~ **Resolved
+  (ledger D1): it lives in pudl.** mu never imports it; `pudl run` compiles a model
+  to a mu build. Schemas are referenced as definitions (`pudl/linux.#Package`),
+  custom ones shipped in `.pudl/`/`~/.pudl` (D2–D4).
 - **Convergence semantics (iterate here).** With `desired`/`converge` present:
   what gates convergence vs. flag-only (drift severity? an explicit opt-in?);
   how does `pudl run` guarantee loop termination (max iterations, drift must

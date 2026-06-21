@@ -14,6 +14,23 @@ sketches in `examples.md`, which predate the design corrections.
 | `headers: { "PRIVATE-TOKEN": _t.result }` (ex. 5) | **`auth.header` ref** | S1 |
 | inline `op.#Plugin & {args:[{op:"observe"}]}` (ex. 1, 2) | **`#PluginObserve` populate kind** — the plugin's own observe, consumed by dataflow | P2 |
 | `paginate: { until: "empty" }` | **`paginate: { style: "page" \| "link" \| "cursor", … }`** | I2 |
+| `schema: ["host.package", …]` (dotted resource-type strings) | **`schema: [linux.#Package, …]`** — definition references; records self-tag with a `_schema` def-ref (`"pudl/linux.#Package"`) | D3, D4 |
+
+## Schemas (D1–D4)
+
+`#SystemModel` lives in **pudl**; every record is an instance of a **pudl schema
+definition**. Models name schema *definitions*, never dotted `resource_type`
+strings (which are an internal derived handle, not an author concept):
+
+- **Reused** schemas are shipped by pudl — `pudl/linux.#Package`, `pudl/fs.#File`,
+  `pudl/git.#GitLabRepository` (examples 1, 5).
+- **Introduced** schemas (`tls`, `dns`, `k8s`, `gitgov`) are **model-shipped** in a
+  pudl schema package — repo-scoped `.pudl/` or global `~/.pudl` (examples 2, 3, 4,
+  and ex. 5's branch-protection). The example `import "tls"` etc. stand in for those
+  shipped packages.
+- A populator record self-identifies with a `_schema` definition reference
+  (`_schema: "pudl/linux.#Package"`), bound *exactly* at ingest — one populator may
+  emit several schemas into one output, so each record carries its own.
 
 ## v1 scope convention used here
 

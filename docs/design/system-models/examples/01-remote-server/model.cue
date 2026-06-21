@@ -4,11 +4,16 @@
 // Fixed point: CONVERGENCE. v1 gives observe + drift-flag; the converge arm and
 // the reconcile loop are V1-OPEN (ledger V1).
 
-import "op"
+import (
+	"pudl/linux"
+	"pudl/fs"
+)
 
 odroid: #SystemModel & {
-	name:   "odroid-hc2"
-	schema: ["host.package", "host.service", "host.file", "host.user"]
+	name: "odroid-hc2"
+	// schema: definition references (D3), not dotted strings. These are shipped
+	// pudl schemas; the host plugin's OutputSchema declares the same defs.
+	schema: [linux.#Package, linux.#Service, linux.#User, fs.#File]
 	vault: {ROOT_SSH_KEY: "pass:infra/odroid/root"}
 
 	// POPULATE — reuse the shipped `host` SSH observer. Under the current design
@@ -25,12 +30,13 @@ odroid: #SystemModel & {
 	}
 
 	// DESIRED — IDEA Definition layer: what should be true on the box.
+	// records self-tag with a _schema definition reference (D4): "pudl/<mod>.#<Def>"
 	desired: [
-		{_schema: "host.package", name: "podman", state: "present"},
-		{_schema: "host.package", name: "restic", state: "present"},
-		{_schema: "host.user", name: "svc", shell: "/usr/sbin/nologin"},
-		{_schema: "host.file", path: "/etc/svc/config.toml", mode: "0640", content: "interval = \"1h\"\n"},
-		{_schema: "host.service", name: "svc", state: "running", enabled: true},
+		{_schema: "pudl/linux.#Package", name: "podman", state: "present"},
+		{_schema: "pudl/linux.#Package", name: "restic", state: "present"},
+		{_schema: "pudl/linux.#User", name: "svc", shell: "/usr/sbin/nologin"},
+		{_schema: "pudl/fs.#File", path: "/etc/svc/config.toml", mode: "0640", content: "interval = \"1h\"\n"},
+		{_schema: "pudl/linux.#Service", name: "svc", state: "running", enabled: true},
 	]
 
 	// CHECK — observe-only flag: report any drift from desired (one-shot, feasible

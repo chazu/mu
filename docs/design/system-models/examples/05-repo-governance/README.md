@@ -31,7 +31,8 @@ form that does, under the current design:
 ## What `pudl run gitlab-governance` does
 
 1. **Accumulate** — paginate projects; batch-fetch protected-branches; join in CUE
-   → one enriched `git.repository.gitlab` record each → catalog.
+   → one enriched `pudl/git.#GitLabRepository` record each (a shipped pudl schema)
+   → catalog.
 2. **Unify** — `branch_protection.cue` derives `default_unprotected` (and
    `protection_fetch_failed`).
 3. **Check** — `default_branch_protected` warns, listing offenders. Report = the

@@ -38,7 +38,7 @@ _prot: op.#HttpBatch & {args: [_reqs]}
 //    ({ok, value} | {ok:false, status, error}) is carried through so the
 //    branch_protection rule can flag fetch failures distinctly from violations.
 _out: [for i, r in _have {
-	_schema:        "git.repository.gitlab"
+	_schema:        "pudl/git.#GitLabRepository" // def reference (D4); shipped pudl schema
 	name:           r.path_with_namespace
 	default_branch: r.default_branch
 	protections:    _prot.result[i] // E4 envelope; rule reads .ok / .value

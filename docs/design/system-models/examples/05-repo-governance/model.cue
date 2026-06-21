@@ -3,11 +3,15 @@
 //
 // Fixed point: OBSERVATION (→ optional convergence). Fully v1-real as observe+flag.
 
-import "op"
+import (
+	"pudl/git"  // #GitLabRepository is a shipped pudl schema
+	"gitgov"    // #BranchProtection is model-introduced (.pudl/gitgov, D2)
+)
 
 gitlabGov: #SystemModel & {
-	name:   "gitlab-governance"
-	schema: ["git.repository.gitlab", "git.branch_protection"]
+	name: "gitlab-governance"
+	// schema: definition references (D3) — one shipped, one model-introduced.
+	schema: [git.#GitLabRepository, gitgov.#BranchProtection]
 	vault: {GITLAB_TOKEN: "env:GITLAB_TOKEN"}
 
 	// POPULATE — ewe program (see populate.cue): paginate projects, then fetch each

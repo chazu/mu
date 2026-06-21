@@ -4,11 +4,13 @@
 // Fixed point: CONVERGENCE, time-triggered (drift signal is the clock, not a
 // config diff). v1: observe expiry + flag; the ACME converge arm is V1-OPEN.
 
-import "op"
+// tls.#Certificate is a model-introduced schema (shipped in .pudl/tls, D2).
+import "tls"
 
 certs: #SystemModel & {
-	name:   "tls-certs"
-	schema: ["tls.certificate"]
+	name: "tls-certs"
+	// schema: definition reference (D3).
+	schema: [tls.#Certificate]
 	vault: {ACME_KEY: "pass:acme/account", DNS_TOKEN: "pass:dns/cloudflare"}
 
 	// POPULATE — ewe program (see populate.cue). Reads each cert via openssl,
@@ -30,7 +32,7 @@ certs: #SystemModel & {
 
 	// DESIRED — every managed cert valid > 30 days out.
 	desired: [for d in ["api.example.com", "www.example.com"] {
-		_schema: "tls.certificate", domain: d, min_days_remaining: 30
+		_schema: "tls.#Certificate", domain: d, min_days_remaining: 30
 	}]
 
 	// CONVERGE — V1-OPEN. For each cert in `cert_expiring`, run ACME (DNS-01 with

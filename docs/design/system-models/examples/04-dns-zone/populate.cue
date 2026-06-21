@@ -23,7 +23,7 @@ _raw: op.#HttpAll & {args: [{
 }]}
 
 _recs: [for r in _raw.result {
-	_schema: "dns.record"
+	_schema: "dns.#Record" // def reference (D4), bound exactly at ingest
 	type:    r.type
 	name:    r.name
 	value:   r.content
