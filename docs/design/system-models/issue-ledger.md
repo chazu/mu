@@ -63,11 +63,11 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 | ID | Folds in | Issue | Status |
 |----|----------|-------|--------|
 | V1 | M2 | No reconcile loop exists; convergence half unimplemented end-to-end — **expanded into V1.1–V1.6 below** | ⬜ open (scoping done) |
-| V1.1 | M2 | **The loop** — re-observe → drift → transform → execute → repeat, in `pudl run` | ⬜ |
+| V1.1 | M2 | **The loop** — re-observe → drift → transform → execute → repeat, in `pudl run` | ⬜ (loop-owner fork resolved: **pudl-driven**, extends observe-only) |
 | V1.2 | M2 | **Termination / fixed-point** — stop at drift = ∅ + guard (max iters; drift must monotonically shrink) | ⬜ **HARD** |
-| V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ⬜ |
+| V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ✅ **resolved** — explicit opt-in via `--converge`; no severity magic |
 | V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ⬜ |
-| V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ⬜ **HARD** |
+| V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ❌ **CUT** — out of scope (owner decision, V1 session) |
 | V1.6 | — | **`converge` field paths** — `#PluginPlan` (≈ exists via `export-actions`) + the ewe-converge path (`#EweTarget` emitting actions) | ⬜ |
 | V2 | m1 | `pudl run` error handling / per-target status / partial-failure | ✅ scoped to observe (below) |
 | V3 | m4 | "Delete pith" premature — sequence behind a working observe-only spike | ✅ defer deletion (below) |
@@ -561,19 +561,37 @@ safety, not new execution primitives.
 | V1.2 | **Termination / fixed-point** (stop at drift=∅; guard: max iters, drift monotonically shrinks) | small code | **HIGH** — correctness/safety, not LOC |
 | V1.3 | **Drift-gating** (fire vs flag; severity threshold / opt-in) | small | medium policy |
 | V1.4 | **Failure reporting** (applied-but-still-drifts / drift-grew / mid-loop action fail; distinct from drift) | medium | medium |
-| V1.5 | **Partial-apply / rollback** (execute fails halfway against a live system) | medium | **HIGH** — touches production mutation |
+| ~~V1.5~~ | ~~Partial-apply / rollback~~ | — | ❌ **CUT** — owner decision (V1 session): out of scope, period |
 | V1.6 | **`converge` field paths** (`#PluginPlan` ≈ exists via export-actions; ewe-converge `#EweTarget` newer) | small–medium | low–medium |
+
+## Decided (V1 session) — `pudl run` CLI contract
+
+Settles the convergence-gating surface (V1.3) and bounds V1.1.
+
+| Invocation | Behaviour |
+|------------|-----------|
+| `pudl run <model>` | **observe-only** (default): populate → drift → checks → report. **No mutation.** Drift is flagged, never fired. Stops at observation fixed point. |
+| `pudl run <model> --converge` | Opt into the convergence loop. Converges **all** drifted resources. |
+| `pudl run <model> --converge --only a,b` | Converge **only** the named definitions. Drift still computed whole-model; Transform filters emitted actions to the selected set. |
+| `pudl run <model> --converge --dry-run` | Print the **plan** (the `mu.json` `export-actions` already emits, `export_actions.go:139`) and **execute nothing**. Single pass — `observe → drift → transform → print → stop`. |
+
+Rules:
+- **`--converge` is the gate.** Convergence (production mutation) never happens without it — observe-only is the safe default. This *is* the resolution of V1.3: explicit opt-in, **no severity-threshold magic**.
+- **`--only` and `--dry-run` both require `--converge`** (else error). One rule: convergence flags need the convergence gate. Prevents accidental firing by naming a resource.
+- **`--only` selects on definition name** (the unit drift / `export-actions` already key on).
+- **`--dry-run` is inherently single-pass.** Iterations 2+ depend on execution actually changing live state, which dry-run doesn't do — so it can only show "what iteration 1 would hand mu." `--dry-run` respects `--only`.
+- Flag-name leans (not yet locked): selector = `--only` (rejected `--target`: collides with mu/build vocab).
 
 ## Rough size (approximation, not commitment)
 
 - **Breadth: ~40–50% of the observe-only effort** — fewer points (6 vs ~13),
   several reuse shipped pieces.
-- **Difficulty: front-loaded with the project's two hardest cells.** Observe-only
+- **Difficulty: front-loaded with the project's hardest cell.** Observe-only
   was broad-but-mechanical; convergence is narrow-but-sharp. **V1.2 (loop
-  termination/correctness)** and **V1.5 (failure/rollback against live systems)**
-  carry the real risk, because convergence is the **first place the system mutates
-  production** — observe-only could never leave the world worse, convergence can.
-  Both likely warrant a dialectic before any code.
+  termination/correctness)** carries the real risk. (V1.5 rollback was **cut** —
+  out of scope; the system's production-mutation risk is acknowledged but not
+  guarded against in V1: execute is best-effort, failures are *reported* (V1.4),
+  not *undone*.) V1.2 likely warrants a dialectic before any code.
 
 ## One grounding caveat to check when V1 opens
 
@@ -582,3 +600,13 @@ If their one-shot internals bake in assumptions that fight iteration (e.g. the
 `"converging"` state is not re-enterable), V1.1 grows. Verify with a grounding pass
 at the start of V1; it would not change the overall "small surface, two hard cells"
 shape.
+
+**Resolved (V1 session, grounding pass):** one-shots are **loop-ready as-is**.
+`UpdateStatus` (`pudl/internal/database/catalog_status.go:18`) is a blind set with
+validity-check only — **no FSM transition guard** — so `converging→drifted→converging`
+cycles freely across iterations. `drift check` (`checker.go:117`) and
+`markConverging` (`export_actions.go:153`) are both idempotent / re-enterable. V1.1
+stays "wiring existing one-shots into a cycle"; no growth. **Bonus:** the valid-status
+set already includes `"converged"` and `"failed"` (line 21) but **nothing writes
+them** — they are the pre-existing terminal vocabulary for V1.2 (fixed-point reached →
+`converged`) and V1.4 (failure → `failed`). No schema migration needed.
