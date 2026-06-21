@@ -1,0 +1,453 @@
+# Issue ledger — System Models / ewe-in-CUE
+
+Consolidated, deduplicated, dependency-ordered tracker for every finding from
+[adversarial-review.md](adversarial-review.md) (C/M/m) and
+[adversarial-review-2.md](adversarial-review-2.md) (CRIT/MAJOR/MIN), plus the
+state of [ewe-arg-resolution-spec.md](ewe-arg-resolution-spec.md). Each row is
+resolved one at a time; the relevant design doc is amended as we go.
+
+Status: ⬜ open · 🔬 validated/decided, doc pending · ✅ resolved + doc updated.
+
+## End goal (the thing all of this serves)
+
+A `#SystemModel` is one declaration that bundles **shape + populate + relate +
+check + freshness** (+ optional **desired + converge**), and `pudl run <model>`
+drives the IDEA/ACUTE loop to a fixed point — observation fixed point
+(inventory stable) for observe-only models, convergence fixed point
+(observed == desired) when a desired state is declared. The populator is an
+**ewe-in-CUE** action body kind in mu; checks/relations are pudl Datalog;
+secrets are sealed refs revealed only at sinks; capability extension is mu
+plugins via `#Plugin`. No second evaluator, no embedded Lisp.
+
+---
+
+## ENGINE — ewe repo (gates every populator example)
+
+| ID | Folds in | Issue | Status |
+|----|----------|-------|--------|
+| E1 | CRIT-1, CRIT-2, C1(arg part) | Nested-`.result` args + hidden fields unresolvable → LookupPath-the-args-subpath redesign | 🔬 validated empirically (below) |
+| E2 | C1, m2 | Effects inside comprehensions unsupported → reject loudly + batch/join pattern | 🔬 decided (below) |
+| E3 | MAJOR-4 | `maxPasses=16` ceiling + large-list splice re-parse cost | 🔬 decided (below) |
+| E4 | MIN-2 | Batch partial-failure (one item errors → whole pass aborts) | 🔬 decided (below) |
+| E5 | C2(ii), MAJOR-3 | Pure ordering (`after:`/`callReady`) — needed, or cut? | 🔬 decided: CUT (below) |
+| E6 | NEW-1 | `cueValueToGo` keeps quotes on quoted struct labels (`"PRIVATE-TOKEN"` → `"\"PRIVATE-TOKEN\""`) | 🔬 fix located (below) |
+
+## SECRETS / TAINT
+
+| ID | Folds in | Issue | Status |
+|----|----------|-------|--------|
+| S1 | C3, CRIT-3, MIN-1 | Secret-by-reference + secret-as-substring template + `goToCUEExpr` fail-closed guard | ✅ [ewe-secrets-spec.md](ewe-secrets-spec.md) |
+
+## CACHING / DETERMINISM
+
+| ID | Folds in | Issue | Status |
+|----|----------|-------|--------|
+| K1 | M1, MAJOR-1, MIN-3 | Every populator `impure` → never cached; ewe has no memoization; `#Now` has no seed mechanism | ✅ reframed (below) |
+
+## MU INTEGRATION
+
+| ID | Folds in | Issue | Status |
+|----|----------|-------|--------|
+| I1 | C2(i), MAJOR-2 | `ewe` action body kind: raw-source storage vs string field; per-execute registry; `#Output` wiring | ✅ [ewe-body-kind-spec.md](ewe-body-kind-spec.md) |
+| I2 | m3 | Pagination vocabulary (cursor / Link-header), all Go-side | ✅ [ewe-http-pagination-spec.md](ewe-http-pagination-spec.md) |
+
+## PUDL INTEGRATION
+
+| ID | Folds in | Issue | Status |
+|----|----------|-------|--------|
+| P1 | M4 | `#DatalogQuery` has no driver; rule-file loading unwired | ✅ dissolved (below) |
+| P2 | M3 | Inline `#Plugin` lifecycle vs dataflow form (4/5 examples use inline) | ✅ cut (below) |
+
+## CONVERGENCE / ORCHESTRATION (end-goal clarity; build scoped out of v1)
+
+| ID | Folds in | Issue | Status |
+|----|----------|-------|--------|
+| V1 | M2 | No reconcile loop exists anywhere; convergence half is unimplemented end-to-end | ⬜ |
+| V2 | m1 | `pudl run` error handling / per-target status / partial-failure | ✅ scoped to observe (below) |
+| V3 | m4 | "Delete pith" premature — sequence behind a working observe-only spike | ✅ defer deletion (below) |
+
+---
+
+## E1 — RESOLVED (validated)
+
+**Finding (CRIT-1/CRIT-2):** `extractArgsWithFallback` (`processor.go:176-214`)
+resolves an arg element only if it is wholly literal or a bare top-level ref;
+a `.result` embedded in a struct/list/interpolation is unresolvable, and
+`LookupPath` rejects hidden labels. Kills every real example.
+
+**Resolution:** the spec's redesign — stop hand-converting the args AST; instead
+`LookupPath` the call's `args` subpath in the already-evaluated partial compile,
+let the CUE engine evaluate nested refs / interpolation / builtins, and convert
+the concrete result with the existing `cueValueToGo`. Hidden fields addressed by
+building a typed `cue.Path` with `cue.Hid(name, pkg)` instead of `ParsePath`.
+
+**Empirical validation (throwaway test against real CUE engine, 2026-06-19):**
+a partial-compile fixture where `_repos` (hidden) has `args` embedding
+`_tok.result` (nested in a struct) and `"\(_env.result.MU_OUT)/repos.json"`
+(interpolation):
+
+- `LookupPath(cue.MakePath(cue.Hid("_repos","_"), cue.Str("args")))` → exists ✓
+- `Validate(cue.Concrete(true))` → nil once refs concrete ✓
+- interpolation evaluated to `/out/repos.json` ✓
+- negative control (before `_tok.result` spliced) → `undefined field: result`
+  → pass correctly skips/retries ✓
+
+So the LookupPath redesign genuinely closes CRIT-1 + CRIT-2. Spec stands; carry
+E6 (quoted-label bug) as a rider fix in the same change.
+
+## E2 — RESOLVED (decided)
+
+**Finding (C1/m2):** effects inside a `for`/comprehension body are unsupported —
+`findCallSites` only matches static `op.#X & {…}` fields; per-item calls don't
+exist as nodes until the final `CompileString`, long after effects ran. The
+flagship example 5 ("N fetches, one per item") was written this way.
+
+**Resolution:** *forbid* effects in comprehensions; detect and fail loudly
+(spec Change 3, `flagComprehensionCalls`). The sanctioned N-fan-out is
+**batch effect + pure build/join**:
+
+```cue
+_reqs: [ for r in _repos.result { {url: "…/\(r.id)/…", headers: {…}} } ] // pure CUE
+_prot: op.#HttpBatch & { args: [_reqs] }                                  // ONE effect → list
+_out:  [ for i, r in _filtered { {…, protections: _prot.result[i]} } ]    // pure CUE join
+```
+
+Review #2 showed this pattern *only* worked with non-hidden, bare-named,
+top-level fields — because of CRIT-1/CRIT-2. **E1 removes exactly that
+restriction**, so batch+join now works with hidden fields and nested refs. This
+is review #1's recommended path (b); both reviews agree on forbidding effects in
+comprehensions. Comprehension-unrolling (Route B) stays deferred sugar — not
+built. Gate: confirm batch+join evaluates end-to-end against a stub registry
+(spec sequencing step 2).
+
+## E3 — RESOLVED (decided)
+
+**Finding (MAJOR-4):** `maxPasses=16` is a hard ceiling; each pass re-parses,
+re-runs `compilableSource`, recompiles whole source; a batch returning hundreds
+of items splices a huge `ListLit` back as source re-parsed every later pass.
+Termination/cost of chained batches unverified.
+
+**Resolution — separate the two concerns:**
+
+1. **Pass count is not the worry.** Passes-needed ≈ *longest `.result`
+   dependency chain*, **not** the number of calls — the inner loop resolves
+   every ready call each pass. A realistic populator chain
+   (secret→fetch→build→batch→join→write) is ~4–6 levels; 16 is generous.
+   Defensive only: make `maxPasses` a `Processor` option (default 16), raisable
+   if a real model needs it.
+2. **Splice cost is real but measure-first.** In the canonical pattern a large
+   list threads through CUE only for the index-join, then is written out via a
+   sink. Ship v1 as-is + add a benchmark (500-item batch + join). **Escape
+   hatch if it bites:** store executed results out-of-band keyed by call path and
+   inject a *reference* into `compilableSource` instead of re-splicing literal
+   source (already named in spec Risks). Built only on demonstrated cost.
+
+## E4 — RESOLVED (decided) — contract lives in the sink layer, not the engine
+
+**Finding (MIN-2):** `fn.Execute` returning an error aborts the entire
+`ProcessSource` (`processor.go:84-86`). Inventory fan-out over hundreds of repos
+needs per-item tolerance.
+
+**Resolution:** keep the engine's "Execute error = fatal" (correct for genuine
+faults — bad config, whole-call auth failure). Per-item tolerance is the **batch
+function's ABI**: a batch effect catches per-item errors and returns a list of
+**result envelopes** —
+
+```cue
+_prot.result: [ {ok: true, value: {…}}, {ok: false, status: 403, error: "forbidden"}, … ]
+```
+
+The pure-CUE join decides per item (skip / flag as a `#Check` finding / default).
+The batch errors the whole call only if it cannot run at all (arg not a list).
+Engine semantics unchanged; envelope shape documented as the batch ABI in the
+sink-function spec (I1 layer). No ewe-repo change.
+
+## E6 — RESOLVED (fix located)
+
+**Finding (NEW-1):** `cueValueToGo` (`convert.go:284`) keys structs with
+`iter.Selector().String()`, which returns the *source* form — a quoted label
+`"PRIVATE-TOKEN"` becomes Go map key `"\"PRIVATE-TOKEN\""`, breaking header
+names. Surfaced by the E1 validation test.
+
+**Resolution:** unquote string labels —
+
+```go
+sel := iter.Selector()
+key := sel.String()
+if sel.Type() == cue.StringLabel {
+    key = sel.Unquoted()
+}
+result[key] = val
+```
+
+Few lines; rider on the E1 change. Add a test with a quoted label.
+
+## E5 — RESOLVED (decided: CUT from v1)
+
+**Finding (C2-ii/MAJOR-3):** ewe has no pure-ordering primitive — "run A before B
+though B doesn't consume A's value." No `#Seq`; the rebuttal proposed an
+`after:`/`callReady` gate (gate a call on every `.result` ref in its struct, not
+just `args`). Review #2 called it cosmetic *because it rested on the broken arg
+substrate* — which E1 has since fixed, so the gate would now be sound and is
+nearly free under `resolveCallArgs` (also LookupPath+validate an `after:` field).
+
+**Decision: do not build `after:`/`callReady` in v1.** The reasoning is
+**layering, not YAGNI:**
+
+1. **Observe-only never needs it.** Every effect threads the previous one's
+   `.result` (fetch→build→batch→write); data-dependency ordering already
+   sequences the whole chain. There is no "A before B without dataflow" shape in
+   an inventory populator.
+2. **Pure cross-effect ordering is the DAG's job, not the ewe body's.** mu already
+   sequences *actions* by dependency. Two ordered-but-independent effects
+   (`#Converge` then `#Notify`) should be **two mu actions** — the DAG orders them
+   for free, which is the charter ("mu is the executor; ordering is the DAG's
+   job") and the doc's own "dataflow preferred" path. An `after:` field inside one
+   ewe body duplicates a mechanism mu already has and blurs the boundary.
+3. **A body that wants `after:` is a smell** that says "these belong in separate
+   actions." Keeping intra-body ordering purely data-driven yields one clean rule:
+   *one ewe body = one dataflow DAG; ordering across independent effects = mu
+   actions.* Two overlapping ordering mechanisms is the thing to avoid.
+
+**The clean rule, recorded:**
+
+> Inside an ewe body, ordering is **only** via `.result` data dependencies. If you
+> need A before B without B consuming A, split them into two mu DAG actions; the
+> coordinator orders them. ewe never gets a pure-sequencing primitive.
+
+**Revisit trigger:** if the convergence layer (V1) demonstrates a real
+ergonomic need for a tight `converge; notify` sequence inside *one* body (vs. the
+two-action form + `#Output` wiring), reopen E5 then — the gate stays cheap to add
+later. Until a concrete convergence consumer exists, it stays cut.
+
+**Independent check:** this decision was re-derived by a 3-persona `dlktk`
+dialectic (grounded semantics, not assertion) — recorded at
+[../dialectics/e5-pure-ordering.ndjson](../dialectics/e5-pure-ordering.ndjson),
+discussion `vagoh-dativ`. The engine labelled CUT=IN, BUILD=OUT *without* the
+tie-break preference being load-bearing. BUILD fell on two surviving objections:
+DAG already orders independent actions (charter), and no concrete convergence
+consumer exists yet (speculative). `dlktk check` can re-verify it for drift.
+
+## S1 — RESOLVED → [ewe-secrets-spec.md](ewe-secrets-spec.md)
+
+Secret-by-reference (three layers: `{"$secret":name}` → `$secretTemplate`/`#Secretf`
+→ full `auth:` vocab), reveal only in Go sinks, fail-closed `goToCUEExpr` guard as
+backstop. Keystone safety property (CUE rejects struct-into-string interpolation)
+verified empirically. No `pith.Secret` on the ewe path. Egress/exfil is a sandbox
+concern, not a taint concern — boundary recorded. Full design in the spec.
+
+## K1 — RESOLVED (reframed: caching is the wrong tool for observation)
+
+**Findings (M1/MAJOR-1/MIN-3):** every populator sets `impure: true`, and
+`executeAction` skips both cache lookup and store when `a.Impure`
+(`executor.go:222,382`) — so "no ewe populator is ever cached" contradicts
+"cached by input hash." ewe's `Function.Cacheable` is declared but never read.
+`#Now` "seedable for determinism" specifies no mechanism.
+
+**Grounding (verified in mu source):**
+- `observe` is **not new** — a shipping plugin capability (`manager.go:237`,
+  `process.go:290`) + `mu observe` → `Coordinator.Observe` (`coordinator.go:746`).
+- `Coordinator.Observe` is single-pass and **not a DAG action** — it talks to
+  plugins directly, never touches the action cache. Comment `:744`: "Convergence
+  decisions are made downstream (by pudl), not by mu." mu already draws the line.
+- The cache concern is about the **build DAG** (the ewe populator action), not
+  `mu observe`.
+
+**Resolution — `impure` is correct, not a workaround. Caching and observation are
+antithetical:**
+
+1. **Observe reads live state; live state is not in the key.** Caching reuses
+   output for unchanged inputs, but observe's output changes when external reality
+   changes with no input change. The external system is the thing measured, not a
+   cache input. Caching would serve stale reality. `impure: true` is the right and
+   intended setting. **Doc fix:** drop the "cached by input hash" claim for
+   populators wherever it appears — it was wrong.
+2. **Pure-transform granularity follows the DAG.** A populator is impure fetch +
+   pure CUE transform in one body; the transform re-runs each time (cheap). If a
+   transform is ever expensive, split it into its own **pure** action consuming the
+   fetch's output, which caches on that output's content hash. **Deferred: do not
+   build the pure-transform action in v1** — one impure action; split only on
+   demonstrated cost (same YAGNI logic as E5).
+3. **Remove `Function.Cacheable` (ewe repo).** Within one ewe body the multi-pass
+   loop runs each call once (splice-back → literal), so intra-body memoization is
+   already implicit. The field implies a caching layer that doesn't exist and isn't
+   needed; cross-run caching is the *action* cache, not ewe's job. Delete it — it's
+   misleading dead code.
+4. **`#Now` (MIN-3) is moot.** No cache key to seed (impure) → nothing to make
+   deterministic. `#Now` returns wall-clock; re-running re-reads it — correct for
+   "observe live state at time T." No seed mechanism in v1; revisit only if a
+   pure, cacheable ewe action ever needs deterministic time (none in observe-only).
+5. **Currency = freshness, not caching.** Re-observation cadence (every N) keeps a
+   model current — the opposite of caching. That's the orchestration/loop concern
+   (V1), not K1.
+
+**One distinction recorded (kills the confusion):** there *is* a legitimate
+observe-side "stable when unchanged" mechanism, but it is **not** action-input
+caching — it is the README's *observation fixed point*: re-observing unchanged
+reality yields a byte-identical catalog → **pudl catalog content-hash dedup, no
+new version**. That lives downstream in pudl's catalog (skip *versioning*), not in
+the action cache (skip *execution*). Action cache = "don't run it" (wrong for
+observe). Catalog dedup = "ran it, result identical, don't version it" (right for
+observe). Two different mechanisms, two different layers.
+
+**Net:** M1/MAJOR-1/MIN-3 dissolve — no missing caching story to build; caching is
+the wrong tool for observation. Deferred: pure-transform cacheable action (build
+on demonstrated cost). Doc fixes: drop "cached by input hash" for populators;
+remove `Function.Cacheable`.
+
+## I1 — RESOLVED → [ewe-body-kind-spec.md](ewe-body-kind-spec.md)
+
+Populator-as-program: an ewe populator is a normal `.cue` file, content-addressed
+into CAS (the plugin idiom), the action carries an `EweRef` digest. Resolves
+MAJOR-2 (the "recover source from a cue.Value" problem never arises — the program
+is never loaded as config). Per-execute registry closes over sandbox + `reveal`
+(ties to existing `SealedInputs`) + `MU_OUT`; third dispatch arm in
+`executeAction`. `#Output` dropped — cross-action data is a declared `input`
+(content digest + implicit `DependsOn`, `resolve.go:24-55`) read via `#ReadFile`.
+actionkey adds one stanza hashing the program *digest* (honors K1). Inline
+struct/string, AST-in-memory, and populate-as-phase all rejected with reasons.
+All integration points grounded in current mu source.
+
+## I2 — RESOLVED → [ewe-http-pagination-spec.md](ewe-http-pagination-spec.md)
+
+`#HttpAll` paging is greenfield Go (mu has only single-request `http/request`
+today). Fixed strategy enum — `none`/`page`/`link`/`cursor` — discriminated by
+`style`, parameterized by where signals live (not a DSL). `maxPages` enforced
+default 1000 (hard backstop on unbounded live-HTTP spend; errors on hit).
+Fail-loud on mid-pagination error (one logical fetch ≠ batch's per-item envelope,
+E4). Build all four in v1 (GitHub needs link/cursor day one); `total-count`
+deferred. Tied into the secrets-spec sink suite (`auth:`/`resolveSecrets` per page).
+
+## P1 — RESOLVED (dissolved: the bridge already exists)
+
+**Finding (M4):** `pithdriver/register.go` registers catalog/fact/schema/drift —
+**no datalog driver word**; `#DatalogQuery` must be wired fresh to
+`datalog.Evaluate`/`pkg/factstore`, and rule-file loading is unwired. Presented as
+the one lake primitive that doesn't exist.
+
+**Grounding (pudl source, 2026-06-20):** M4 measured the wrong seam.
+- `pudl query` **already evaluates datalog directly** — `datalog.LoadRulesFromPaths`
+  (`cmd/query.go:103`, the "unwired" rule loading) + `datalog.Evaluate`
+  (`cmd/query.go:119`) — **bypassing the pith driver layer entirely**.
+- A clean library API sits above it: `pkg/eval.LoadRulesFromPaths`,
+  `pkg/factstore.Store.Query(QueryOptions)` (`factstore.go:111`).
+
+So the engine is directly callable and already called; the orchestrator never
+goes through the driver layer.
+
+**Resolution:**
+1. **Checks in `pudl run` = direct engine call**, reusing the exact path
+   `pudl query` ships (`pkg/factstore.Query` / `datalog.Evaluate` + severity). No
+   new engine, no new bridge — lift the existing call. The only datalog wiring
+   observe-only v1 needs.
+2. **No datalog *pith driver word*.** M4's "add the missing driver to match the
+   other four" is backwards — pith is deprecating (V3); don't extend the dying
+   layer. The orchestrator calls the package directly.
+3. **`#DatalogQuery` *ewe function*: defer.** Its only named consumer was
+   "evaluate a `#Check` from inside a model build" — but check evaluation moved to
+   `pudl run` (orchestrator), not the populator body. A populator *writes* the
+   catalog; it does not *query relations mid-fetch*. No observe-only consumer →
+   defer (YAGNI); add only if in-populate enrichment proves real.
+4. **The whole Tier-2 lake ewe vocabulary (`#CatalogQuery`/`#FactQuery`/`#Schema*`/
+   `#Drift`/`#DatalogQuery`): defer.** Bigger cut than the review implied, made
+   explicitly. The populate→catalog path is **ewe writes JSON (`#WriteFile`) →
+   action output → `pudl run` ingests** (the `_schema` tag routes records). The
+   populator never calls a catalog ewe function, so Tier-2 has no v1 consumer.
+
+**Net:** P1 needs no new datalog machinery — `pudl run` reuses the direct call
+`pudl query` already ships; pith stays untouched; the ewe-side lake functions are
+deferred for lack of an observe-only consumer. **Carries into V1:** the catalog
+*ingest* step in `pudl run` (read populator JSON output → catalog records) is
+`pudl run` orchestration plumbing — specced under V1, not here.
+
+## P2 — RESOLVED (cut: inline `#Plugin` and the `#Plugin` ewe function both unbuilt)
+
+**Finding (M3):** plugins start only at coordinator boundaries
+(`manager.go:131` — `Manager.Start` batch-spawns, queried via `mgr.Plan`/
+`mgr.Observe`), never from inside an action body. Inline `#Plugin` (a plugin
+subprocess mid-ewe-execute) is entirely new machinery — subprocess lifecycle,
+sandbox ownership, NDJSON from inside a sandboxed action. Bite: 4 of 5 examples use
+the inline form despite the doc recommending dataflow.
+
+**Grounding (mu source, 2026-06-20):** there is no path to spawn a single plugin
+from inside a sandboxed action. A sandboxed action spawning subprocesses is
+sandbox-escape-shaped — it cuts against the boundary that keeps the privileged
+surface auditable.
+
+**Structural fact:** `#SystemModel.populate` is already typed
+`#EweTarget | #PluginObserve` — two disjoint paths that converge on the same
+ingest, neither of which is inline `#Plugin`:
+- **`#EweTarget`** (GitLab): ewe body fetches via ewe *sinks* (`#Http`/`#HttpAll`)
+  → writes JSON → action output → `pudl run` ingests. No plugins.
+- **`#PluginObserve`** (Proxmox): reuse an existing observer = the **existing
+  observe phase** (`Coordinator.Observe` → `ObserveResult`, `coordinator.go:746`)
+  → `pudl run` ingests. Not an ewe function — `mu observe` on a plugin target.
+
+Both end at "`pudl run` ingests structured records" (consistent with P1).
+
+**Resolution:**
+1. **Inline `#Plugin` (subprocess mid-execute): do NOT build.** New machinery
+   against the sandbox boundary; no v1 consumer the two populate kinds don't serve.
+2. **Plugin-populate = `#PluginObserve` kind** = existing observe phase + ingest.
+   A populate *kind*, not an `op.#Plugin` call.
+3. **The `#Plugin` ewe function — even the dataflow form — defer.** Only needed to
+   *mix* ewe-fetch + plugin-call in one body; no v1 consumer (populate is ewe OR
+   plugin-observe, never both in one body). Cross-source enrichment (e.g. GitLab
+   repos + Proxmox VMs in one model) is a **join across two catalogs = pudl Datalog
+   relations**, not an in-body plugin call — reinforces the cut. Same YAGNI as the
+   Tier-2 lake functions (P1).
+4. **DOC TASK — fix examples.md:** rewrite the Proxmox (and other inline-`#Plugin`)
+   examples as `populate: #PluginObserve & {…}`, not
+   `op.#Plugin & {args:[{op:"observe"}]}`. The examples must *show* the dataflow
+   path, not contradict the recommendation. (Flagged, not done here.)
+
+**Net:** M3's "new machinery" never needs building — inline `#Plugin` and the
+`#Plugin` ewe function are both cut from v1. The plugin-populate path is
+`#PluginObserve` (existing observe phase + ingest); cross-source joins are pudl
+relations. Only real work: the examples rewrite.
+
+## V3 — RESOLVED (decided: defer pith deletion until ewe observation ships)
+
+**Finding (m4):** "Delete pith" is premature — given the (now-resolved) engine
+findings, pith is the only thing that works today; sequencing deletion behind "ewe
+proves out" must not be treated as a formality.
+
+**Decision:** keep pith running until **observation via ewe is shipped end-to-end**
+(the observe-only v1 gate: arg-resolution engine + sink suite + `ewe` body kind +
+a real populator evaluating against live APIs). Only then revisit deletion. The
+taint-type extraction (arg-resolution spec) proceeds regardless — it is worth
+saving independently — but `pudl exec` removal and the pith VM deletion wait behind
+a working ewe observe spike. The execute-time-cost (CUE-free IR) question remains
+the only thing that could grant pith a permanent reprieve; unmeasured, so deletion
+stays the default *after* the spike, not before.
+
+## V2 — RESOLVED (scoped to the observe-only boundary)
+
+**Finding (m1):** the `pudl run`→`mu build` shell-out precedent
+(`pudl/cmd/memory.go`) has one-line error handling — exit-code propagation only, no
+partial-failure, no per-target status. A convergence loop needs far more.
+
+**Grounding (2026-06-20):** mu *already* emits structured output — `mu build
+--json` (`mu/cmd/mu/build.go:230`) over `BuildResult` carrying `ExecResult
+*dag.ExecuteResult` (per-action detail, `coordinator.go:66`). The memory-cycle
+precedent simply doesn't consume it (wires stdout/stderr to the terminal, reads
+only `c.Run()`'s exit code). So richer status is available, not blocked.
+
+**Resolution — scope `pudl run` error handling to observe-only; expand as
+uncovered:**
+1. **Three distinct per-model outcomes** (the core distinction): **failed-to-run**
+   (populate/ingest errored) vs **ran-with-findings** (a `fail`-severity `#Check`
+   flagged something — this is *success*, the run completed; flagging is the point)
+   vs **ran-clean**. Never conflate "a check found a problem" with "the run failed."
+2. **Per-model isolation:** models are independent; one model's populate failure
+   does not abort the others. Aggregate a per-model status table — this is m1's
+   "per-target status," cheap because each model is its own `mu build` invocation.
+3. **Consume `mu build --json`**, not just exit codes — parse `BuildResult`/
+   `ExecResult` so the report names the failing action, not just "build failed."
+   Available today, no mu change; strictly better than the precedent.
+4. **No rollback in v1** — observation has nothing to undo (reads external state;
+   writes immutable, content-versioned catalog records). Rollback is a convergence
+   concern; out of scope here and not raised. One line, deliberately.
+
+Error handling beyond this (convergence-loop failures, "drift didn't shrink"
+reporting) is uncovered as we build, and defers with V1.
