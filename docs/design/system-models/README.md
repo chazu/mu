@@ -8,9 +8,9 @@
 > [ewe-secrets-spec.md](ewe-secrets-spec.md),
 > [ewe-body-kind-spec.md](ewe-body-kind-spec.md),
 > [ewe-http-pagination-spec.md](ewe-http-pagination-spec.md)). The **convergence**
-> half (`desired`/`converge`, fixed points, ACUTE) is still open (ledger V1) — those
-> sections below are unreconciled and will change. Inline annotations flag the
-> spots this doc has been overtaken; the ledger is the source of truth.
+> half (`desired`/`converge`, fixed points, ACUTE) is **design-resolved** (ledger
+> V1.1–V1.4, V1.6; V1.5 rollback cut) and the sections below are reconciled to it.
+> The ledger remains the source of truth for the detailed V1 decisions.
 
 ## Motivation
 
@@ -101,8 +101,10 @@ the ewe populator.
 
     // CONVERGE — close drift between desired and observed (ACUTE Transform +
     //   Execute). Typically `pudl export-actions` → `mu build`. Only meaningful
-    //   alongside `desired`.
-    converge?: #EweTarget | #PluginPlan
+    //   alongside `desired`. V1: `#PluginPlan` only (all consumers use it; the
+    //   shipped export-actions path serves it). ewe-converge (`#EweTarget`
+    //   mutate) deferred — no consumer; ewe stays first-class for `populate`.
+    converge?: #PluginPlan   // V1; future: #EweTarget | #PluginPlan
 
     // FRESHNESS — how the model stays current (mu observe + drift cadence).
     freshness?: #Freshness
@@ -507,16 +509,27 @@ populate (Accumulate) → checks/drift (Unify) → freshness re-observe → popu
    └── converges to the OBSERVATION fixed point: catalog stable, checks evaluated.
 ```
 
-**Convergence** (`desired` + `converge` present — a known target state):
+**Convergence** (`desired` + `converge` present *and* `pudl run --converge`):
 
 ```
-populate (Accumulate) → drift vs desired (Unify) → converge (Transform+Execute) → populate …
+populate (Accumulate) → drift vs desired (Unify) → converge (Transform+Execute) → re-populate …
    └── converges to the CONVERGENCE fixed point: observed == desired, drift = ∅.
 ```
 
 `converge` is the natural home for the existing `pudl export-actions → mu build`
 path — the BRICK loop already does this; the model just bundles it. The fixed
 point is not bolted on: it is precisely what `pudl run`'s iteration settles into.
+
+**Mutation is opt-in, even for a convergence-capable model.** Declaring `desired`
++ `converge` makes a model *able* to converge; it does not make a bare `pudl run`
+mutate. Convergence (the only place the system touches production) fires **only**
+under `pudl run --converge`. Without the flag, a convergence model behaves
+observe-only — drift is flagged, never closed. The full CLI contract,
+termination (drift==∅ + a hard max-iter cap), and failure semantics (`converged`
+/ `failed`, the mandatory partial-state warning) are settled in the
+[issue ledger](issue-ledger.md)'s V1 section. Loop termination's monotonic-guard
+question was argued out in
+[`dialectics/v1-2-loop-termination.ndjson`](../dialectics/v1-2-loop-termination.ndjson).
 
 ### Design intent
 

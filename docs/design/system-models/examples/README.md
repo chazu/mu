@@ -38,10 +38,12 @@ v1 is **observe-only**. So in each example:
 
 - **Real in v1:** `populate` (ewe program or `#PluginObserve`) → ingest → `relations`
   / `checks` (observe + flag) → report.
-- **Deferred (ledger V1):** `desired` + `converge` and the reconcile *loop*. Where
-  an example converges (1, 3, 4) the converge arm is shown but flagged
-  `# V1-OPEN`. One-shot drift-vs-`desired` *flagging* is feasible today (`pudl
-  drift check`); the iterate-to-fixed-point loop is not.
+- **V1 (design-resolved, not yet built):** `desired` + `converge` and the reconcile
+  *loop*. Where an example converges (1, 3, 4) the converge arm is flagged
+  `# V1-OPEN` — the design is settled (ledger V1; `pudl run --converge`, drift==∅
+  + max-iter cap, `#PluginPlan` converge path), the code is pending. One-shot
+  drift-vs-`desired` *flagging* is feasible today (`pudl drift check`); the
+  iterate-to-fixed-point loop is the V1 build.
 
 ## Layout
 

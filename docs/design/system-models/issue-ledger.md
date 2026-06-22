@@ -62,13 +62,13 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 
 | ID | Folds in | Issue | Status |
 |----|----------|-------|--------|
-| V1 | M2 | No reconcile loop exists; convergence half unimplemented end-to-end — **expanded into V1.1–V1.6 below** | ⬜ open (scoping done) |
+| V1 | M2 | No reconcile loop exists; convergence half unimplemented end-to-end — **expanded into V1.1–V1.6 below** | ✅ **design resolved** (V1.1–V1.4, V1.6 resolved; V1.5 cut) — ready to build |
 | V1.1 | M2 | **The loop** — re-observe → drift → transform → execute → repeat, in `pudl run` | ⬜ (loop-owner fork resolved: **pudl-driven**, extends observe-only) |
 | V1.2 | M2 | **Termination / fixed-point** — stop at drift = ∅ + guard (max iters; drift must monotonically shrink) | ✅ **resolved** — drift==∅ fixed point + hard cap; **monotonic guard DEFERRED** (dialectic: [`v1-2-loop-termination.ndjson`](../dialectics/v1-2-loop-termination.ndjson)) |
 | V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ✅ **resolved** — explicit opt-in via `--converge`; no severity magic |
-| V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ⬜ |
+| V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ✅ **resolved** — reuse `failed` status; 2 modes (`cap_exhausted`/`execute_error`); mandatory partial-state warning |
 | V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ❌ **CUT** — out of scope (owner decision, V1 session) |
-| V1.6 | — | **`converge` field paths** — `#PluginPlan` (≈ exists via `export-actions`) + the ewe-converge path (`#EweTarget` emitting actions) | ⬜ |
+| V1.6 | — | **`converge` field paths** — `#PluginPlan` (≈ exists via `export-actions`) + the ewe-converge path (`#EweTarget` emitting actions) | ✅ **resolved** — V1 converge = `#PluginPlan` only; ewe-**converge** deferred. ewe-**populate** (pull) kept, untouched |
 | V2 | m1 | `pudl run` error handling / per-target status / partial-failure | ✅ scoped to observe (below) |
 | V3 | m4 | "Delete pith" premature — sequence behind a working observe-only spike | ✅ defer deletion (below) |
 
@@ -614,6 +614,60 @@ saving iterations no consumer needs. Even after steelmanning the guard (set-iden
 metric to kill the ambiguity objection; future-consumer "insurance" defense), CAP
 re-won once the cap-subsumes-insurance counter landed. **Basis on record:** YAGNI +
 cap-as-halting-guarantee.
+
+## Decided (V1 session) — V1.4 failure reporting
+
+Surface convergence failure **distinctly from drift**. The status enum already
+carries the vocabulary, so no new statuses:
+
+- `drifted` = world ≠ desired, **untouched** (observe signal).
+- `converging` = mid-loop (export-actions ran).
+- `converged` = loop reached drift==∅ (V1.2).
+- `failed` = loop ran, couldn't converge (V1.4).
+
+**Two failure modes, both → `failed` + reason:**
+1. `cap_exhausted` — hit `--max-iters`, residual drift ≠ ∅.
+2. `execute_error` — `mu build` returned nonzero during a converge iteration.
+
+**Mandatory partial-state warning.** On `execute_error`, rollback being cut
+(V1.5), the loop **stops, marks `failed`, leaves the half-applied state**. The
+report **MUST** state the live system may be in a partial state with no rollback.
+This is non-negotiable — it is the honesty the cut-rollback decision demands;
+silent partial-apply would be the real failure.
+
+**Report carries:** mode, iteration count, residual drift set, and (for
+`execute_error`) the failing action + the partial-state warning. V1.4 is the
+**convergence analog of V2** (per-target status / partial-failure, scoped to
+observe-only) — same machinery, extended to the loop.
+
+## Decided (V1 session) — V1.6 converge field paths
+
+**Two ewe directions, do not conflate:**
+
+| arm | direction | consumer | V1 status |
+|-----|-----------|----------|-----------|
+| **populate** | PULL state in (observe) | GitLab fetch (ex. with `#EweTarget`) | **must-have, KEPT** — `#EweTarget \| #PluginObserve`, observe-only, already specced. Not part of V1.6. |
+| **converge** | PUSH / mutate out | none use ewe; all 5 use `#PluginPlan` | V1 = **`#PluginPlan` only** |
+
+**V1 converge = `#PluginPlan` only.** Schema narrows for V1:
+```
+converge?: #PluginPlan          // V1
+// converge?: #EweTarget | #PluginPlan   // when an ewe-converge consumer appears
+```
+Path is mostly shipped: `drift → ExportMuConfig (export.go:80) → MuConfig{Targets}
+(toolchain-mapped) → mu.json → mu build`. `pudl export-actions` *is* this path;
+`ActionSpec`/`MuConfig` already match mu's plugin protocol (export.go:141).
+
+**V1.6 actual work (small):**
+1. Write the `#PluginPlan` CUE def (plugin name + input) — README sketch only today.
+2. Wire the model's `converge` arm → the export-actions invocation in the V1.1
+   loop's Transform step (today export-actions runs standalone on drift reports).
+3. Drop `#EweTarget` from the **converge** union for V1 (keep it in **populate**).
+
+**ewe-converge (mutate via ewe): DEFERRED** — zero consumers (YAGNI / default-to-cut,
+cf. E5, Tier-2, `#Plugin`). Revisit-trigger: first model needing custom mutation
+logic a plugin `apply` op can't express. **ewe-populate is unaffected** — pulling
+external state (GitLab) stays a first-class, must-have V1 path.
 
 ## Rough size (approximation, not commitment)
 
