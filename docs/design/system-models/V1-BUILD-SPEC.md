@@ -6,12 +6,12 @@
 > see the [Document map](#document-map) at the bottom. Where a decision needs its
 > *why*, this doc links to the rationale; the link is optional reading.
 
-**Status:** orchestration/policy design resolved (V1.1–V1.4, V1.6; V1.5 cut). The
-**apply path** (translating desired-state drift into imperative actions a mutation
-plugin accepts) is **identified but not yet designed** — see
-[§10 Open / not-yet-designed](#10-open--not-yet-designed). Not built. Decision
+**Status:** design resolved (V1.1–V1.4, V1.6; V1.5 cut), including the **apply
+path** (§5.5 — plugin-owned translation, desired routed as generated sources). Not
+built. Remaining *open* items are build-time, not design: the ewe-populate path and
+some missing plugins ([§10](#10-open--build-time-prerequisites)). Decision
 rationale: [`issue-ledger.md`](issue-ledger.md) V1 section. Scope was corrected by
-an adversarial source-grounded review (2026-06-21) — see §10.
+an adversarial source-grounded review (2026-06-21).
 
 ---
 
@@ -29,11 +29,11 @@ Convergence is the ACUTE loop: **A**ccumulate (observe) → **C**onfigure → **
 - **Ships:** the *observe* substrate (drift check, catalog, status enum) and the
   *orchestration scaffold* (pudl shells `mu build`; `mu build --emit-manifest |
   pudl mu ingest-manifest` records execution results). See [§9 Grounding](#9-grounding--what-ships-vs-what-is-new).
-- **New:** the loop itself; the **apply translation** (desired-state →
-  per-toolchain imperative actions) — this is *not* a wiring task, the current
-  `export-actions` path emits desired-state targets for observe/BRICK cases, not
-  apply directives for arbitrary mutation plugins; a one-line status-semantics fix
-  to `ingest-manifest`; and (prerequisite) the observe-only `pudl run` + the
+- **New:** the loop itself; the **apply path** — pudl routes `desired` to the
+  plugin as generated sources and lets the plugin's `Plan` reconcile (§5.5); the
+  translation logic lives in the *plugin*, not pudl, so pudl's new code is bounded
+  (arm→Target + desired→sources); a one-line status-semantics fix to
+  `ingest-manifest` (§5); and (prerequisite) the observe-only `pudl run` + the
   ewe-populate path, which is specced but unbuilt.
 
 ---
@@ -114,7 +114,7 @@ loop:
   drift                        # Unify: drift.Check vs desired, over the instance's definitions
   if drift == ∅:   → (drift writes "converged"), break        # fixed-point test at TOP
   if iters >= cap: → loop writes "failed" (cap_exhausted), break   # safety stop
-  converge:  translate drift+`converge` arm → MuConfig         # Transform (apply translation, §10)
+  converge:  arm → Target{plugin,input}; desired → sources     # Transform (apply path, §5.5)
   execute:   mu build --emit-manifest | pudl mu ingest-manifest # Execute + record
              # ingest records per-action entries and returns a Failed count
   if ingest Failed > 0: → loop writes "failed" (execute_error), break  # see §6 partial state
@@ -172,32 +172,79 @@ Healthy 1-iteration timeline:
 
 ---
 
+## 5.5 The apply path — who translates desired-state into actions
+
+**The plugin does. pudl stays domain-agnostic.** (Decided V1 session; grounded in
+three real plugin behaviours.)
+
+The mu plugin `Plan` op *is* the translation point:
+`Plan(PlanRequest{Target{Config, Sources}}) → Actions` (`mu/sdk/muplugin/plugin.go:33`,
+`types.go:284`). The plugin turns its inputs into concrete actions. Domain knowledge
+(apt, kubectl, the DNS API) lives in the plugin/tool, **never in pudl** — this is
+the charter ("pudl doesn't execute; mu does"). The working exemplar: the **k8s**
+plugin reads desired manifests from `Sources` and runs `kubectl apply
+--server-side` (+`prune`), so **kubectl computes desired-vs-actual itself**
+(`mu/plugins/k8s/plugin.bb:48,125`).
+
+**pudl's bounded contract (the net-new code):**
+1. `#PluginPlan{plugin, input}` arm → `MuConfig.Target{Toolchain: plugin, Config: input}`.
+2. **Route `desired` to the plugin as a generated sources file.** pudl renders the
+   instance's `desired` definitions (filtered by `--only`) to a file (yaml/json) and
+   sets `Target.Sources`. This matches how k8s already consumes input
+   (`consumes: ["source:yaml","source:json"]`, `plugin.bb:48`). The plugin reads
+   the file and reconciles.
+3. The plugin's `Plan` emits actions; `mu build` executes; the loop's drift
+   re-check confirms the fixed point.
+
+**Division of labour:** pudl detects *whether* converged (drift==∅, domain-agnostic
+set-compare on the catalog — the loop's termination sensor); the plugin computes
+*how* to converge (domain-specific reconciliation). pudl never computes apt/DNS ops.
+
+**Consequence — convergence needs *declarative-apply* plugins.** A plugin must
+consume desired-state sources and reconcile (k8s/kubectl-style). An *imperative*
+plugin like `remote-exec` (which requires a literal `config.command`,
+`mu/plugins/remote-exec/main.go:71`) is **not** a convergence plugin as written —
+it cannot turn `desired:[{Package:podman}]` into `apt install podman`. Example 1's
+`converge: remote-exec` is therefore mis-specced; it needs a *declarative host*
+plugin (build-time, §10). **V1's end-to-end convergence proof targets `k8s`** — the
+one shipping declarative-apply plugin.
+
+**`desired` must be authored in the plugin's schema.** Since pudl serializes
+`desired` verbatim to sources, the model author's `desired` entries must already be
+shaped as the plugin expects (k8s manifests for the k8s plugin). pudl does the
+CUE→yaml/json serialization; it does not transform schemas.
+
+---
+
 ## 6. Build units
 
-Build order: prerequisite (§2/§9) → V1.6 apply translation (§10 — design it first)
-→ V1.1 (loop) → V1.2 (termination) → V1.4 (failure reporting). V1.3 is satisfied by
-the V1.1 flag work. The `ingest-manifest` status fix (§5) lands with V1.1.
+Build order: prerequisite (§2/§9) → V1.6 apply path (§5.5 — arm→Target, desired→
+sources) → V1.1 (loop) → V1.2 (termination) → V1.4 (failure reporting). V1.3 is
+satisfied by the V1.1 flag work. The `ingest-manifest` status fix (§5) lands with
+V1.1.
 
 ### V1.6 — `converge` field path (`#PluginPlan` only)
-**Build:**
+**Build** (the apply-path contract is designed — §5.5):
 1. Write the `#PluginPlan` CUE def (`plugin: string`, `input: {...}`). Today it's
    a README sketch only (`grep '#PluginPlan:'` over mu+pudl `.cue` → zero).
-2. **The apply translation** — read the model's `converge: #PluginPlan{plugin,
-   input}` arm + the drift diff, and produce a `MuConfig` whose target the named
-   plugin will accept. **This is net-new** — see [§10](#10-open--not-yet-designed).
-   No Go code reads a `converge` field today, and the existing `export-actions`
-   path emits desired-state keys, not apply directives.
-3. Schema for V1: `converge?: #PluginPlan` (narrowed from
+2. **Arm → Target:** `converge: #PluginPlan{plugin, input}` →
+   `MuConfig.Target{Toolchain: plugin, Config: input}`. No Go reads a `converge`
+   field today; this is new but bounded.
+3. **desired → sources:** render the instance's `desired` (filtered by `--only`) to
+   a generated yaml/json file, set `Target.Sources`. The plugin's `Plan` reconciles
+   (§5.5). pudl computes no domain ops.
+4. Schema for V1: `converge?: #PluginPlan` (narrowed from
    `#EweTarget | #PluginPlan`).
 
-**Decisions baked in:** all 5 worked examples use `#PluginPlan`. **ewe-converge
-(`#EweTarget` mutate) is deferred** — zero consumers. **ewe-*populate* is a
-separate, must-have path** (pull state, e.g. GitLab) — unaffected by this cut, but
-**unbuilt** (see §9/§10), not "already shipping."
+**Decisions baked in:** apply-translation lives in the **plugin**, not pudl (§5.5);
+all 5 worked examples use `#PluginPlan`; convergence requires a **declarative-apply**
+plugin (k8s is the V1 proof; remote-exec/DNS need new plugins, §10). **ewe-converge
+(`#EweTarget` mutate) is deferred** — zero consumers. **ewe-*populate*** (pull state,
+e.g. GitLab) is a separate must-have path — **unbuilt** (§9/§10), not shipping.
 
-**Done when:** an instance with a `converge: #PluginPlan` arm produces a `MuConfig`
-that the named plugin executes to actually close drift (verified by a subsequent
-drift==∅), for at least one real plugin.
+**Done when:** a `k8s` instance with a `converge: #PluginPlan` arm has its `desired`
+rendered to sources, the plugin reconciles via `mu build`, and a subsequent drift
+check reports ∅.
 
 ### V1.1 — the loop in `pudl run`
 **Build:** resolve `//models/<model>` to an instance; enumerate its definitions;
@@ -307,41 +354,35 @@ Verified against source (mu/pudl/ewe, 2026-06-21).
 | Piece | Why it's new |
 |-------|--------------|
 | `pudl run` / `cmd/run.go` | does not exist (`ls cmd/run.go` → absent). Observe-only `pudl run` is itself the prerequisite. |
-| **apply translation** (desired-state → imperative plugin actions) | the riskiest piece — see §10. The shipped `export-actions` emits `Target.Config = DeclaredKeys` (desired state); plugins like `remote-exec` need imperative `config.command`/`config.host` (`mu/plugins/remote-exec/main.go:66-71`). Shapes don't match. |
+| **apply path** (arm→Target, desired→sources) | design resolved (§5.5): pudl routes `desired` to the plugin as generated sources; the **plugin** reconciles (k8s/kubectl exemplar). pudl computes no domain ops. Net-new pudl code is bounded; requires a declarative-apply plugin. |
 | `#PluginPlan` CUE def + arm reader | sketch only; no Go reads a `converge` field |
 | `ingest-manifest` status narrowing | the §5 one-liner |
 | **ewe-populate** (auth'd HTTP fetch → catalog) | ewe has **zero** HTTP code, zero `EweTarget`/`HttpAll`/`auth.bearer`, zero `.cue` files (verified in ewe). It is *specced* (`ewe-*-spec.md`) but unbuilt. |
 
 ---
 
-## 10. Open / not-yet-designed
+## 10. Open — build-time prerequisites
 
 Surfaced by the 2026-06-21 adversarial review (grounded in mu/pudl/ewe source).
-These are **real design gaps**, not wiring. They must be designed before or during
-the build; the orchestration decisions above assume them solved.
+The **apply-path design gap it flagged is now resolved** (§5.5 — plugin-owned
+translation, desired→sources). What remains is **build-time work, not design**:
 
-1. **Apply translation (the core gap).** Convergence needs to turn a drift *diff*
-   plus a `#PluginPlan` arm into imperative actions a mutation plugin accepts. The
-   existing `export-actions` path produces *desired-state* `MuConfig` targets for
-   observe/BRICK cases, and plugins' config vocabularies differ
-   (`remote-exec` wants `command`/`host`, `mu/plugins/remote-exec/main.go:66-71`;
-   `k8s` reads a manifest from `sources`, `mu/plugins/k8s/plugin.bb:48,125`). No
-   code computes apply directives from a diff. **This is the riskiest unsolved
-   piece; design it first (it is the real content of V1.6 step 2).**
+1. **ewe-populate path.** Pull external state (the GitLab/DNS cases) is a must-have
+   observe path but is unbuilt in ewe (no HTTP/auth/fetch; zero `EweTarget`/
+   `HttpAll`/`auth.bearer`). It is a **prerequisite** for the convergence examples
+   that fetch over HTTP, and belongs to the observe-only milestone (§2/§9). The
+   `ewe-*-spec.md` files are its design.
 
-2. **ewe-populate path.** Pull external state (the GitLab/DNS cases) is a must-have
-   observe path but is unbuilt in ewe (no HTTP/auth/fetch). It is a **prerequisite**
-   for the convergence examples, and belongs to the observe-only milestone (§2/§9).
-   The `ewe-*-spec.md` files are its design.
-
-3. **Missing example plugins.** Of the example converge plugins only `remote-exec`
-   ships; `cloudflare-dns` (example 4) does **not** exist in `mu/plugins/`, and DNS
-   set-difference apply (compute POST/PUT/DELETE from a diff) is unbuilt. Treat the
-   examples as *target consumers*, not executable-today proofs.
+2. **Missing / wrong-shape plugins for the examples.** Convergence needs
+   *declarative-apply* plugins (§5.5). Today only **`k8s`** qualifies (and is the V1
+   proof). `cloudflare-dns` (example 4) does **not** exist in `mu/plugins/`;
+   `remote-exec` (example 1) is *imperative* and cannot consume declarative desired,
+   so example 1 needs a new **declarative host** plugin. Treat the non-k8s examples
+   as *target consumers*, not executable-today proofs.
 
 Review artifact: the full findings (F1–F8, each with `file:line` evidence) are
-summarized in the commit that introduced this section; re-run the review after the
-apply-translation design lands.
+summarized in the commit history (search "adversarial review"). Re-run the review
+after the build lands.
 
 ---
 
@@ -349,16 +390,17 @@ apply-translation design lands.
 
 The convergence instances V1 must serve (under [`examples/`](examples/)):
 
-| # | Model | converge arm | plugin ships? |
-|---|-------|--------------|---------------|
-| 1 | [Remote server](examples/01-remote-server/) | `#PluginPlan` (`remote-exec`) | ✅ `remote-exec` |
-| 3 | [TLS certs](examples/03-tls-certs/) | `#PluginPlan` | ⚠️ verify plugin |
-| 4 | [DNS zone](examples/04-dns-zone/) | `#PluginPlan` (`cloudflare-dns`, textbook set-difference) | ❌ no `cloudflare-dns` plugin (§10) |
-| 2 | [k8s policy](examples/02-k8s-policy/) | optional `#PluginPlan` upgrade (`k8s`) | ✅ `k8s` (apply shape: §10) |
-| 5 | [repo governance](examples/05-repo-governance/) | optional `#PluginPlan` upgrade (`gitlab`) | ⚠️ verify plugin |
+| # | Model | converge arm | V1 status |
+|---|-------|--------------|-----------|
+| 2 | [k8s policy](examples/02-k8s-policy/) | `#PluginPlan` (`k8s`) | ✅ **V1 convergence proof** — declarative-apply plugin ships; desired→sources, kubectl reconciles |
+| 1 | [Remote server](examples/01-remote-server/) | `#PluginPlan` (`remote-exec`) | ❌ remote-exec is imperative — needs a new **declarative host** plugin (§10) |
+| 4 | [DNS zone](examples/04-dns-zone/) | `#PluginPlan` (`cloudflare-dns`) | ❌ no `cloudflare-dns` plugin (§10) |
+| 3 | [TLS certs](examples/03-tls-certs/) | `#PluginPlan` | ⚠️ verify a declarative plugin exists |
+| 5 | [repo governance](examples/05-repo-governance/) | optional `#PluginPlan` (`gitlab`) | ⚠️ verify a declarative plugin exists |
 
-All converge arms are flagged `# V1-OPEN` in their `model.cue` — orchestration
-design resolved, apply-translation + some plugins pending. None use ewe-converge.
+All converge arms are flagged `# V1-OPEN` in their `model.cue` — design resolved
+(orchestration + apply path); some plugins are build-time pending (§10). None use
+ewe-converge. **k8s is the end-to-end proof; the rest are target consumers.**
 
 ---
 

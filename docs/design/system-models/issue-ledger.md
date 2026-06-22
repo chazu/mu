@@ -68,7 +68,7 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 | V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ✅ **resolved** — explicit opt-in via `--converge`; no severity magic |
 | V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ✅ **resolved** — reuse `failed` status; 2 modes (`cap_exhausted`/`execute_error`); mandatory partial-state warning |
 | V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ❌ **CUT** — out of scope (owner decision, V1 session) |
-| V1.6 | — | **`converge` field paths** — `#PluginPlan` + the ewe-converge path (`#EweTarget`) | ⚠️ **partly resolved** — V1 converge = `#PluginPlan` only; ewe-converge deferred. BUT **apply translation is net-new, not yet designed** (review F2/F3); ewe-populate specced-not-built (F4). See build-spec §10 |
+| V1.6 | — | **`converge` field paths** — `#PluginPlan` + the ewe-converge path (`#EweTarget`) | ✅ **resolved** — `#PluginPlan` only; apply-translation lives in the **plugin** (pudl routes desired→sources); ewe-converge deferred. Remaining = build-time (ewe-populate, plugins). See build-spec §5.5/§10 |
 | V2 | m1 | `pudl run` error handling / per-target status / partial-failure | ✅ scoped to observe (below) |
 | V3 | m4 | "Delete pith" premature — sequence behind a working observe-only spike | ✅ defer deletion (below) |
 
@@ -668,6 +668,33 @@ Path is mostly shipped: `drift → ExportMuConfig (export.go:80) → MuConfig{Ta
 cf. E5, Tier-2, `#Plugin`). Revisit-trigger: first model needing custom mutation
 logic a plugin `apply` op can't express. **ewe-populate is unaffected** — pulling
 external state (GitLab) stays a first-class, must-have V1 path.
+
+## Decided (V1 session) — the apply path (resolves review F2/F3)
+
+**Apply-translation lives in the plugin, not pudl.** The mu plugin `Plan` op
+(`mu/sdk/muplugin/plugin.go:33`) is the translation point: `Plan(Target{Config,
+Sources}) → Actions`. Domain knowledge (apt, kubectl, DNS API) lives in the
+plugin/tool — never in pudl (charter: "pudl doesn't execute"). Exemplar: the **k8s**
+plugin reads desired manifests from `Sources` and runs `kubectl apply --server-side`
+(+`prune`) — kubectl computes desired-vs-actual itself (`mu/plugins/k8s/plugin.bb:48,125`).
+
+**pudl's bounded contract:** (1) `#PluginPlan{plugin,input}` → `Target{Toolchain:
+plugin, Config: input}`; (2) render the instance's `desired` (filtered by `--only`)
+to a **generated sources file** (yaml/json), set `Target.Sources` — matching k8s's
+`consumes:[source:yaml,source:json]`; (3) plugin `Plan` reconciles → `mu build`
+executes → drift re-check confirms. **Drift = the loop's termination sensor**
+(domain-agnostic), not the apply computer.
+
+**Consequences:**
+- Convergence requires **declarative-apply** plugins. `remote-exec` is imperative
+  (needs literal `config.command`, `remote-exec/main.go:71`) → **not** a convergence
+  plugin; example 1 needs a new declarative host plugin (build-time).
+- **`k8s` is the V1 end-to-end convergence proof** (only shipping declarative plugin).
+- The model author's `desired` must be authored in the plugin's schema (pudl
+  serializes verbatim CUE→yaml/json; it does not transform schemas).
+
+Rationale chain that forced "plugin owns it": pudl computing domain ops violates the
+charter; author-writes-CUE doesn't scale. Full reasoning in build-spec §5.5.
 
 ## Rough size (approximation, not commitment)
 
