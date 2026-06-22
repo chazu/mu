@@ -355,7 +355,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		// for intra-target wiring, not through the cross-target path map.
 		crossTargetProducers := cloneStringMap(producerForPath)
 
-		resolved, err := Resolve(planActions, c.ProjectRoot, crossTargetProducers)
+		resolved, err := Resolve(ctx, planActions, c.ProjectRoot, c.Store, crossTargetProducers)
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}
@@ -958,6 +958,9 @@ func mapToActionSpec(m map[string]any) plugin.ActionSpec {
 	}
 	if body, ok := m["body"].([]any); ok {
 		spec.Body = body
+	}
+	if es, ok := m["eweSource"].(string); ok {
+		spec.EweSource = es
 	}
 	if outputs, ok := m["outputs"].([]any); ok {
 		for _, o := range outputs {

@@ -150,9 +150,10 @@ type DepInfo struct {
 type ActionSpec struct {
 	ID                string            `json:"id"`
 	Command           []string          `json:"command"`
-	Body              []any             `json:"body,omitempty"` // pith VM program; mutually exclusive with Command
-	Inputs            map[string]string `json:"inputs"`         // name -> file path or "{action:id}" reference
-	Outputs           []string          `json:"outputs"`        // declared output file paths
+	Body              []any             `json:"body,omitempty"`       // pith VM program; mutually exclusive with Command
+	EweSource         string            `json:"ewe_source,omitempty"` // project-relative path to an ewe populator .cue program; mutually exclusive with Command/Body
+	Inputs            map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
+	Outputs           []string          `json:"outputs"`              // declared output file paths
 	DependsOn         []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
 	Env               map[string]string `json:"env,omitempty"`
 	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name -> secret reference (e.g. "pass:deploy/token")
