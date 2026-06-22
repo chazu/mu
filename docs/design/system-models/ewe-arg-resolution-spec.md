@@ -1,7 +1,7 @@
 # Spec: rework ewe arg resolution (fixes CRIT-1, CRIT-2)
 
 Targets the **ewe repo** (`/Users/chazu/dev/go/ewe`). Addresses the blocker named
-by [adversarial-review-2.md](adversarial-review-2.md): `extractArgsWithFallback`
+by [adversarial-review-2.md](archive/adversarial-review-2.md): `extractArgsWithFallback`
 cannot resolve a `.result` reference embedded inside a composite arg
 (struct/list/interpolated string), and hidden fields (`_foo`) are rejected by
 `LookupPath`. This single function — not comprehensions, not `callReady` — is the
@@ -249,27 +249,45 @@ Surface `comprehensionErr` before the pass loop returns. This makes the
 ## What this unblocks
 
 Example 5 (GitLab governance, batch+join+secret-ref form from
-[ewe-extensions.md](ewe-extensions.md)) **runs** after this change: hidden fields
+[ewe-extensions.md](archive/ewe-extensions.md)) **runs** after this change: hidden fields
 resolve, the nested `headers` struct resolves, the `_reqs` comprehension + batch
 resolve, the interpolated `MU_OUT` path resolves, `json.Marshal(_out)` resolves.
 That is the observe-only populator v1 gate.
 
 It does **not** make `"Bearer \(_tok.result)"` work — see next.
 
-## Follow-on (separate spec): secret-as-substring (CRIT-3)
+## Follow-on (now specced separately): secrets & taint
 
-Secret-by-reference only works as a whole value. To use a secret as a substring
-(Bearer, basic-auth, query param, body field) without revealing it in CUE,
-provide a **sink-resolved template**: pass a structured ref the sink expands in Go
-*after* reveal, never building the string in CUE:
+Secret handling (whole-value refs, the secret-as-substring template, the full
+`auth:` vocabulary, the fail-closed guard, and the security boundary) is resolved
+in its own document: **[ewe-secrets-spec.md](ewe-secrets-spec.md)** (ledger S1).
+It supersedes the earlier one-paragraph `$secretTemplate` sketch that lived here.
 
-```cue
-headers: { Authorization: { "$secretTemplate": "Bearer {}", ref: "GITLAB_TOKEN" } }
+## Change 4 — rider fixes (same PR)
+
+Two small engine fixes ride this change; both surfaced while validating Change 2.
+
+**(a) `cueValueToGo` quoted-label bug (ledger E6).** `convert.go:284` keys structs
+with `iter.Selector().String()`, the *source* form — a quoted label
+`"PRIVATE-TOKEN"` becomes Go map key `"\"PRIVATE-TOKEN\""`, breaking header names
+the moment args are decoded. Unquote string labels:
+
+```go
+sel := iter.Selector()
+key := sel.String()
+if sel.Type() == cue.StringLabel {
+    key = sel.Unquoted()
+}
+result[key] = val
 ```
 
-`resolveSecrets` (in the sink) recognizes `$secretTemplate` + `ref`, reveals
-`ref`, substitutes `{}`, returns the final string — all in Go, secret never in CUE
-source. This is additive to this spec and belongs in its own note.
+**(b) Parameterize `maxPasses` (ledger E3).** Make it a `Processor` field with a
+default of 16 (constructor option), not a package constant. Passes-needed ≈ the
+longest `.result` dependency chain (the pass loop resolves every ready call each
+pass), not the call count — 16 is generous for realistic populator depth, but a
+raisable knob removes it as a hard ceiling. The large-list splice *cost* is left
+to measure-first (benchmark a 500-item batch+join); the out-of-band result store
+is the escape hatch if it bites (see Risks).
 
 ## Tests to add (ewe repo)
 
@@ -283,6 +301,8 @@ source. This is additive to this spec and belongs in its own note.
 7. Chained-dependency ordering still works (regression: existing
    `processor_test.go` chained test).
 8. Package-clause file: hidden labels resolve under the declared package.
+9. Quoted struct label (`f: op.#Echo & {args:[{"PRIVATE-TOKEN": "x"}]}`) decodes
+   to Go map key `PRIVATE-TOKEN` without quotes (Change 4a regression).
 
 ## Risks / open
 
@@ -292,11 +312,14 @@ source. This is additive to this spec and belongs in its own note.
   real bug after the loop — *less precise* error messages than today for malformed
   args. Mitigation: on a zero-progress pass, re-run validation and surface the
   collected `lastErr`. Acceptable; improve later if noisy.
-- **`maxPasses=16` + large splices (MAJOR-4).** Each pass recompiles the whole
-  source; a batch returning hundreds of items splices a large `ListLit` that later
-  passes re-parse. Unchanged by this spec. If chained batches over big lists hit
-  the ceiling, parameterize `maxPasses` and/or avoid re-splicing large results as
-  source (store results out-of-band keyed by call path). Separate work.
+- **`maxPasses` + large splices (MAJOR-4, ledger E3).** `maxPasses` is now a
+  parameter (Change 4b), removing the hard ceiling. The remaining concern is
+  *cost*: each pass recompiles the whole source, and a batch returning hundreds of
+  items splices a large `ListLit` that later passes re-parse — O(passes ×
+  result-size). Measure-first: add a benchmark with a 500-item batch + index-join.
+  Escape hatch if it bites: store executed results out-of-band keyed by call path
+  and inject a *reference* into `compilableSource` rather than re-splicing literal
+  source. Built only on demonstrated cost.
 - **Package detection.** Must read the file's package clause correctly so
   `cue.Hid` uses the right package; default `_` for package-less files. Cover in
   test 8.

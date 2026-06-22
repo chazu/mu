@@ -38,3 +38,9 @@ greeting.txt
 !internal/coordinator/testdata/mock_env_secret.sh
 # ...but never the compiled plugin binary.
 plugins/envsecret/envsecret
+
+# dlktk local discussion-selection state (dialectics are exported to docs/design/dialectics/)
+.dlktk/
+
+# stray metrics output
+metrics.json

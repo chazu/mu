@@ -1,5 +1,21 @@
 # System Models: a swamp-equivalent over pudl + mu
 
+> **⮕ Building V1 convergence? Go to [`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md)** — the
+> single canonical, self-contained build doc. This README is the vision/concept
+> doc; the build spec is the work. (Full doc map at the bottom of the build spec.)
+
+> **Status (2026-06-20).** This is the original vision doc. Every CRITICAL/MAJOR
+> finding from the two adversarial reviews has since been worked through in
+> **[issue-ledger.md](issue-ledger.md)** — read it for what is *resolved*,
+> *deferred*, or *cut*. The **observe-only** half is fully specced (see
+> [ewe-arg-resolution-spec.md](ewe-arg-resolution-spec.md),
+> [ewe-secrets-spec.md](ewe-secrets-spec.md),
+> [ewe-body-kind-spec.md](ewe-body-kind-spec.md),
+> [ewe-http-pagination-spec.md](ewe-http-pagination-spec.md)). The **convergence**
+> half (`desired`/`converge`, fixed points, ACUTE) is **design-resolved** (ledger
+> V1.1–V1.4, V1.6; V1.5 rollback cut) and the sections below are reconciled to it.
+> The ledger remains the source of truth for the detailed V1 decisions.
+
 ## Motivation
 
 [swamp](https://swamp-club.com/) packages five primitives — Models, Workflows,
@@ -38,13 +54,17 @@ clear answer on runtime extensibility (mu plugins, **not** an embedded Lisp).
    `encoding/json`, `crypto/sha256`, …).
 2. **ewe supplies only what CUE cannot:** effects (I/O) and the one iteration
    primitive CUE lacks (bounded iteration / pagination). Everything pure is
-   already CUE.
+   already CUE. *(Resolved: effects are **forbidden inside comprehensions** —
+   per-item fan-out is a batch effect + pure build/join. See ledger E2 and the
+   pagination spec.)*
 3. **Two extensibility axes, two mechanisms.**
    - *Logic* extends in CUE — no code, no recompile, unprivileged.
    - *Capabilities* (new external systems) extend as **mu plugins** — out of
-     process, sandboxed, language-agnostic, CAS-distributed — surfaced to ewe
-     through one generic `#Plugin` function. Adding a capability never edits
-     mu/pudl Go.
+     process, sandboxed, language-agnostic, CAS-distributed. *(Resolved: a plugin
+     is reused as a **`#PluginObserve` populate kind** — its own `observe` action,
+     consumed by dataflow — **not** an inline `#Plugin` ewe function. The generic
+     `#Plugin` function is cut/deferred; see ledger P2.)* Adding a capability never
+     edits mu/pudl Go.
 4. **Effects are privileged and audited; they live in Go (or behind the plugin
    boundary). Logic is unprivileged and lives in CUE.** This is the boundary
    that keeps the dangerous surface small and reviewable.
@@ -85,8 +105,10 @@ the ewe populator.
 
     // CONVERGE — close drift between desired and observed (ACUTE Transform +
     //   Execute). Typically `pudl export-actions` → `mu build`. Only meaningful
-    //   alongside `desired`.
-    converge?: #EweTarget | #PluginPlan
+    //   alongside `desired`. V1: `#PluginPlan` only (all consumers use it; the
+    //   shipped export-actions path serves it). ewe-converge (`#EweTarget`
+    //   mutate) deferred — no consumer; ewe stays first-class for `populate`.
+    converge?: #PluginPlan   // V1; future: #EweTarget | #PluginPlan
 
     // FRESHNESS — how the model stays current (mu observe + drift cadence).
     freshness?: #Freshness
@@ -120,12 +142,20 @@ below for what `pudl run` converges to in each mode.
 ## The populator surface: ewe-in-CUE
 
 The populator is the part that needs real expressiveness, and it is exactly the
-GitLab gist generalized. It runs as an **action body of kind `ewe`** (see
-[expressiveness-sketches.md](../expressiveness-sketches.md) for the body-kind
-integration): a CUE program fragment mu keeps unevaluated and runs through the
-ewe evaluator at execute time, with the privileged effect registry bound to the
-sandbox + sealed env. Effect ordering falls out of CUE data dependencies; taint
-carries via pith's `Secret` type (`Redact` in traces, `Reveal` only at sinks).
+GitLab gist generalized. It runs as an **action body of kind `ewe`**.
+
+> **Resolved (ledger I1, [ewe-body-kind-spec.md](ewe-body-kind-spec.md)).** The
+> populator is **a program, not an inline block**: a normal `.cue` file
+> content-addressed into CAS (the plugin idiom), the action carrying an `EweRef`
+> digest. mu never loads it as config — it is restored and run through the ewe
+> evaluator at execute time, with a **per-execute** privileged registry bound to
+> the sandbox + sealed resolver + `MU_OUT`. Effect ordering falls out of CUE
+> `.result` data dependencies (no pure-ordering primitive — ledger E5). **Taint
+> does not use `pith.Secret`** — secrets are references revealed only inside Go
+> sinks (ledger S1, [ewe-secrets-spec.md](ewe-secrets-spec.md)). Cross-action
+> data is a declared `input` (content digest + implicit `DependsOn`) read via
+> `#ReadFile` — there is no `#Output` function. The "mu keeps a CUE value
+> unevaluated" framing in earlier drafts was inverted; see the spec.
 
 ## ewe function catalog
 
@@ -143,34 +173,40 @@ hidden-field `let`, plus `strings.*`, `list.Sort`/`FlattenN`, `regexp.*`,
 
 | Function | Shape | Notes |
 |---|---|---|
-| `#Secret` | `[name] -> Secret` | sealed input; taint-tracked |
+| `#Secret` | `[name] -> {"$secret":name}` | sealed-input **reference**; revealed only in sinks (S1) |
+| `#Secretf` | `[tmpl, names…] -> {"$secretTemplate":…}` | secret-as-substring **reference** (S1) |
 | `#Env` | `[name] -> string` | non-secret env; refuses sealed names |
-| `#Http` | `[{url, method, query, headers, body}] -> resp` | single request |
-| `#HttpAll` | `[{…, paginate:{param, until}}] -> [items]` | **the iteration primitive** — paginate until empty/cursor exhausted |
-| `#ReadFile` | `[path] -> bytes/string` | confined to `MU_OUT`/inputs |
+| `#Http` | `[{url, method, query, headers, body, auth}] -> resp` | single request; `auth:` block resolves secret refs (S1) |
+| `#HttpAll` | `[{…, paginate:{style, …}}] -> [items]` | **the iteration primitive** — paginate in Go (`none`/`page`/`link`/`cursor`, `maxPages` cap; I2) |
+| `#HttpBatch` | `[[reqSpec…]] -> [envelope…]` | **the fan-out primitive** — N requests → list; per-item error envelopes (E2/E4) |
+| `#ReadFile` | `[path] -> bytes/string` | confined to `MU_OUT`/declared inputs |
 | `#WriteFile` | `[path, content] -> ok` | confined to `MU_OUT` |
 | `#Exec` | `[{cmd, args, stdin}] -> {stdout, stderr, code}` | sandboxed subprocess |
-| `#Now` | `[] -> ts` | seedable for determinism/caching |
+| `#Now` | `[] -> ts` | wall-clock; no seed (moot under impure — K1) |
 
-These are the irreducible effects. Note `#HttpAll` is the single concession to
-"CUE can't iterate unboundedly" — pagination is baked into the fetch rather than
-exposed as a general higher-order `unfold`.
+These are the irreducible effects. `#HttpAll` paginates and `#HttpBatch` fans out
+*internally in Go* (CUE can't iterate unboundedly); per-item fan-out is batch +
+pure build/join, never effects-in-comprehensions (E2). Secrets are references
+throughout, revealed only at sinks ([ewe-secrets-spec.md](ewe-secrets-spec.md)).
 
-### Tier 2 — USEFUL: pudl lake vocabulary (Go, pudl-side)
+### Tier 2 — DEFERRED: pudl lake vocabulary (no observe-only consumer)
 
-Surface the existing pudl subsystems (today reached via pith driver words) as
-ewe functions so CUE programs read/write the lake directly:
+> **Resolved (ledger P1): the entire Tier-2 set below is deferred, not built in
+> v1.** It was premised on an ewe *body* reading/writing the lake, but the
+> populate→catalog path is **ewe writes JSON (`#WriteFile`) → action output →
+> `pudl run` ingests** (the `_schema` tag routes records); the populator never
+> calls a catalog function. `#DatalogQuery`'s named consumer — "evaluate a `#Check`
+> from inside a model build" — also went away: **checks run in `pudl run`** by
+> reusing the direct `datalog.Evaluate` call `pudl query` already ships (no driver
+> word, no ewe function). Build these only if a real in-populate consumer appears.
 
-| Function | Backed by |
+| Function (deferred) | Was backed by |
 |---|---|
 | `#CatalogQuery` / `#CatalogGet` / `#CatalogCount` | `internal/pithdriver/catalog.go` |
 | `#FactQuery` / `#FactAssert` / `#FactRetract` | `internal/pithdriver/facts.go` |
 | `#SchemaMatch` / `#SchemaInfer` / `#SchemaList` | `internal/pithdriver/schema*.go` |
 | `#Drift` | `internal/pithdriver/drift.go` |
-| `#DatalogQuery` | `internal/datalog` — run a rule relation inline |
-
-`#DatalogQuery` is the bridge that lets a `#Check` be evaluated from inside a
-model build, reusing the real query engine rather than reimplementing it.
+| `#DatalogQuery` | `internal/datalog` (now: `pudl run` calls it directly) |
 
 ### Tier 3 — USEFUL: pure helpers where CUE stdlib is clumsy (Go, tiny)
 
@@ -186,6 +222,16 @@ Build only on demonstrated friction:
 Everything else (split/join/regex/encode/hash) is Tier 0. Resist growing Tier 3.
 
 ## The keystone: a generic `#Plugin` function
+
+> **Superseded (ledger P2).** This section is retained for rationale but its
+> conclusion is reversed for v1. There is **no `#Plugin` ewe function** — neither
+> the inline form (a plugin subprocess mid-execute is sandbox-escape-shaped and is
+> not built) nor the dataflow form (no v1 consumer: a populate is *either* ewe
+> *or* plugin-observe, never both in one body). **Reusing a plugin = the
+> `#PluginObserve` populate kind** — the plugin's existing `observe` runs as its
+> own action/phase and its output is ingested by `pudl run`. Cross-source joins
+> (two systems in one model) are **pudl Datalog relations**, not an in-body plugin
+> call. Read the rest of this section as the path *considered and not taken*.
 
 **Do we need an ewe function for leveraging an arbitrary mu plugin? Yes — it is
 the extensibility keystone.** It is how *capabilities* extend without editing
@@ -304,6 +350,15 @@ taint package now (worth saving regardless), build the ewe body kind, migrate or
 drop `pudl exec`, then delete pith — unless the execute-time-cost question turns
 up a real need for a CUE-free IR.
 
+> **Resolved (ledger V3): defer the deletion, not the deprecation.** pith deletion
+> waits until **observation via ewe ships end-to-end** (the observe-only v1 gate:
+> arg-resolution engine + sink suite + `ewe` body kind + a real populator running
+> against live APIs). Taint-type extraction proceeds now; `pudl exec` removal and
+> the VM deletion wait behind a working ewe observe spike. The CUE-free-IR question
+> remains the only thing that could grant a permanent reprieve — unmeasured, so
+> deletion stays the default *after* the spike. (Note: the "two notations" claim
+> above already holds — secrets do **not** use `pith.Secret` on the ewe path; S1.)
+
 ## Worked example: the GitLab model, end to end
 
 ```cue
@@ -370,7 +425,7 @@ same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", �
 
 For five fuller walkthroughs — remote-server provisioning, Kubernetes policy
 compliance, TLS certificate lifecycle, DNS zone convergence, and repo
-governance — see [examples.md](examples.md). They span both fixed points
+governance — see [examples/](examples/). They span both fixed points
 (observe-only and convergence) and exercise the full ewe / `#Plugin` / Datalog
 surface.
 
@@ -458,16 +513,27 @@ populate (Accumulate) → checks/drift (Unify) → freshness re-observe → popu
    └── converges to the OBSERVATION fixed point: catalog stable, checks evaluated.
 ```
 
-**Convergence** (`desired` + `converge` present — a known target state):
+**Convergence** (`desired` + `converge` present *and* `pudl run --converge`):
 
 ```
-populate (Accumulate) → drift vs desired (Unify) → converge (Transform+Execute) → populate …
+populate (Accumulate) → drift vs desired (Unify) → converge (Transform+Execute) → re-populate …
    └── converges to the CONVERGENCE fixed point: observed == desired, drift = ∅.
 ```
 
 `converge` is the natural home for the existing `pudl export-actions → mu build`
 path — the BRICK loop already does this; the model just bundles it. The fixed
 point is not bolted on: it is precisely what `pudl run`'s iteration settles into.
+
+**Mutation is opt-in, even for a convergence-capable model.** Declaring `desired`
++ `converge` makes a model *able* to converge; it does not make a bare `pudl run`
+mutate. Convergence (the only place the system touches production) fires **only**
+under `pudl run --converge`. Without the flag, a convergence model behaves
+observe-only — drift is flagged, never closed. The full CLI contract,
+termination (drift==∅ + a hard max-iter cap), and failure semantics (`converged`
+/ `failed`, the mandatory partial-state warning) are settled in the
+[issue ledger](issue-ledger.md)'s V1 section. Loop termination's monotonic-guard
+question was argued out in
+[`dialectics/v1-2-loop-termination.ndjson`](../dialectics/v1-2-loop-termination.ndjson).
 
 ### Design intent
 
@@ -482,42 +548,42 @@ termination guarantees, and convergence-failure reporting are all open.
 
 ## Implementation phases
 
-1. **ewe action body kind.** Add `Ewe` to the `Action` struct (`dag/graph.go`),
-   teach `mapToActionSpec` the `ewe` key, add the execute-phase arm in
-   `coordinator`/`dag` that runs the ewe evaluator with an effect registry (the
-   ewe peer of `pithvm.RegisterExecDrivers`). Reuse pith's `Secret`/`Reveal`.
-2. **Tier-1 ewe functions** + the shared effect/taint core extracted so pith
-   driver words and ewe funcs call the *same* http/file/secret implementations.
-3. **`#Plugin` ewe function** (start with `op: "observe"`, dataflow form first).
-4. **Tier-2 lake functions** in pudl; `#DatalogQuery` bridge.
-5. **`#SystemModel` schema** + `pudl run <model>`: orchestrate populate (delegate
-   to `mu build`), then relations → checks → report. Generalizes the existing
-   `pudl memory cycle` shell-out.
-6. **Tier-3 helpers** only as friction demands.
-7. **pith disposition (deprecate, don't freeze):** extract the taint type to its
-   own Go package immediately (the one piece worth saving). `pudl exec` is
-   **retired, not ported** — querying is `pudl query` (Datalog), running is
-   `pudl run` (models). Once the ewe body kind ships and `pudl run` lands,
-   **delete pith** — unless the execute-time-cost question (CUE-free IR) proves
-   real. Do **not** build the earlier pith authoring sugar
-   (`format`/`with`/records); ewe-CUE supersedes it.
+> **Reconciled to the ledger (2026-06-20).** The original phases are superseded by
+> the resolved specs. The v1 scope is **observe-only**; convergence is out (V1).
+
+1. **ewe arg-resolution engine** (ewe repo) — the LookupPath redesign + rider fixes
+   ([ewe-arg-resolution-spec.md](ewe-arg-resolution-spec.md)). The blocker
+   everything else sits on (E1–E6). Validated empirically.
+2. **Secrets** — `#Secret`/`#Secretf` refs + `goToCUEExpr` guard (ewe), then the
+   sink-side `resolveSecrets` + `auth:` vocab (mu)
+   ([ewe-secrets-spec.md](ewe-secrets-spec.md), S1).
+3. **`ewe` action body kind** (mu) — populator-as-program: `eweSource` → CAS digest
+   → `Action.EweRef`; per-execute registry; `#ReadFile` + declared-input dataflow;
+   actionkey stanza ([ewe-body-kind-spec.md](ewe-body-kind-spec.md), I1).
+4. **Tier-1 effect sinks** including `#HttpAll` pagination + `#HttpBatch` fan-out
+   ([ewe-http-pagination-spec.md](ewe-http-pagination-spec.md), I2/E2/E4).
+5. **`#SystemModel` schema (observe-only) + `pudl run <model>`** — populate
+   (delegate to `mu build`, consume `mu --json`) → ingest JSON to catalog →
+   relations → checks (direct `datalog.Evaluate`, P1) → report. Per-model isolation;
+   three outcomes; no rollback (V2). Generalizes `pudl memory cycle`.
+6. **pith** — extract the taint package now; **defer deletion** until the above
+   ships end-to-end (V3). `pudl exec` retired, not ported. Do **not** build the old
+   pith authoring sugar.
+
+*Cut/deferred from v1:* the `#Plugin` ewe function (P2 — use `#PluginObserve`), the
+Tier-2 lake vocabulary (P1), Tier-3 helpers (on friction), the pure-transform
+cacheable action (K1), and the `after:`/pure-ordering primitive (E5). **The entire
+convergence half** (`desired`/`converge`, the loop, drift-gating, termination) is
+open under ledger **V1**.
 
 ## Open questions
 
-- **`#Plugin` inline lifecycle.** If a plugin is invoked mid-execute (not as a
-  dataflow dependency), what owns its subprocess/sandbox? Resolve before
-  promoting inline `#Plugin` beyond an escape hatch.
-- **ewe evaluation semantics for effects.** CUE is lazy and total; effectful
-  `op.#Func` results must be forced in dependency order. Confirm ewe's
-  rewrite-to-`result` model sequences side effects deterministically (it should,
-  via data deps — verify with a multi-effect test).
-- **Determinism / caching.** `#Now`, `#HttpAll` responses — what is part of the
-  action cache key vs. captured output? Mirror pith's rule (refs+structure in
-  key, values out).
-- **Does `#SystemModel` live in mu, pudl, or a shared CUE module?** It binds
-  both. Leaning a shared `brick`-adjacent module both import.
-- **Pagination `until` vocabulary.** `"empty"` covers offset paging; add
-  `"cursor"`/`"link-header"` forms for GitHub/GitLab-style cursors.
+*(Resolved questions removed; see the ledger. What genuinely remains:)*
+
+- ~~**Does `#SystemModel` live in mu, pudl, or a shared CUE module?**~~ **Resolved
+  (ledger D1): it lives in pudl.** mu never imports it; `pudl run` compiles a model
+  to a mu build. Schemas are referenced as definitions (`pudl/linux.#Package`),
+  custom ones shipped in `.pudl/`/`~/.pudl` (D2–D4).
 - **Convergence semantics (iterate here).** With `desired`/`converge` present:
   what gates convergence vs. flag-only (drift severity? an explicit opt-in?);
   how does `pudl run` guarantee loop termination (max iterations, drift must
