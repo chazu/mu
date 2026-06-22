@@ -248,5 +248,5 @@ Where everything for this effort lives, and which file owns what:
 | [`issue-ledger.md`](issue-ledger.md) | Decision rationale archive — every resolved issue (observe-only E1–E6…, and V1.1–V1.6) with the *why*. Source of truth for decisions; this spec distills its V1 section. |
 | [`examples/`](examples/) | Five worked `#SystemModel` consumers (structured: per-model `model.cue` + README). |
 | `ewe-*-spec.md` | Observe-only ewe detail specs (arg-resolution, secrets, body-kind, http-pagination). Relevant when building the populate path. |
-| `../dialectics/*.ndjson` | Recorded dlktk arguments (`v1-2-loop-termination`, `e5-pure-ordering`). The auditable "why" behind the hard calls. |
-| `adversarial-review*.md`, `ewe-extensions.md`, `examples.md` | **Historical** — the reviews and notes that drove the design. Archive; superseded by the above. |
+| [`../dialectics/`](../dialectics/)`*.ndjson` | Recorded dlktk arguments (`v1-2-loop-termination`, `e5-pure-ordering`). The auditable "why" behind the hard calls. |
+| [`archive/`](archive/) | **Historical** — the adversarial reviews, `ewe-extensions.md`, and the flat `examples.md` that drove the design. Superseded by the above; kept for trail. |

@@ -425,7 +425,7 @@ same shape with `populate: op.#Plugin & {args:[{name:"proxmox", op:"observe", �
 
 For five fuller walkthroughs — remote-server provisioning, Kubernetes policy
 compliance, TLS certificate lifecycle, DNS zone convergence, and repo
-governance — see [examples.md](examples.md). They span both fixed points
+governance — see [examples/](examples/). They span both fixed points
 (observe-only and convergence) and exercise the full ewe / `#Plugin` / Datalog
 surface.
 

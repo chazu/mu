@@ -1,10 +1,11 @@
 # System Model examples — under the current (post-review) design
 
-Each of the five examples from [../examples.md](../examples.md), re-expressed as it
-would actually look after the issue-ledger resolutions. These supersede the inline
-sketches in `examples.md`, which predate the design corrections.
+Each of the five examples from [../archive/examples.md](../archive/examples.md),
+re-expressed as it would actually look after the issue-ledger resolutions. These
+supersede the inline sketches in the archived `examples.md`, which predate the
+design corrections.
 
-## What changed from `examples.md`
+## What changed from the archived `examples.md`
 
 | Original sketch | Current design | Ledger |
 |---|---|---|

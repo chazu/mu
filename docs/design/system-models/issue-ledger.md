@@ -1,8 +1,8 @@
 # Issue ledger — System Models / ewe-in-CUE
 
 Consolidated, deduplicated, dependency-ordered tracker for every finding from
-[adversarial-review.md](adversarial-review.md) (C/M/m) and
-[adversarial-review-2.md](adversarial-review-2.md) (CRIT/MAJOR/MIN), plus the
+[adversarial-review.md](archive/adversarial-review.md) (C/M/m) and
+[adversarial-review-2.md](archive/adversarial-review-2.md) (CRIT/MAJOR/MIN), plus the
 state of [ewe-arg-resolution-spec.md](ewe-arg-resolution-spec.md). Each row is
 resolved one at a time; the relevant design doc is amended as we go.
 

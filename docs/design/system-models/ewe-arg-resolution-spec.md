@@ -1,7 +1,7 @@
 # Spec: rework ewe arg resolution (fixes CRIT-1, CRIT-2)
 
 Targets the **ewe repo** (`/Users/chazu/dev/go/ewe`). Addresses the blocker named
-by [adversarial-review-2.md](adversarial-review-2.md): `extractArgsWithFallback`
+by [adversarial-review-2.md](archive/adversarial-review-2.md): `extractArgsWithFallback`
 cannot resolve a `.result` reference embedded inside a composite arg
 (struct/list/interpolated string), and hidden fields (`_foo`) are rejected by
 `LookupPath`. This single function — not comprehensions, not `callReady` — is the
@@ -249,7 +249,7 @@ Surface `comprehensionErr` before the pass loop returns. This makes the
 ## What this unblocks
 
 Example 5 (GitLab governance, batch+join+secret-ref form from
-[ewe-extensions.md](ewe-extensions.md)) **runs** after this change: hidden fields
+[ewe-extensions.md](archive/ewe-extensions.md)) **runs** after this change: hidden fields
 resolve, the nested `headers` struct resolves, the `_reqs` comprehension + batch
 resolve, the interpolated `MU_OUT` path resolves, `json.Marshal(_out)` resolves.
 That is the observe-only populator v1 gate.
