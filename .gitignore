@@ -41,3 +41,6 @@ plugins/envsecret/envsecret
 
 # dlktk local discussion-selection state (dialectics are exported to docs/design/dialectics/)
 .dlktk/
+
+# stray metrics output
+metrics.json
