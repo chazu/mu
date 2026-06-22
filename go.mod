@@ -1,6 +1,6 @@
 module github.com/chazu/mu
 
-go 1.25.8
+go 1.26.2
 
 require (
 	github.com/opencontainers/go-digest v1.0.0
@@ -10,11 +10,11 @@ require (
 
 require github.com/chazu/pith v0.3.0
 
-require golang.org/x/sync v0.19.0
+require golang.org/x/sync v0.20.0
 
 require (
 	charm.land/lipgloss/v2 v2.0.3
-	cuelang.org/go v0.16.0
+	cuelang.org/go v0.16.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	golang.org/x/term v0.42.0
@@ -29,6 +29,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
+	github.com/chazu/ewe v0.0.0
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
@@ -44,9 +45,11 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.50.0 // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 )
+
+replace github.com/chazu/ewe => /Users/chazu/dev/go/ewe
