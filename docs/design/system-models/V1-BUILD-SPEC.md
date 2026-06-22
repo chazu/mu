@@ -428,6 +428,7 @@ Where everything for this effort lives, and which file owns what:
 | File | Role |
 |------|------|
 | **`V1-BUILD-SPEC.md`** (this) | **THE build doc — what to build for V1 convergence.** Start here. |
+| [`handoff-v1-build.md`](handoff-v1-build.md) | Next-session orientation: build order, spec map, grounding, working method. |
 | [`README.md`](README.md) | Vision / the `#SystemModel` concept, observe-only + convergence overview. The front door. |
 | [`issue-ledger.md`](issue-ledger.md) | Decision rationale archive — every resolved issue (observe-only E1–E6…, and V1.1–V1.6) with the *why*. Source of truth for decisions; this spec distills its V1 section. |
 | [`examples/`](examples/) | Five worked `#SystemModel` consumers (structured: per-model `model.cue` + README). |
