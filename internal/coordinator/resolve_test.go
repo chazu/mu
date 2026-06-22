@@ -1,6 +1,8 @@
 package coordinator
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +28,7 @@ func TestResolveFileInputs(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -86,7 +88,7 @@ func TestResolveCrossTargetProducer(t *testing.T) {
 		"infra/vpc/state.json": "//infra/vpc:show",
 	}
 
-	actions, err := Resolve(specs, dir, producers)
+	actions, err := Resolve(context.Background(), specs, dir, nil, producers)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -123,7 +125,7 @@ func TestResolveActionRef(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -159,7 +161,7 @@ func TestResolveMixedInputs(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -198,7 +200,7 @@ func TestResolveMissingFile(t *testing.T) {
 		},
 	}
 
-	_, err := Resolve(specs, dir, nil)
+	_, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -228,7 +230,7 @@ func TestResolvePathTraversal(t *testing.T) {
 			},
 		}
 
-		_, err := Resolve(specs, dir, nil)
+		_, err := Resolve(context.Background(), specs, dir, nil, nil)
 		if err == nil {
 			t.Errorf("expected error for traversal input %q, got nil", input)
 			continue
@@ -250,7 +252,7 @@ func TestResolveWorkDirTraversal(t *testing.T) {
 		},
 	}
 
-	_, err := Resolve(specs, dir, nil)
+	_, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for work_dir traversal, got nil")
 	}
@@ -276,7 +278,7 @@ func TestResolveWorkDirValid(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -299,7 +301,7 @@ func TestResolveWorkDirEmpty(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -325,7 +327,7 @@ func TestResolveSealedInputsPassthrough(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -355,7 +357,7 @@ func TestResolveSealedInputsNil(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -377,7 +379,7 @@ func TestResolveSealedOutputsForceImpure(t *testing.T) {
 			},
 		},
 	}
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -401,7 +403,7 @@ func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(specs, dir, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -414,7 +416,7 @@ func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 }
 
 func TestResolveEmptySpecs(t *testing.T) {
-	actions, err := Resolve(nil, t.TempDir(), nil)
+	actions, err := Resolve(context.Background(), nil, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -434,4 +436,56 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestResolveEweSource(t *testing.T) {
+	dir := t.TempDir()
+	progPath := filepath.Join(dir, "populate.cue")
+	src := "_x: op.#Env & { args: [] }\n"
+	if err := os.WriteFile(progPath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+	store := newTestStore(t)
+
+	specs := []plugin.ActionSpec{{ID: "fetch", EweSource: "populate.cue", Impure: true}}
+	actions, err := Resolve(context.Background(), specs, dir, store, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("got %d actions, want 1", len(actions))
+	}
+	ref := actions[0].EweRef
+	if ref == (cas.Digest{}) {
+		t.Fatal("EweRef not set")
+	}
+	// The program is stored and restorable by its digest.
+	rc, err := store.Get(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	defer rc.Close()
+	got, _ := io.ReadAll(rc)
+	if string(got) != src {
+		t.Errorf("restored program = %q, want %q", got, src)
+	}
+}
+
+func TestResolveEweSourceErrors(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t)
+
+	// Missing file → clear error.
+	_, err := Resolve(context.Background(),
+		[]plugin.ActionSpec{{ID: "a", EweSource: "nope.cue"}}, dir, store, nil)
+	if err == nil {
+		t.Error("expected error for missing ewe_source file")
+	}
+
+	// Path escaping project root → rejected.
+	_, err = Resolve(context.Background(),
+		[]plugin.ActionSpec{{ID: "a", EweSource: "../escape.cue"}}, dir, store, nil)
+	if err == nil || !contains(err.Error(), "escapes project root") {
+		t.Errorf("expected escape rejection, got %v", err)
+	}
 }
