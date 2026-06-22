@@ -68,7 +68,7 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 | V1.3 | — | **Drift-gating** — does converge *fire* or only flag? severity threshold / explicit opt-in | ✅ **resolved** — explicit opt-in via `--converge`; no severity magic |
 | V1.4 | m1 | **Convergence-failure reporting** — "applied but still drifts" / "drift grew" / action failed mid-loop (distinct from drift) | ✅ **resolved** — reuse `failed` status; 2 modes (`cap_exhausted`/`execute_error`); mandatory partial-state warning |
 | V1.5 | — | **Partial-apply / rollback** — execute fails halfway against a live system | ❌ **CUT** — out of scope (owner decision, V1 session) |
-| V1.6 | — | **`converge` field paths** — `#PluginPlan` (≈ exists via `export-actions`) + the ewe-converge path (`#EweTarget` emitting actions) | ✅ **resolved** — V1 converge = `#PluginPlan` only; ewe-**converge** deferred. ewe-**populate** (pull) kept, untouched |
+| V1.6 | — | **`converge` field paths** — `#PluginPlan` + the ewe-converge path (`#EweTarget`) | ⚠️ **partly resolved** — V1 converge = `#PluginPlan` only; ewe-converge deferred. BUT **apply translation is net-new, not yet designed** (review F2/F3); ewe-populate specced-not-built (F4). See build-spec §10 |
 | V2 | m1 | `pudl run` error handling / per-target status / partial-failure | ✅ scoped to observe (below) |
 | V3 | m4 | "Delete pith" premature — sequence behind a working observe-only spike | ✅ defer deletion (below) |
 
@@ -692,8 +692,27 @@ shape.
 `UpdateStatus` (`pudl/internal/database/catalog_status.go:18`) is a blind set with
 validity-check only — **no FSM transition guard** — so `converging→drifted→converging`
 cycles freely across iterations. `drift check` (`checker.go:117`) and
-`markConverging` (`export_actions.go:153`) are both idempotent / re-enterable. V1.1
-stays "wiring existing one-shots into a cycle"; no growth. **Bonus:** the valid-status
-set already includes `"converged"` and `"failed"` (line 21) but **nothing writes
-them** — they are the pre-existing terminal vocabulary for V1.2 (fixed-point reached →
-`converged`) and V1.4 (failure → `failed`). No schema migration needed.
+`markConverging` (`export_actions.go:153`) are both idempotent / re-enterable. No
+schema migration needed for the status enum.
+
+**CORRECTION (2026-06-21 adversarial review, F1/F6):** an earlier "bonus" note here
+claimed `"converged"`/`"failed"` are valid-but-**unwritten**. **That was wrong.**
+`pudl mu ingest-manifest` **already writes both today**, per definition, from action
+**exit code** (`pudl/internal/mubridge/manifest.go:182-188`): exit 0 → `converged`,
+else → `failed`. There are three status writers, not two: drift (clean/drifted),
+export-actions (converging), ingest-manifest (converged/failed). The V1 change is
+therefore **not** "add new writes" — it is **narrowing** ingest-manifest (exit 0 →
+`converging`, "applied/pending-verify", not `converged`) so the **verified**
+`converged` (drift==∅) is owned solely by the drift check. Removes a latent lie
+(exit-0 ≠ world-matches-desired) rather than filling a blank. Full composition in
+[`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md) §5/§8.
+
+**Also corrected by the review:** V1.6 is **not** "wiring existing one-shots." The
+shipped `export-actions` path emits *desired-state* `MuConfig` targets (observe/BRICK
+shape); the **apply translation** (drift diff + `#PluginPlan` arm → imperative
+actions a mutation plugin accepts) is **net-new and not yet designed** — plugin
+config shapes differ (`remote-exec` needs `command`/`host`; `k8s` reads a manifest
+from `sources`). And **ewe-populate** (auth'd HTTP fetch → catalog) is **specced but
+unbuilt** in ewe (zero HTTP code). See [`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md) §9/§10.
+`pudl run` operates on a `#SystemModel` **instance** (the run unit), whose
+**definitions** are the status/`--only` unit (build-spec §2).
