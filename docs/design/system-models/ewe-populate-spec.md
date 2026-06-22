@@ -66,10 +66,19 @@ This is the populate-arm-level declaration; it **compiles to** the body-kind spe
 that action's fields, `ewe-body-kind-spec.md:60-72`). `#EweTarget` is the
 `#SystemModel`-facing name for that action shape.
 
-**Convention:** the program's emitted records **must** self-tag with `_schema`
-(the `"pudl/<module>.#<Def>"` reference form, ledger D4). That tag is what routes
-each record to its catalog schema at ingest (§3). Records without `_schema` are an
-authoring error (a populate program that can't be bound).
+**Convention:** the program's emitted records **must** self-tag with a **quoted**
+`"_schema"` label (the `"pudl/<module>.#<Def>"` reference form, ledger D4). That
+tag is what routes each record to its catalog schema at ingest (§3). Records
+without `"_schema"` are an authoring error (a populate program that can't be
+bound).
+
+> **The quote is load-bearing (verified building this).** A bare `_schema:` is a
+> *hidden* CUE field, and both CUE's `json.Marshal` and ewe's value conversion
+> drop hidden fields — so a bare tag silently disappears from the records file and
+> every record falls back to the generic `pudl/mu.#ObserveResult` schema. Write
+> `"_schema": "git.repository.gitlab"` (a normal string field whose name starts
+> with `_`). Equivalently, never `json.Marshal` records *in CUE*; pass them
+> structured to `#WriteFile` and let the Go sink marshal them.
 
 ---
 

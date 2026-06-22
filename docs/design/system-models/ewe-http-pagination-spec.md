@@ -111,6 +111,16 @@ the v1 observe-only targets *require* them on day one (GitHub needs `link` or
 **Deferred: `total-count`** (loop `1..X` from `X-Total-Pages`/a body count). Rare,
 and expressible as a `page` variant; add only when a target needs it.
 
+## Response decoding: preserve integer-ness (grounded)
+
+The sink decodes response bodies with `json.Decoder.UseNumber()`, not plain
+`json.Unmarshal`. Without it, every JSON number decodes to `float64`, and an
+entity id of `1` renders back into CUE as `1.0` — so `"\(r.id)"` interpolated
+into a follow-up URL becomes `/repos/1.0/branches`, a 404. (Found end-to-end on
+example 5.) With `UseNumber`, ids arrive as `json.Number`, which ewe's
+`goToCUEExpr` renders as an INT when integral and a FLOAT otherwise, so IDs
+spliced into paths stay `1`.
+
 ## Determinism / caching
 
 `#HttpAll` is a live network read inside an `impure` populator → never cached

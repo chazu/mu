@@ -44,18 +44,35 @@ config you inline.
 // against a stub `op` package. Never loaded as mu config.
 import "op"
 
-_tok: op.#Secret & { args: ["GITLAB_TOKEN"] }
+_env: op.#Env & { args: [] }                   // NB: #Env is a call — `op.#Env & {args:[]}`,
+_tok: op.#Secret & { args: ["GITLAB_TOKEN"] }  //     then ref _env.result.MU_OUT (see note below)
 _repos: op.#HttpAll & { args: [{
     url:      "https://gitlab.com/api/v4/groups/garner-health/projects"
     headers:  { "PRIVATE-TOKEN": _tok.result }
-    paginate: { param: "page", until: "empty" }
+    paginate: { style: "page", param: "page", stop: "empty" }
 }]}
 _out: [ for r in _repos.result if r.default_branch != null {
     name: "gitlab.com/\(r.path_with_namespace)", default_branch: r.default_branch
-    _schema: "git.repository.gitlab"
+    "_schema": "git.repository.gitlab"          // QUOTED — a bare _schema is hidden and dropped
 }]
-write: op.#WriteFile & { args: ["\(op.#Env.result.MU_OUT)/repos.json", json.Marshal(_out)] }
+write: op.#WriteFile & { args: ["\(_env.result.MU_OUT)/repos.json", _out] }
 ```
+
+Two grounded corrections in the example above (caught building it):
+
+- **`#Env` is a call site, not a bare selector.** `op.#Env.result.MU_OUT` written
+  inline (no `& {args:…}`) is *not* an addressable call — `op` survives into the
+  partial compile and nothing resolves. Bind a named call (`_env: op.#Env &
+  {args:[]}`) and reference `_env.result.MU_OUT`. Same for any effect: a call must
+  be a named field, never a bare sub-expression inside another call's args.
+- **`_schema` must be a QUOTED label, and don't `json.Marshal` in CUE.** A bare
+  `_schema:` is a hidden CUE field; CUE's `json.Marshal` (and ewe's value
+  conversion) drop hidden fields, so the routing tag silently vanishes from the
+  records file (verified against the real CUE engine). Tag with `"_schema":`
+  (quoted = a normal string field) and pass the records **structured** to
+  `#WriteFile` — the sink marshals in Go. (`json.Marshal(_out)` in CUE would also
+  re-introduce the same hidden-drop and the secret-freeze gotcha; see the secrets
+  spec.)
 
 The action references it by path; mu hashes the file at plan time and carries the
 digest:

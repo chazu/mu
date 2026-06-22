@@ -88,3 +88,39 @@ Read `ewe-populate-spec.md` + `ewe-arg-resolution-spec.md`, then **ground the ew
 engine** (`/Users/chazu/dev/go/ewe`): read `function.go` + the arg-resolution path
 the spec names, confirm the defect, and reproduce it with a throwaway test before
 fixing. That bounds step 1.
+
+---
+
+## Build complete (all 5 steps shipped)
+
+Implemented on feature branches off `main`, every suite green:
+
+- **ewe** (`ewe-arg-resolution`): step 1 (arg resolution as CUE-value eval) +
+  step 2 ewe-half (`#Secretf` + `RevealedSecret` guard) + `json.Number` rendering.
+- **mu** (`ewe-populate`): step 2 mu-half (`internal/ewesink`: `resolveSecrets`,
+  auth lowering, `#Secret`) + step 3 (`#HttpAll` paging, `#Http`, `#HttpBatch`,
+  `#WriteFile`/`#ReadFile`/`#Env`, per-execute registry) + step 4 (`ewe` body
+  kind: `Action.EweRef`, `executeEwe`, actionkey stanza, `eweSource`→CAS plan-time
+  plumbing in `muplugin.ActionSpec`/`mapToActionSpec`/`Resolve`).
+- **pudl** (`ewe-populate-ingest`): step 5 (`pudl run` ewe arm — render mu target
+  → `mu build` → wrap each output as `ObserveResult{records}` → reuse
+  `IngestObserveResults`). `#EweTarget` def was already present.
+
+The example-5 core (GitLab: auth + secret ref + `#HttpAll` + comprehension +
+`#HttpBatch` + indexed join + `#WriteFile`) runs end-to-end against `httptest`,
+with the token absent from the output file.
+
+### Findings (specs corrected in place)
+
+1. **CUE `json.Marshal` drops hidden fields** → a bare `_schema:` tag silently
+   vanishes from the records file. Convention is now the **quoted** `"_schema":`
+   label (or pass records structured to `#WriteFile`, which marshals in Go).
+   Corrected in `ewe-populate-spec.md` §2 and `ewe-body-kind-spec.md`.
+2. **HTTP response integers** decode as `float64` → render as `1.0` → break URL
+   interpolation (`/repos/1.0/...`). Sink now decodes with `UseNumber`; ewe's
+   `goToCUEExpr` renders `json.Number` by integrality. Noted in
+   `ewe-http-pagination-spec.md`.
+3. **`#Env` is a call site**, not a bare selector: write `_env: op.#Env &
+   {args:[]}` then reference `_env.result.MU_OUT`. A bare `op.#Env.result.MU_OUT`
+   inside another call's args is not addressable. Corrected in the body-kind
+   example.
