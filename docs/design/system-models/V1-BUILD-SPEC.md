@@ -384,8 +384,17 @@ translation, desired→sources). What remains is **build-time work, not design**
      existing `host` plugin's stub `plan` op (`mu/plugins/host/main.go:71`), making
      it observe+converge like k8s. Spec: [`host-converge-spec.md`](host-converge-spec.md).
      Build pending. (Example 1's `converge: remote-exec` is mis-specced → `host`.)
-   - **`cloudflare-dns` (example 4):** does **not** exist in `mu/plugins/`; still
-     unbuilt, no spec yet (API-backed set-difference plugin).
+   - **`cloudflare-dns` (example 4): POST-V1, deliberately unbuilt.** DNS is not
+     needed for V1 (k8s is the proof). When wanted, it is a **regular mu plugin**
+     (observe+plan, like host/k8s, but plugin-internal set-difference → HTTP
+     POST/PUT/DELETE — Cloudflare has no server-side reconcile tool like
+     kubectl/SSH). Use [`host-converge-spec.md`](host-converge-spec.md) as the
+     template (minus SSH, plus auth'd HTTP CRUD). **DNS is the recorded
+     revisit-trigger for ewe-converge:** it is the textbook pure-HTTP-CRUD case, so
+     if a *second/third* such converger appears (route53, a SaaS API), un-defer
+     ewe-converge (`#EweTarget` mutate) and make them declarative CUE rather than N
+     bespoke Go plugins — at which point `cloudflare-dns` is intentional throwaway.
+     YAGNI says: don't build the general ewe-converge machinery for one consumer.
    Treat the non-k8s examples as *target consumers*, not executable-today proofs.
 
 Review artifact: the full findings (F1–F8, each with `file:line` evidence) are
@@ -402,7 +411,7 @@ The convergence instances V1 must serve (under [`examples/`](examples/)):
 |---|-------|--------------|-----------|
 | 2 | [k8s policy](examples/02-k8s-policy/) | `#PluginPlan` (`k8s`) | ✅ **V1 convergence proof** — declarative-apply plugin ships; desired→sources, kubectl reconciles |
 | 1 | [Remote server](examples/01-remote-server/) | `#PluginPlan` (`host`) | 🔧 design resolved ([`host-converge-spec.md`](host-converge-spec.md)) — complete `host.plan`; build pending |
-| 4 | [DNS zone](examples/04-dns-zone/) | `#PluginPlan` (`cloudflare-dns`) | ❌ no `cloudflare-dns` plugin (§10) |
+| 4 | [DNS zone](examples/04-dns-zone/) | `#PluginPlan` (`cloudflare-dns`) | ⏸ **post-V1, deliberately unbuilt** — regular plugin when wanted; ewe-converge revisit-trigger (§10) |
 | 3 | [TLS certs](examples/03-tls-certs/) | `#PluginPlan` | ⚠️ verify a declarative plugin exists |
 | 5 | [repo governance](examples/05-repo-governance/) | optional `#PluginPlan` (`gitlab`) | ⚠️ verify a declarative plugin exists |
 

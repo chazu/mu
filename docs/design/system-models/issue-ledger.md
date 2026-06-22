@@ -671,6 +671,16 @@ cf. E5, Tier-2, `#Plugin`). Revisit-trigger: first model needing custom mutation
 logic a plugin `apply` op can't express. **ewe-populate is unaffected** — pulling
 external state (GitLab) stays a first-class, must-have V1 path.
 
+**DNS (example 4) disposition (V1 session):** `cloudflare-dns` is **post-V1,
+deliberately unbuilt** — not needed for the V1 proof (k8s). DNS is pure auth'd HTTP
+CRUD with no server-side reconcile tool (unlike kubectl/SSH), so when wanted it is a
+**regular mu plugin** (observe+plan, plugin-internal set-difference → POST/PUT/DELETE;
+template = host-converge-spec, minus SSH). **DNS is the named revisit-trigger for
+ewe-converge:** it is the textbook pure-HTTP-CRUD case; on a *second/third* such
+converger (route53, SaaS API), un-defer ewe-converge and make them declarative CUE
+instead of N bespoke Go plugins. Building the general machinery for one consumer is
+the rejected pattern. See [`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md) §10.
+
 ## Decided (V1 session) — the apply path (resolves review F2/F3)
 
 **Apply-translation lives in the plugin, not pudl.** The mu plugin `Plan` op
