@@ -54,6 +54,12 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 		}
 	}
 
+	// Ewe populator program — hash the content DIGEST (already content-
+	// addressed). No source, no values, no live HTTP in the key.
+	if a.EweRef != (cas.Digest{}) {
+		fmt.Fprintf(h, "ewe:%s\n", a.EweRef.String())
+	}
+
 	// Env vars sorted by key.
 	envKeys := make([]string, 0, len(a.Env))
 	for k := range a.Env {

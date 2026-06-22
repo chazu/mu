@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chazu/ewe"
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/ewesink"
 	"github.com/chazu/mu/internal/pithvm"
 	"github.com/chazu/mu/internal/sandbox"
 	"github.com/chazu/pith"
@@ -237,8 +239,8 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	}
 
 	// Execute the command (or pith Body program).
-	if len(a.Command) == 0 && len(a.Body) == 0 {
-		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command or body", a.ID)}
+	if len(a.Command) == 0 && len(a.Body) == 0 && a.EweRef == (cas.Digest{}) {
+		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command, body, or ewe program", a.ID)}
 	}
 
 	// Merge resolved secrets into a copy of the env. We must not mutate a.Env
@@ -436,6 +438,8 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 		var err error
 		if a.Toolchain != nil {
 			exitCode, err = e.executeInSandbox(attemptCtx, a, env)
+		} else if a.EweRef != (cas.Digest{}) {
+			exitCode, err = e.executeEwe(attemptCtx, a, env)
 		} else if len(a.Body) > 0 {
 			exitCode, err = e.executePithVM(attemptCtx, a, env)
 		} else {
@@ -556,6 +560,61 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 		}
 	}
 
+	return 0, nil
+}
+
+// executeEwe runs an ewe populator program: it restores the program from CAS by
+// its digest and runs it through a fresh per-execute ewe registry whose sink
+// functions close over this action's reveal (sealed inputs), MU_OUT, and
+// WorkDir. Outputs land in $MU_OUT and are copied to WorkDir exactly as for a
+// bare action.
+func (e *Executor) executeEwe(ctx context.Context, a *Action, env map[string]string) (int, error) {
+	rc, err := e.Store.Get(ctx, a.EweRef)
+	if err != nil {
+		return 1, fmt.Errorf("ewe: restore program %s: %w", a.EweRef.String(), err)
+	}
+	src, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil {
+		return 1, fmt.Errorf("ewe: read program: %w", err)
+	}
+
+	// Sealed-input values live in env (env-mode delivery). reveal resolves a
+	// secret name to its value; nothing else may reveal them.
+	sealedNames := make(map[string]bool, len(a.SealedInputs))
+	for name := range a.SealedInputs {
+		sealedNames[name] = true
+	}
+	reveal := func(name string) (string, error) {
+		v, ok := env[name]
+		if !ok {
+			return "", fmt.Errorf("sealed input %q not available to this action", name)
+		}
+		return v, nil
+	}
+
+	// #Env exposes the action environment EXCEPT sealed-input values, which must
+	// never enter the CUE layer (reveal happens only in sinks).
+	safeEnv := make(map[string]string, len(env))
+	for k, v := range env {
+		if !sealedNames[k] {
+			safeEnv[k] = v
+		}
+	}
+
+	reg, err := ewesink.NewRegistry(ewesink.Deps{
+		Reveal:  reveal,
+		WorkDir: a.WorkDir,
+		MuOut:   env["MU_OUT"],
+		Env:     safeEnv,
+	})
+	if err != nil {
+		return 1, fmt.Errorf("ewe: build registry: %w", err)
+	}
+
+	if _, err := ewe.NewProcessor(reg).ProcessSource(ctx, string(src)); err != nil {
+		return 1, fmt.Errorf("ewe: %w", err)
+	}
 	return 0, nil
 }
 
