@@ -7,6 +7,9 @@ import (
 	"github.com/chazu/mu/internal/sandbox"
 )
 
+// muVersion is the CLI version string, kept in sync with the release tag.
+const muVersion = "v0.3.1"
+
 func main() {
 	if sandbox.IsSandboxInit() {
 		sandbox.RunInit()
@@ -37,7 +40,7 @@ func main() {
 	case "guide":
 		os.Exit(runGuide(os.Args[2:]))
 	case "version":
-		fmt.Println("mu v0.1.0")
+		fmt.Println("mu " + muVersion)
 	default:
 		usage()
 		os.Exit(2)
