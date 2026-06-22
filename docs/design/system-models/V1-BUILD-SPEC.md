@@ -357,7 +357,7 @@ Verified against source (mu/pudl/ewe, 2026-06-21).
 | **apply path** (arm→Target, desired→sources) | design resolved (§5.5): pudl routes `desired` to the plugin as generated sources; the **plugin** reconciles (k8s/kubectl exemplar). pudl computes no domain ops. Net-new pudl code is bounded; requires a declarative-apply plugin. |
 | `#PluginPlan` CUE def + arm reader | sketch only; no Go reads a `converge` field |
 | `ingest-manifest` status narrowing | the §5 one-liner |
-| **ewe-populate** (auth'd HTTP fetch → catalog) | ewe has **zero** HTTP code, zero `EweTarget`/`HttpAll`/`auth.bearer`, zero `.cue` files (verified in ewe). It is *specced* (`ewe-*-spec.md`) but unbuilt. |
+| **ewe-populate** (auth'd HTTP fetch → catalog) | ewe has **zero** HTTP code, zero `EweTarget`/`HttpAll`/`auth.bearer`, zero `.cue` files (verified in ewe). Design resolved end-to-end (`ewe-populate-spec.md`): the `#EweTarget` def + a thin pudl ingest seam (wrap → reuse `IngestObserveResults`) on top of the four primitive specs. Build pending; the ewe HTTP/secret primitives are the bulk. |
 
 ---
 
@@ -370,8 +370,13 @@ translation, desired→sources). What remains is **build-time work, not design**
 1. **ewe-populate path.** Pull external state (the GitLab/DNS cases) is a must-have
    observe path but is unbuilt in ewe (no HTTP/auth/fetch; zero `EweTarget`/
    `HttpAll`/`auth.bearer`). It is a **prerequisite** for the convergence examples
-   that fetch over HTTP, and belongs to the observe-only milestone (§2/§9). The
-   `ewe-*-spec.md` files are its design.
+   that fetch over HTTP, and belongs to the observe-only milestone (§2/§9).
+   **Design now resolved end-to-end** in
+   [`ewe-populate-spec.md`](ewe-populate-spec.md) — `#EweTarget` schema + the pudl
+   ingest seam (wrap output as `ObserveResult`, reuse `IngestObserveResults`, so
+   drift is populate-kind-agnostic). The four `ewe-*-spec.md` files spec the ewe
+   internals it sits on. Remaining is **build** (the ewe HTTP/secret primitives),
+   not design.
 
 2. **Missing / wrong-shape plugins for the examples.** Convergence needs
    *declarative-apply* plugins (§5.5). Today only **`k8s`** qualifies (and is the V1
@@ -414,6 +419,7 @@ Where everything for this effort lives, and which file owns what:
 | [`README.md`](README.md) | Vision / the `#SystemModel` concept, observe-only + convergence overview. The front door. |
 | [`issue-ledger.md`](issue-ledger.md) | Decision rationale archive — every resolved issue (observe-only E1–E6…, and V1.1–V1.6) with the *why*. Source of truth for decisions; this spec distills its V1 section. |
 | [`examples/`](examples/) | Five worked `#SystemModel` consumers (structured: per-model `model.cue` + README). |
-| `ewe-*-spec.md` | ewe detail specs (arg-resolution, secrets, body-kind, http-pagination) — the design for the unbuilt ewe-populate path (§10). |
+| [`ewe-populate-spec.md`](ewe-populate-spec.md) | The end-to-end ewe-populate path: `#EweTarget` schema + the pudl ingest seam. Ties the four primitive specs together (§10). |
+| `ewe-*-spec.md` | ewe primitive specs (arg-resolution, secrets, body-kind, http-pagination) — the ewe internals the populate path sits on. |
 | [`../dialectics/`](../dialectics/)`*.ndjson` | Recorded dlktk arguments (`v1-2-loop-termination`, `e5-pure-ordering`). The auditable "why" behind the hard calls. |
 | [`archive/`](archive/) | **Historical** — the adversarial reviews, `ewe-extensions.md`, and the flat `examples.md` that drove the design. Superseded by the above; kept for trail. |
