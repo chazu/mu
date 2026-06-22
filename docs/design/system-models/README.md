@@ -1,5 +1,9 @@
 # System Models: a swamp-equivalent over pudl + mu
 
+> **⮕ Building V1 convergence? Go to [`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md)** — the
+> single canonical, self-contained build doc. This README is the vision/concept
+> doc; the build spec is the work. (Full doc map at the bottom of the build spec.)
+
 > **Status (2026-06-20).** This is the original vision doc. Every CRITICAL/MAJOR
 > finding from the two adversarial reviews has since been worked through in
 > **[issue-ledger.md](issue-ledger.md)** — read it for what is *resolved*,
