@@ -46,12 +46,14 @@ odroid: #SystemModel & {
 		severity: "warn", message: "host drifted from desired state"
 	}]
 
-	// CONVERGE — V1-OPEN. Hands drift to mu; remote-exec/remote-file plugins emit
-	// actions (apt install, useradd, write file, systemctl) and mu build runs them
-	// over SSH. The reconcile LOOP (re-observe → converge → … until drift = ∅) is
-	// not yet designed.
+	// CONVERGE — V1-OPEN (design resolved, see host-converge-spec.md). The SAME
+	// `host` plugin used for populate gains a declarative `plan` op: pudl routes
+	// `desired` to it as sources; host.plan emits guarded idempotent SSH actions
+	// (apt install, useradd, write file, systemctl); mu build runs them; the loop
+	// re-observes until drift = ∅. (Was mis-specced as `remote-exec`, which is
+	// imperative and can't reconcile declarative desired.)
 	converge: #PluginPlan & { // # V1-OPEN
-		plugin: "remote-exec"
+		plugin: "host"
 		input: {host: "192.168.1.104", user: "root", key: vault.ROOT_SSH_KEY}
 	}
 

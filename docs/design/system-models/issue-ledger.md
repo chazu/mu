@@ -51,6 +51,7 @@ plugins via `#Plugin`. No second evaluator, no embedded Lisp.
 | I1 | C2(i), MAJOR-2 | `ewe` action body kind: raw-source storage vs string field; per-execute registry; `#Output` wiring | ✅ [ewe-body-kind-spec.md](ewe-body-kind-spec.md) |
 | I2 | m3 | Pagination vocabulary (cursor / Link-header), all Go-side | ✅ [ewe-http-pagination-spec.md](ewe-http-pagination-spec.md) |
 | I3 | — | **ewe-populate end-to-end** — `#EweTarget` schema + pudl ingest seam (records file → catalog observe entries; drift kind-agnostic) | ✅ [ewe-populate-spec.md](ewe-populate-spec.md) — wrap output as `ObserveResult`, reuse `IngestObserveResults` |
+| I4 | — | **host convergence** (example 1's declarative-apply plugin) — complete the `host` plugin's stub `plan` op; per-`_schema` guarded SSH handlers; prune deferred | ✅ [host-converge-spec.md](host-converge-spec.md) — observe+converge in one plugin (k8s-style) |
 
 ## PUDL INTEGRATION
 

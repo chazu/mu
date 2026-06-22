@@ -379,11 +379,14 @@ translation, desired→sources). What remains is **build-time work, not design**
    not design.
 
 2. **Missing / wrong-shape plugins for the examples.** Convergence needs
-   *declarative-apply* plugins (§5.5). Today only **`k8s`** qualifies (and is the V1
-   proof). `cloudflare-dns` (example 4) does **not** exist in `mu/plugins/`;
-   `remote-exec` (example 1) is *imperative* and cannot consume declarative desired,
-   so example 1 needs a new **declarative host** plugin. Treat the non-k8s examples
-   as *target consumers*, not executable-today proofs.
+   *declarative-apply* plugins (§5.5). Today **`k8s`** qualifies and is the V1 proof.
+   - **Host (example 1): design resolved** — *not* a new plugin; complete the
+     existing `host` plugin's stub `plan` op (`mu/plugins/host/main.go:71`), making
+     it observe+converge like k8s. Spec: [`host-converge-spec.md`](host-converge-spec.md).
+     Build pending. (Example 1's `converge: remote-exec` is mis-specced → `host`.)
+   - **`cloudflare-dns` (example 4):** does **not** exist in `mu/plugins/`; still
+     unbuilt, no spec yet (API-backed set-difference plugin).
+   Treat the non-k8s examples as *target consumers*, not executable-today proofs.
 
 Review artifact: the full findings (F1–F8, each with `file:line` evidence) are
 summarized in the commit history (search "adversarial review"). Re-run the review
@@ -398,7 +401,7 @@ The convergence instances V1 must serve (under [`examples/`](examples/)):
 | # | Model | converge arm | V1 status |
 |---|-------|--------------|-----------|
 | 2 | [k8s policy](examples/02-k8s-policy/) | `#PluginPlan` (`k8s`) | ✅ **V1 convergence proof** — declarative-apply plugin ships; desired→sources, kubectl reconciles |
-| 1 | [Remote server](examples/01-remote-server/) | `#PluginPlan` (`remote-exec`) | ❌ remote-exec is imperative — needs a new **declarative host** plugin (§10) |
+| 1 | [Remote server](examples/01-remote-server/) | `#PluginPlan` (`host`) | 🔧 design resolved ([`host-converge-spec.md`](host-converge-spec.md)) — complete `host.plan`; build pending |
 | 4 | [DNS zone](examples/04-dns-zone/) | `#PluginPlan` (`cloudflare-dns`) | ❌ no `cloudflare-dns` plugin (§10) |
 | 3 | [TLS certs](examples/03-tls-certs/) | `#PluginPlan` | ⚠️ verify a declarative plugin exists |
 | 5 | [repo governance](examples/05-repo-governance/) | optional `#PluginPlan` (`gitlab`) | ⚠️ verify a declarative plugin exists |
@@ -420,6 +423,7 @@ Where everything for this effort lives, and which file owns what:
 | [`issue-ledger.md`](issue-ledger.md) | Decision rationale archive — every resolved issue (observe-only E1–E6…, and V1.1–V1.6) with the *why*. Source of truth for decisions; this spec distills its V1 section. |
 | [`examples/`](examples/) | Five worked `#SystemModel` consumers (structured: per-model `model.cue` + README). |
 | [`ewe-populate-spec.md`](ewe-populate-spec.md) | The end-to-end ewe-populate path: `#EweTarget` schema + the pudl ingest seam. Ties the four primitive specs together (§10). |
+| [`host-converge-spec.md`](host-converge-spec.md) | Host convergence — complete the `host` plugin's `plan` op (example 1's declarative-apply plugin). |
 | `ewe-*-spec.md` | ewe primitive specs (arg-resolution, secrets, body-kind, http-pagination) — the ewe internals the populate path sits on. |
 | [`../dialectics/`](../dialectics/)`*.ndjson` | Recorded dlktk arguments (`v1-2-loop-termination`, `e5-pure-ordering`). The auditable "why" behind the hard calls. |
 | [`archive/`](archive/) | **Historical** — the adversarial reviews, `ewe-extensions.md`, and the flat `examples.md` that drove the design. Superseded by the above; kept for trail. |
