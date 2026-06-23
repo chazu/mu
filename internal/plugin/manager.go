@@ -264,6 +264,13 @@ func (m *Manager) ResolveSecret(ctx context.Context, pluginName string, ref stri
 
 	entry, ok := m.plugins[pluginName]
 	if !ok {
+		// Built-in "env" scheme: resolve a sealed input from the process
+		// environment with no plugin. env-var secrets are too basic to warrant a
+		// subprocess; an explicitly declared plugin named "env" still overrides
+		// (handled by the registered-plugin path above).
+		if pluginName == "env" {
+			return resolveEnvSecret(ref)
+		}
 		return "", fmt.Errorf("no plugin registered for secret scheme %q", pluginName)
 	}
 	if entry.process == nil {
@@ -275,6 +282,17 @@ func (m *Manager) ResolveSecret(ctx context.Context, pluginName string, ref stri
 	}
 
 	return entry.process.ResolveSecret(ctx, ref)
+}
+
+// resolveEnvSecret implements the built-in "env" secret scheme: a ref of
+// "env:NAME" resolves to $NAME from the process environment. Read-only; the
+// value must never be logged, cached, or stored in CAS by the caller.
+func resolveEnvSecret(name string) (string, error) {
+	val, ok := os.LookupEnv(name)
+	if !ok {
+		return "", fmt.Errorf("env: environment variable %q is not set", name)
+	}
+	return val, nil
 }
 
 // StoreSecret sends a store_secret request to the named plugin.
