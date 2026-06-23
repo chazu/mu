@@ -18,6 +18,8 @@ github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8
 github.com/charmbracelet/x/termios v0.1.1/go.mod h1:rB7fnv1TgOPOyyKRJ9o+AsTU/vK5WHJ2ivHeut/Pcwo=
 github.com/charmbracelet/x/windows v0.2.2 h1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=
 github.com/charmbracelet/x/windows v0.2.2/go.mod h1:/8XtdKZzedat74NQFn0NGlGL4soHB0YQZrETF96h75k=
+github.com/chazu/ewe v0.1.0 h1:73jourQ314hQzBpPaZmeu+9TnJvI+kZvlsahHV3ek4k=
+github.com/chazu/ewe v0.1.0/go.mod h1:tQhjOWAyaJGmZzMHqFA4JHFK0AfsiAiZiOPJsOCNByo=
 github.com/chazu/pith v0.3.0 h1:EosuHbEyHPZEeS0GRXBN3o5LbGfIOxZU2wWOt+EftDs=
 github.com/chazu/pith v0.3.0/go.mod h1:Zb3dKCI01JpgXqKuerMuVb0sPY0+Xn9VjIA+1+fRC1w=
 github.com/clipperhouse/displaywidth v0.11.0 h1:lBc6kY44VFw+TDx4I8opi/EtL9m20WSEFgwIwO+UVM8=

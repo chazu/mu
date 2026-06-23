@@ -51,5 +51,3 @@ require (
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 )
-
-replace github.com/chazu/ewe => /Users/chazu/dev/go/ewe
