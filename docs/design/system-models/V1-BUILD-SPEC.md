@@ -58,7 +58,7 @@ dnsZone: #SystemModel & { name: "dns-example-com", desired: [ ... ], converge: .
 #SystemModel              schema (shape: populate/desired/converge/…)
   └─ dnsZone (INSTANCE)   ← pudl run's unit; the ACUTE loop runs over ONE instance
        └─ definitions     ← the instance's `desired` entries (e.g. dns.#Record values)
-            └─ status      ← catalog status is PER-DEFINITION (drifted/converging/converged/failed)
+            └─ status      ← catalog status is PER-DEFINITION (drifted/converging/clean/failed)
 ```
 
 - **Instance = the run/orchestration unit.** One `pudl run <model>` = one
@@ -112,7 +112,7 @@ resolve instance //models/<model>; enumerate its definitions
 populate                       # initial observe (the observe-only pass already does this)
 loop:
   drift                        # Unify: drift.Check vs desired, over the instance's definitions
-  if drift == ∅:   → (drift writes "converged"), break        # fixed-point test at TOP
+  if drift == ∅:   → (drift writes "clean"), break        # fixed-point test at TOP
   if iters >= cap: → loop writes "failed" (cap_exhausted), break   # safety stop
   converge:  arm → Target{plugin,input}; desired → sources     # Transform (apply path, §5.5)
   execute:   mu build --emit-manifest | pudl mu ingest-manifest # Execute + record
@@ -159,16 +159,16 @@ exit-0 means *the apply command ran*, **not** *the world now matches desired* �
 that is the "action ran ≠ world changed" lie, and it ships today in the loop-less
 path (which has no re-verify).
 
-**Fix (one line at `manifest.go:182`):** on exit 0, write **`converging`**
-("applied, pending verification"), not `converged`. Exit≠0 stays `failed`. Then
-**only the drift check ever writes `converged`** (`checker.go:101-103`, and it only
-does so when `Differences == ∅`). Result: `converged` means *observed == desired,
-verified* everywhere, with **zero new enum values** and **no overwrite race**. This
-also fixes the loop-less path (a manual apply that exits 0 but didn't fully
-converge now honestly sits at `converging`, not a false `converged`).
+**Fix (`manifest.go`):** on exit 0, write **`converging`** ("applied, pending
+verification"), not an in-sync status. Exit≠0 stays `failed`. Then **only the drift
+re-check ever writes the in-sync status `clean`**, and only when drift == ∅. Result:
+`clean` means *observed == desired, verified* everywhere, with **no overwrite race**.
+This also fixes the loop-less path (a manual apply that exits 0 but didn't fully
+converge now honestly sits at `converging`, not a false in-sync). (See §8: the
+terminal in-sync status is `clean`; the redundant `converged` was removed.)
 
 Healthy 1-iteration timeline:
-`drifted → converging (export) → converging (applied, exit 0) → [re-observe, drift ∅] converged`.
+`drifted → converging (export) → converging (applied, exit 0) → [re-observe, drift ∅] clean`.
 
 ---
 
@@ -257,10 +257,10 @@ re-observe at bottom, fixed-point test at top, initial populate before the loop;
 the instance is the run unit, definitions the status unit (§2).
 
 **Done when:** `pudl run <model> --converge` runs the loop happy-path on a
-convergent instance and reaches `converged`; `--only` / `--dry-run` behave per §3.
+convergent instance and reaches `clean`; `--only` / `--dry-run` behave per §3.
 
 ### V1.2 — termination / fixed point
-**Build:** the `drift == ∅ → converged` test; the `iters >= cap → failed` stop;
+**Build:** the `drift == ∅ → clean` test; the `iters >= cap → failed` stop;
 `--max-iters` flag (default 5).
 
 **Decisions baked in:** the cap is the halting proof. **The monotonic-drift-shrink
@@ -271,7 +271,7 @@ out and recorded:
 (grounded semantics: cap+drift==∅ justified, guard defeated, robust through a full
 steelman). **Revisit-trigger:** first real oscillating consumer.
 
-**Done when:** loop stops at drift==∅ (→`converged`) or at the cap (→`failed`),
+**Done when:** loop stops at drift==∅ (→`clean`) or at the cap (→`failed`),
 and never spins unbounded.
 
 ### V1.3 — drift-gating
@@ -312,25 +312,26 @@ ordinary drift, and `execute_error` always emits the partial-state warning.
 
 ## 8. Status vocabulary
 
-The catalog status enum already holds every value needed — **no schema migration.**
-`UpdateStatus` (`pudl/internal/database/catalog_status.go:18-34`) is a blind set
-with a validity-check only (no FSM transition guard), so the loop cycles statuses
-freely. Valid set: `unknown/clean/drifted/converging/converged/failed`
-(`catalog_status.go:20-21`).
+`UpdateStatus` (`pudl/internal/database/catalog_status.go`) is a blind set with a
+validity-check only (no FSM transition guard), so the loop cycles statuses freely.
+Valid set: `unknown/drifted/converging/clean/failed`.
 
 | status | meaning | written by |
 |--------|---------|-----------|
-| `clean` / `drifted` | observed == / ≠ desired, observe signal | `drift check` (ships, `checker.go:101-117`) |
-| `converging` | mid-loop: actions emitted **or** applied-but-not-yet-verified | `export-actions` (ships); `ingest-manifest` after the §5 fix |
-| `converged` | drift == ∅, **verified** | **`drift check` only** (after the §5 fix; ships, semantics narrowed) |
+| `clean` | observed == desired, **drift == ∅ verified** (the single in-sync state) | the drift re-check — whether the model is observe-only or was just converged |
+| `drifted` | observed ≠ desired | the drift check |
+| `converging` | mid-loop: actions applied, pending re-verification | `ingest-manifest` on exit 0 (build-spec §5) |
 | `failed` | `cap_exhausted` or `execute_error` | the loop (V1.2/V1.4); `ingest-manifest` on exit≠0 |
 
-**Correction (was wrong in an earlier draft):** `converged`/`failed` are **already
-written today** — by `ingest-manifest` on action exit code (`manifest.go:182-188`).
-The V1 change is therefore *not* "add new writes"; it is **narrowing**
-`ingest-manifest` (exit-0 → `converging`, not `converged`, §5) so the verified
-`converged` is owned solely by the drift check. That removes a latent lie rather
-than filling a blank.
+**Decision (2026-06-29): `converged` collapsed into `clean`.** An earlier draft kept
+both `clean` (observe signal) and `converged` (verified ∅ after apply). They named
+the **same state** — observed == desired — differing only in *provenance*, which
+already lives in the run history/report, not the status enum. So the terminal
+in-sync status is a single value, **`clean`**, and `converged` was removed from the
+vocabulary. The provenance narrowing still holds: `ingest-manifest` writes
+`converging` on a bare apply (exit 0), and only the drift re-check writes the
+verified `clean` — a bare apply never claims in-sync. The converge loop's run-report
+`outcome` likewise uses `clean` for the ∅ terminal.
 
 ---
 
