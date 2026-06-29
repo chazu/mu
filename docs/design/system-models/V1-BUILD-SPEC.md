@@ -421,6 +421,53 @@ ewe-converge. **k8s is the end-to-end proof; the rest are target consumers.**
 
 ---
 
+## 12. Design note (2026-06-26): the socket question + cross-model data dependencies
+
+Surfaced while removing pudl's legacy "socket" wiring — the old `internal/definition`
+cross-definition reference graph, now deleted (pudl `docs/vestige-sweep.md`).
+
+**Sockets are retired correctly — do not resurrect them at the declaration layer.**
+The old sockets encoded one load-bearing thing: runtime **output→input** dataflow
+between resources (B's field = A's *generated* output, e.g. `subnet.vpcId ← vpc.id`).
+V1 already reassigned every socket concern — ordering → the mu DAG (E5), relating →
+Datalog (P2), value-passing → the mu DAG / ewe `.result` threading. A pudl-side wiring
+graph is the wrong layer and the wrong mechanism.
+
+**Whether the *need* bites depends on the target class:**
+- *Declarative-apply* (k8s / any server-side reconciler) — never needs sockets:
+  resources reference each other by stable author-known name and the reconciler
+  resolves intra-set references. `desired:[...]` + plugin-reconciles is complete. This
+  is the V1 proof class.
+- *Imperative CRUD* (cloud APIs with no server-side reconcile — AWS, DNS) — the
+  output→input need resurfaces: a `desired` manifest can't carry an ID that does not
+  exist yet. Today that create-order is buried in opaque plugin code.
+
+**Successor, when it's time:** the principled reimagining is **ewe-converge with value
+threading** (output of one effect → input of the next via `.result` dataflow in the ewe
+body), declarative in CUE/ewe — *not* a pudl-definition wiring graph. That is exactly
+the deferred ewe-converge item (§7), whose revisit-trigger is a second/third
+pure-HTTP-CRUD converger. The one genuinely-lost capability is author-visible
+declarative cross-resource dependency (Terraform-style interpolation) at the `desired`
+layer — a sizeable feature, YAGNI until a real consumer. **Net: leave it cut; the
+architecture deliberately parked this exact case with a named trigger.**
+
+**New requirement — reason over data dependencies BETWEEN models.** Distinct from the
+intra-model case above: model B's desired/observed state can depend on model A's output
+(a `network` model feeds a `compute` model; a model's checks depend on another's
+inventory). `pudl run` is single-instance and has no cross-model references today. Both
+the **system** (to order/trigger runs, compute blast radius, re-run downstream when an
+upstream changes) and the **user** (to answer "what depends on this model / what does it
+depend on") must be able to *query* these dependencies. The home is **Datalog over the
+catalog** — model instances are already recorded as catalog records (identity
+`//models/<name>`), so an inter-model `depends_on` relation (declared on the model
+and/or derived from shared schema/identity) is queryable via `pudl query`, not a bespoke
+graph. Convergence work should add: (a) a way to **declare** a model's data
+dependencies, and (b) a relation to **reason over** them — impact analysis + run
+ordering. This is the cross-model analog of what sockets did within a single definition
+set; unlike sockets it belongs at the data/Datalog layer, where the design already puts
+"relating." (Revisit-trigger: the first model whose run must be sequenced after, or
+re-triggered by, another model's output.)
+
 ## Document map
 
 Where everything for this effort lives, and which file owns what:
