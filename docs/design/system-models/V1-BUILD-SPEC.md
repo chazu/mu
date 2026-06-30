@@ -469,6 +469,21 @@ set; unlike sockets it belongs at the data/Datalog layer, where the design alrea
 "relating." (Revisit-trigger: the first model whose run must be sequenced after, or
 re-triggered by, another model's output.)
 
+**Status — BUILT (pudl Phase 1, 2026-06-30).** Both (a) and (b) now ship in pudl:
+- **(a) declare:** `#SystemModel.depends_on?: [...string]` — names of other model
+  instances. `pudl run` reconciles these into `model_depends_on(from,to)` facts
+  (add new / invalidate removed — idempotent, no per-run churn).
+- **(b) reason:** built-in recursive rules `depends_transitive` / `impacted_by`
+  (blast radius) / `cyclic`, queryable via `pudl query`. Plus `pudl query --topo`
+  (run order, errors on cycle), `pudl query --list` (relation discovery), and an
+  opt-in `pudl run --check-upstream` stale-input advisory.
+
+Stays cut as designed: author-visible value interpolation (`${vpc.id}`) remains the
+ewe-converge item (§7); **re-running downstream models is NOT in pudl** — that
+orchestration is the mu DAG's / an external scheduler's job, consuming the relation.
+Design + rationale: pudl `docs/cross-model-dependencies.md`. Validated end-to-end on a
+local k3d cluster (real k8s convergence + cross-model queries).
+
 ## Document map
 
 Where everything for this effort lives, and which file owns what:
