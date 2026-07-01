@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 
 	"net/http"
 
@@ -34,6 +35,11 @@ import (
 const (
 	MediaTypeMuBlob   = "application/vnd.mu.blob.v1"
 	MediaTypeMuAction = "application/vnd.mu.action-result.v1+json"
+	// ArtifactTypeMuAction is the manifest-level artifactType for a cache action
+	// result (the config media type without the +json). A registry UI keys off it
+	// to recognise and collapse a build cache; older caches lacking it are still
+	// recognised by MediaTypeMuAction on the config.
+	ArtifactTypeMuAction = "application/vnd.mu.action-result.v1"
 )
 
 // Registry abstracts the OCI operations needed by OCIStore.
@@ -267,7 +273,10 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 			MediaType: MediaTypeMuBlob,
 			Digest:    toOCIDigest(dgst),
 			Annotations: map[string]string{
-				"mu.output.name": name,
+				// Standard OCI title (so registry UIs and `oras` name the layer)
+				// plus the legacy mu key kept for back-compat.
+				ocispec.AnnotationTitle: name,
+				"mu.output.name":        name,
 			},
 		}
 		if resolved, err := s.repo.Resolve(ctx, layer.Digest.String()); err == nil {
@@ -276,11 +285,20 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 		layers = append(layers, layer)
 	}
 
+	// Only deterministic annotations belong on a cache manifest: the entry is
+	// content-addressed and tagged by action key, so a non-deterministic value
+	// (e.g. a wall-clock `created`) would change the manifest digest on every
+	// push, re-point the tag, and orphan the prior manifest. artifactType, output
+	// titles, and exit code are all fixed for a given action.
 	manifest := ocispec.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2},
-		MediaType: ocispec.MediaTypeImageManifest,
-		Config:    configDesc,
-		Layers:    layers,
+		Versioned:    specs.Versioned{SchemaVersion: 2},
+		MediaType:    ocispec.MediaTypeImageManifest,
+		ArtifactType: ArtifactTypeMuAction,
+		Config:       configDesc,
+		Layers:       layers,
+		Annotations: map[string]string{
+			"dev.mu.exit-code": strconv.Itoa(result.ExitCode),
+		},
 	}
 
 	manifestBytes, err := json.Marshal(manifest)
