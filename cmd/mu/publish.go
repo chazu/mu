@@ -41,15 +41,10 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 
 	var published, failed int
 	for _, target := range targets {
-		outputs, exitCode, found := collectTargetOutputs(result, target)
+		outputs, command, exitCode, found := collectTargetOutputs(result, target)
 		if !found || len(outputs) == 0 {
 			fmt.Fprintf(os.Stderr, "  publish: %s produced no outputs, skipping\n", target)
 			continue
-		}
-
-		var command []string
-		if a := result.Graph.Action(target); a != nil {
-			command = a.Command
 		}
 
 		meta := oci.ArtifactMeta{
@@ -93,10 +88,13 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 
 // collectTargetOutputs merges the outputs of every completed action belonging to
 // a target: the action named exactly for the target, plus per-output actions
-// "<target>:<name>". Dependency actions (different IDs) are excluded. Returns the
-// merged outputs, the producing action's exit code, and whether any matched.
-func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[string]cas.Digest, int, bool) {
+// "<target>:<name>" (e.g. "//cmd/mu:build"). Dependency actions (different IDs)
+// are excluded. It returns the merged outputs plus the command and exit code of
+// the output-producing action (the target's terminal action, whose argv the
+// artifact represents), and whether any action matched.
+func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[string]cas.Digest, []string, int, bool) {
 	outputs := make(map[string]cas.Digest)
+	var command []string
 	exitCode, found := 0, false
 	prefix := target + ":"
 	for _, s := range result.ExecResult.Completed {
@@ -104,14 +102,19 @@ func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[s
 			continue
 		}
 		found = true
-		if s.ID == target {
-			exitCode = s.ExitCode
-		}
 		for name, dgst := range s.Outputs {
 			outputs[name] = dgst
 		}
+		// The action that actually emitted outputs carries the command + exit
+		// code the published artifact should record.
+		if len(s.Outputs) > 0 {
+			exitCode = s.ExitCode
+			if a := result.Graph.Action(s.ID); a != nil {
+				command = a.Command
+			}
+		}
 	}
-	return outputs, exitCode, found
+	return outputs, command, exitCode, found
 }
 
 // resolvePublishBase returns "<registry>/<repository>" from config.publish, or a

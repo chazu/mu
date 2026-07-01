@@ -346,17 +346,32 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
 	}
 
-	// Copy outputs from MU_OUT staging dir to WorkDir so dependents can read them.
+	// Collect declared outputs into WorkDir so dependents and cache storage can
+	// find them. An action may write an output to either location:
+	//   - $MU_OUT (the staging dir): ewe/pith actions, or any command that
+	//     honors MU_OUT. We copy those into WorkDir.
+	//   - its working dir directly: a plain shell command with a relative output
+	//     path (e.g. `cowsay ... > greeting.txt`, `go build -o=mu`). exec runs
+	//     with cmd.Dir = WorkDir, so the file already lands at the destination.
+	// Prefer the staging copy; fall back to an in-place WorkDir output. Error
+	// only if the output is in neither — otherwise a legacy bare command that
+	// wrote to WorkDir (the pre-$MU_OUT convention) fails to build.
 	if muOutDir != "" {
 		for _, outRel := range a.Outputs {
 			srcPath := filepath.Join(muOutDir, outRel)
 			dstPath := filepath.Join(a.WorkDir, outRel)
-			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: create output dir for %s: %w", a.ID, outRel, err)}
-			}
 			src, err := os.Open(srcPath)
 			if err != nil {
+				if os.IsNotExist(err) {
+					if _, statErr := os.Stat(dstPath); statErr == nil {
+						continue // command wrote the output directly to WorkDir
+					}
+				}
 				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: open output %s: %w", a.ID, outRel, err)}
+			}
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+				src.Close()
+				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: create output dir for %s: %w", a.ID, outRel, err)}
 			}
 			if err := writeFile(dstPath, src); err != nil {
 				src.Close()
