@@ -27,8 +27,13 @@ func runBuild(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "alias for --plan")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
 	publish := fs.Bool("publish", false, "after a successful build, publish each target's outputs as an artifact (config.publish)")
+	var attach stringSliceFlag
+	fs.Var(&attach, "attach", "attach a file to the published artifact as a referrer: <artifactType>=<path> (repeatable; implies --publish)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+	if len(attach) > 0 && !*publish {
+		return cli.fail(exitUsage, "--attach requires --publish")
 	}
 
 	if *dryRun {
@@ -139,7 +144,7 @@ func runBuild(args []string) int {
 		total, result.Cached, result.Failed, elapsed.Seconds())
 
 	if *publish {
-		if code := publishTargets(ctx, cli, result, targets); code != exitOK {
+		if code := publishTargets(ctx, cli, result, targets, attach); code != exitOK {
 			return code
 		}
 	}

@@ -62,7 +62,7 @@ func TestPublishArtifact(t *testing.T) {
 		Outputs:   map[string]cas.Digest{"app": binDg, "meta.json": metaDg},
 	}
 
-	dgst, err := store.PublishArtifact(ctx, meta, src, []string{"abc123", "latest"})
+	desc, err := store.PublishArtifact(ctx, meta, src, []string{"abc123", "latest"})
 	if err != nil {
 		t.Fatalf("PublishArtifact: %v", err)
 	}
@@ -73,8 +73,8 @@ func TestPublishArtifact(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve %s: %v", tag, err)
 		}
-		if d.Digest != dgst {
-			t.Errorf("tag %s -> %s, want %s", tag, d.Digest, dgst)
+		if d.Digest != desc.Digest {
+			t.Errorf("tag %s -> %s, want %s", tag, d.Digest, desc.Digest)
 		}
 	}
 
