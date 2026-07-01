@@ -54,6 +54,44 @@ func TestImpureActionSkipsCacheLookup(t *testing.T) {
 	}
 }
 
+// TestBareActionRelativeOutputInWorkDir covers the case where a plain shell
+// command writes a RELATIVE declared output to its working directory (e.g.
+// `echo hi > out.txt`) rather than to $MU_OUT. A relative output triggers the
+// $MU_OUT staging dir, but executeBare runs with cmd.Dir = WorkDir, so the file
+// lands in WorkDir. Output collection must find it there instead of erroring
+// "open output ...: no such file" (regressed when $MU_OUT staging was added).
+func TestBareActionRelativeOutputInWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	store := newStore(t)
+
+	g := dag.NewGraph()
+	_ = g.AddAction(&dag.Action{
+		ID:      "A",
+		Command: []string{"sh", "-c", "echo hello > out.txt"},
+		Outputs: []string{"out.txt"}, // relative → $MU_OUT staging path
+		WorkDir: workDir,
+	})
+
+	res, err := (&dag.Executor{Store: store, Workers: 1}).Execute(context.Background(), g)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(res.Failed) != 0 {
+		t.Fatalf("action failed: %v", res.Failed[0].Err)
+	}
+	if len(res.Completed) != 1 {
+		t.Fatalf("completed %d, want 1", len(res.Completed))
+	}
+	// The output must be captured into the CAS (non-zero digest).
+	if dg, ok := res.Completed[0].Outputs["out.txt"]; !ok || dg.IsZero() {
+		t.Fatalf("out.txt not captured: %+v", res.Completed[0].Outputs)
+	}
+	// And it must be materialized in WorkDir for dependents.
+	if b, err := os.ReadFile(filepath.Join(workDir, "out.txt")); err != nil || strings.TrimSpace(string(b)) != "hello" {
+		t.Fatalf("WorkDir output = %q, err=%v", b, err)
+	}
+}
+
 func TestImpureActionSkipsCacheStorage(t *testing.T) {
 	workDir := t.TempDir()
 	outA := filepath.Join(workDir, "a.txt")
