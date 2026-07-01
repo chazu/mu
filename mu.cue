@@ -19,6 +19,14 @@ cache: {
 		repository: "loosh-industries/mu-cache"
 	}
 }
+
+// `mu build --publish <target>` pushes that target's outputs to the platform
+// registry (snooker) as a first-class artifact under loosh-industries/<slug>,
+// tagged by git sha + latest. Same auth as the cache push.
+publish: {
+	registry:   "registry.platform.loosh.cloud"
+	repository: "loosh-industries"
+}
 toolchains: [{
 	toolchain: "bb"
 	from:      "scratch"
