@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,18 +14,48 @@ import (
 	"github.com/chazu/mu/internal/coordinator"
 )
 
+// attachSpec is a --attach entry: an artifactType and the file to attach.
+type attachSpec struct {
+	Type string
+	Path string
+}
+
+// parseAttachments parses repeatable "<artifactType>=<path>" flags. The '=' form
+// keeps type and path paired unambiguously across multiple attachments.
+func parseAttachments(specs []string) ([]attachSpec, error) {
+	out := make([]attachSpec, 0, len(specs))
+	for _, s := range specs {
+		i := strings.IndexByte(s, '=')
+		if i <= 0 || i == len(s)-1 {
+			return nil, fmt.Errorf("--attach %q must be <artifactType>=<path>", s)
+		}
+		out = append(out, attachSpec{Type: s[:i], Path: s[i+1:]})
+	}
+	return out, nil
+}
+
+// stringSliceFlag collects a repeatable string flag into a slice.
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string     { return strings.Join(*s, ",") }
+func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
+
 // publishTargets pushes each requested target's outputs to the publish registry
 // (config.publish) as a first-class artifact — one layer per output, a config
 // blob of {target, command, created, revision, source, outputs}, tagged by git
 // sha + latest. Called after a successful `mu build --publish`. Returns an exit
 // code; exitOK on success.
-func publishTargets(ctx context.Context, c *cliContext, result *coordinator.BuildResult, targets []string) int {
+func publishTargets(ctx context.Context, c *cliContext, result *coordinator.BuildResult, targets []string, attachSpecs []string) int {
 	base, code, ok := resolvePublishBase(c)
 	if !ok {
 		return code
 	}
 	if c.Store == nil {
 		return c.fail(exitFail, "--publish needs the CAS store (do not combine with --no-cache)")
+	}
+	attachments, err := parseAttachments(attachSpecs)
+	if err != nil {
+		return c.fail(exitUsage, "%v", err)
 	}
 
 	// Side-band provenance. Missing git info is non-fatal — an artifact can be
@@ -65,14 +96,32 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 			failed++
 			continue
 		}
-		dgst, err := oci.New(remoteRepo).PublishArtifact(ctx, meta, c.Store, tags)
+		store := oci.New(remoteRepo)
+		subject, err := store.PublishArtifact(ctx, meta, c.Store, tags)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  publish: %s: %v\n", target, err)
 			failed++
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "  published %s -> %s:%s (%s)\n", target, ref, tags[0], dgst)
+		fmt.Fprintf(os.Stderr, "  published %s -> %s:%s (%s)\n", target, ref, tags[0], subject.Digest)
 		published++
+
+		// Attach referrers (SBOMs, provenance, logs) to this artifact.
+		for _, att := range attachments {
+			data, readErr := os.ReadFile(att.Path)
+			if readErr != nil {
+				fmt.Fprintf(os.Stderr, "  attach: %s: %v\n", att.Path, readErr)
+				failed++
+				continue
+			}
+			refDgst, attErr := store.AttachReferrer(ctx, subject, att.Type, filepath.Base(att.Path), data, created)
+			if attErr != nil {
+				fmt.Fprintf(os.Stderr, "  attach: %s: %v\n", att.Path, attErr)
+				failed++
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "    attached %s (%s) -> %s\n", filepath.Base(att.Path), att.Type, refDgst)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "  published %d target(s)", published)
