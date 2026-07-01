@@ -5,6 +5,7 @@ type ProjectConfig struct {
 	Targets      []Target       `json:"targets,omitempty"`
 	Toolchains   []Toolchain    `json:"toolchains,omitempty"`
 	Cache        *CacheConfig   `json:"cache,omitempty"`
+	Publish      *PublishConfig `json:"publish,omitempty"`
 	Plugins      []PluginDef    `json:"plugins,omitempty"`
 	Preprocessor *Preprocessor  `json:"preprocessor,omitempty"`
 	Secrets      *SecretsConfig `json:"secrets,omitempty"`
@@ -36,16 +37,16 @@ type SecretsConfig struct {
 
 // Target describes a build target.
 type Target struct {
-	Name         string            `json:"target"`
-	Toolchain    string            `json:"toolchain,omitempty"`
-	Sources      []string          `json:"sources"`
-	Deps         []string          `json:"deps,omitempty"`
-	Config       map[string]any    `json:"config,omitempty"`
-	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name → secret ref (e.g. "pass:deploy/token")
-	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name → delivery mode: "env" (default) or "file"
-	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name → secret ref; action writes to $MU_SEALED_OUT_DIR/<name>
-	Plan      []any `json:"plan,omitempty"`      // pith plan program (alternative to plugin planning)
-	Transform []any `json:"transform,omitempty"` // pith transform program (runs after deps complete)
+	Name             string            `json:"target"`
+	Toolchain        string            `json:"toolchain,omitempty"`
+	Sources          []string          `json:"sources"`
+	Deps             []string          `json:"deps,omitempty"`
+	Config           map[string]any    `json:"config,omitempty"`
+	SealedInputs     map[string]string `json:"sealed_inputs,omitempty"`      // name → secret ref (e.g. "pass:deploy/token")
+	SealedInputModes map[string]string `json:"sealed_input_modes,omitempty"` // name → delivery mode: "env" (default) or "file"
+	SealedOutputs    map[string]string `json:"sealed_outputs,omitempty"`     // file name → secret ref; action writes to $MU_SEALED_OUT_DIR/<name>
+	Plan             []any             `json:"plan,omitempty"`               // pith plan program (alternative to plugin planning)
+	Transform        []any             `json:"transform,omitempty"`          // pith transform program (runs after deps complete)
 	// BRICK classification (optional, set by pudl export-actions).
 	// mu does not validate these — pudl enforces BRICK constraints via CUE.
 	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"
@@ -87,10 +88,10 @@ type PluginDef struct {
 // (e.g., posting results to a webhook) but do not produce build actions.
 // Advice errors are non-fatal to the build.
 type AdviceDef struct {
-	Plugin       string            `json:"plugin"`                    // plugin name (must match a plugin in plugins[])
-	Phases       []string          `json:"phases,omitempty"`          // lifecycle phases: "after-build", etc.
-	Config       map[string]any    `json:"config,omitempty"`          // plugin-specific configuration
-	SealedInputs map[string]string `json:"sealed_inputs,omitempty"`   // name → secret ref for advice secrets
+	Plugin       string            `json:"plugin"`                  // plugin name (must match a plugin in plugins[])
+	Phases       []string          `json:"phases,omitempty"`        // lifecycle phases: "after-build", etc.
+	Config       map[string]any    `json:"config,omitempty"`        // plugin-specific configuration
+	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // name → secret ref for advice secrets
 }
 
 // Preprocessor configures a file preprocessor that transforms non-JSON
@@ -143,6 +144,16 @@ type CacheConfig struct {
 // path within that registry (e.g. "mu-cache"). Both must be set for push to
 // succeed.
 type CachePush struct {
+	Registry   string `json:"registry,omitempty"`
+	Repository string `json:"repository,omitempty"`
+}
+
+// PublishConfig configures `mu build --publish`. Registry is the OCI registry
+// host (e.g. "registry.platform.loosh.cloud"); Repository is the base repo path
+// the published artifact lands under, to which the target slug is appended
+// (e.g. "loosh-industries" → "loosh-industries/image/snooker"). The first
+// segment must be an org/user the pusher can push to.
+type PublishConfig struct {
 	Registry   string `json:"registry,omitempty"`
 	Repository string `json:"repository,omitempty"`
 }

@@ -40,6 +40,12 @@ const (
 	// to recognise and collapse a build cache; older caches lacking it are still
 	// recognised by MediaTypeMuAction on the config.
 	ArtifactTypeMuAction = "application/vnd.mu.action-result.v1"
+
+	// mu artifact media types (`mu build --publish`). Unlike a cache entry, a
+	// published artifact carries human metadata (target/command/created/revision)
+	// in its config blob and is tagged by git sha + latest.
+	MediaTypeMuArtifactConfig = "application/vnd.mu.artifact.v1+json" // config blob
+	ArtifactTypeMuArtifact    = "application/vnd.mu.artifact.v1"      // manifest artifactType
 )
 
 // Registry abstracts the OCI operations needed by OCIStore.

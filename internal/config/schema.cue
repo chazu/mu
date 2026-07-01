@@ -14,9 +14,17 @@ package mu
 	targets?:      [...#Target]
 	toolchains?:   [...#Toolchain]
 	cache?:        #CacheConfig
+	publish?:      #PublishConfig
 	plugins?:      [...#PluginDef]
 	preprocessor?: #Preprocessor
 	secrets?:      #SecretsConfig
+	...
+}
+
+// #PublishConfig describes the target of `mu build --publish`.
+#PublishConfig: {
+	registry?:   string
+	repository?: string
 	...
 }
 

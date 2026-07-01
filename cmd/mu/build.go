@@ -26,6 +26,7 @@ func runBuild(args []string) int {
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
 	dryRun := fs.Bool("dry-run", false, "alias for --plan")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
+	publish := fs.Bool("publish", false, "after a successful build, publish each target's outputs as an artifact (config.publish)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -35,6 +36,9 @@ func runBuild(args []string) int {
 	}
 	if *emitManifest && *planOnly {
 		return cli.fail(exitUsage, "--emit-manifest and --plan are mutually exclusive")
+	}
+	if *publish && *planOnly {
+		return cli.fail(exitUsage, "--publish and --plan are mutually exclusive")
 	}
 
 	targets := fs.Args()
@@ -133,6 +137,12 @@ func runBuild(args []string) int {
 	total := result.Completed + result.Cached
 	fmt.Fprintf(os.Stderr, "  \u2713 %d completed (%d cached), %d failed in %.1fs\n",
 		total, result.Cached, result.Failed, elapsed.Seconds())
+
+	if *publish {
+		if code := publishTargets(ctx, cli, result, targets); code != exitOK {
+			return code
+		}
+	}
 	return exitOK
 }
 
