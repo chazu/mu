@@ -12,6 +12,7 @@ import (
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/coordinator"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // attachSpec is a --attach entry: an artifactType and the file to attach.
@@ -32,6 +33,30 @@ func parseAttachments(specs []string) ([]attachSpec, error) {
 		out = append(out, attachSpec{Type: s[:i], Path: s[i+1:]})
 	}
 	return out, nil
+}
+
+// attachReferrers attaches each spec's file to subject as an OCI referrer,
+// logging progress to stderr. Shared by `mu build --publish --attach` and
+// `mu plugin push --attach`. Returns the number of failed attachments;
+// failures are logged and do not stop later attachments.
+func attachReferrers(ctx context.Context, store *oci.OCIStore, subject ocispec.Descriptor, attachments []attachSpec, created string) int {
+	failed := 0
+	for _, att := range attachments {
+		data, err := os.ReadFile(att.Path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  attach: %s: %v\n", att.Path, err)
+			failed++
+			continue
+		}
+		refDgst, err := store.AttachReferrer(ctx, subject, att.Type, filepath.Base(att.Path), data, created)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  attach: %s: %v\n", att.Path, err)
+			failed++
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "    attached %s (%s) -> %s\n", filepath.Base(att.Path), att.Type, refDgst)
+	}
+	return failed
 }
 
 // stringSliceFlag collects a repeatable string flag into a slice.
@@ -107,21 +132,7 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 		published++
 
 		// Attach referrers (SBOMs, provenance, logs) to this artifact.
-		for _, att := range attachments {
-			data, readErr := os.ReadFile(att.Path)
-			if readErr != nil {
-				fmt.Fprintf(os.Stderr, "  attach: %s: %v\n", att.Path, readErr)
-				failed++
-				continue
-			}
-			refDgst, attErr := store.AttachReferrer(ctx, subject, att.Type, filepath.Base(att.Path), data, created)
-			if attErr != nil {
-				fmt.Fprintf(os.Stderr, "  attach: %s: %v\n", att.Path, attErr)
-				failed++
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "    attached %s (%s) -> %s\n", filepath.Base(att.Path), att.Type, refDgst)
-		}
+		failed += attachReferrers(ctx, store, subject, attachments, created)
 	}
 
 	fmt.Fprintf(os.Stderr, "  published %d target(s)", published)
@@ -185,10 +196,13 @@ func resolvePublishBase(c *cliContext) (string, int, bool) {
 }
 
 // targetSlug turns a target label into a repository path segment: "//image/
-// akashic" -> "image/akashic". Slashes are preserved (akashic accepts
-// multi-segment repos); the leading "//" is stripped.
+// akashic" -> "image/akashic", "//hello:greeting" -> "hello/greeting". Slashes
+// are preserved (akashic accepts multi-segment repos); the leading "//" is
+// stripped. The ':' separating directory from target name maps to '/' — a
+// literal ':' in the ref would otherwise be parsed as a tag separator,
+// silently dropping the target name from the repository path.
 func targetSlug(target string) string {
-	return strings.TrimPrefix(target, "//")
+	return strings.ReplaceAll(strings.TrimPrefix(target, "//"), ":", "/")
 }
 
 // gitOutput runs `git <args>` at the cwd and returns trimmed stdout, or "" on

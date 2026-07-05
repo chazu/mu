@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -115,8 +116,12 @@ func TestPushPluginToRegistry(t *testing.T) {
 	}
 	files := map[string][]byte{"fmt.bb": []byte("#!/usr/bin/env bb\n")}
 
-	if err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files); err != nil {
+	subject, err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files)
+	if err != nil {
 		t.Fatalf("pushPluginToRegistry: %v", err)
+	}
+	if subject.Digest == "" {
+		t.Fatal("pushPluginToRegistry returned empty descriptor")
 	}
 
 	tag := oci.PluginTag(cfg.Digest)
@@ -149,7 +154,7 @@ func TestPushPluginToRegistryIdempotent(t *testing.T) {
 	files := map[string][]byte{"x.bb": []byte("a")}
 
 	for i := 0; i < 3; i++ {
-		if err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files); err != nil {
+		if _, err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files); err != nil {
 			t.Fatalf("push iter %d: %v", i, err)
 		}
 	}
@@ -160,6 +165,63 @@ func TestPushPluginToRegistryIdempotent(t *testing.T) {
 	}
 	if len(idx.Plugins) != 1 {
 		t.Fatalf("expected 1 entry after 3 pushes, got %d: %v", len(idx.Plugins), idx.Plugins)
+	}
+}
+
+// TestPushPluginToRegistryWithAttach pushes a plugin, then attaches evidence
+// to the returned subject descriptor via attachReferrers — the same path
+// `mu plugin push --attach` takes — and verifies the referrer manifest
+// (artifactType, subject linkage, layer title) round-trips.
+func TestPushPluginToRegistryWithAttach(t *testing.T) {
+	ctx := context.Background()
+	pluginRepo := newFakeRegistry()
+	indexRepo := newFakeRegistry()
+
+	cfg := oci.PluginConfig{
+		Name: "fmt", Entrypoint: "fmt.bb", Toolchain: "bb", Files: []string{"fmt.bb"},
+		Digest: "sha256:" + repeatByte('b', 64),
+	}
+	files := map[string][]byte{"fmt.bb": []byte("#!/usr/bin/env bb\n")}
+
+	subject, err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files)
+	if err != nil {
+		t.Fatalf("pushPluginToRegistry: %v", err)
+	}
+
+	evidence := filepath.Join(t.TempDir(), "provenance.json")
+	if err := os.WriteFile(evidence, []byte(`{"builder":"test"}`), 0o644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	const artifactType = "application/vnd.mu.plugin.provenance.v1"
+	failed := attachReferrers(ctx, oci.New(pluginRepo), subject,
+		[]attachSpec{{Type: artifactType, Path: evidence}}, "2026-07-04T00:00:00Z")
+	if failed != 0 {
+		t.Fatalf("attachReferrers: %d failed", failed)
+	}
+
+	// Find the referrer manifest: a manifest blob whose subject is the plugin.
+	var ref *ocispec.Manifest
+	pluginRepo.mu.Lock()
+	for _, b := range pluginRepo.blobs {
+		var m ocispec.Manifest
+		if json.Unmarshal(b, &m) != nil || m.Subject == nil {
+			continue
+		}
+		if m.Subject.Digest == subject.Digest {
+			ref = &m
+			break
+		}
+	}
+	pluginRepo.mu.Unlock()
+	if ref == nil {
+		t.Fatal("no referrer manifest found for pushed plugin")
+	}
+	if ref.ArtifactType != artifactType {
+		t.Fatalf("artifactType: got %q, want %q", ref.ArtifactType, artifactType)
+	}
+	if len(ref.Layers) != 1 || ref.Layers[0].Annotations[ocispec.AnnotationTitle] != "provenance.json" {
+		t.Fatalf("referrer layers: %+v", ref.Layers)
 	}
 }
 

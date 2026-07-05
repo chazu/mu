@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/schemacache"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // runPluginPush publishes the named plugin to the configured cache.push
@@ -22,33 +24,47 @@ func runPluginPush(args []string) int {
 	fs := flag.NewFlagSet("plugin push", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	c := newCLIContext("plugin push", fs)
+	var attach stringSliceFlag
+	fs.Var(&attach, "attach", "attach a file to the pushed plugin as a referrer: <artifactType>=<path> (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: mu plugin push <name>")
+		fmt.Fprintln(os.Stderr, "usage: mu plugin push [--attach <artifactType>=<path>] <name>")
 		return exitUsage
 	}
 	name := fs.Arg(0)
+	attachments, err := parseAttachments(attach)
+	if err != nil {
+		return c.fail(exitUsage, "%v", err)
+	}
 
 	if code, ok := c.Resolve(resolveOpts{NeedConfig: true, ValidateConfig: true}); !ok {
 		return code
 	}
 
-	targetName := "//plugins/" + name
-	var entrypoint string
-	foundTarget := false
-	for _, t := range c.Config.Targets {
-		if t.Name == targetName {
-			foundTarget = true
-			if len(t.Sources) > 0 {
-				entrypoint = filepath.Base(t.Sources[0])
+	// The plugin's build target may be named "//plugins/<name>" (target defined
+	// at the project root) or "//plugins/<name>/build" (a "build" target in the
+	// plugin's own mu.cue, aggregated into the root config with its directory
+	// as prefix). Try both, in that order.
+	candidates := []string{"//plugins/" + name, "//plugins/" + name + "/build"}
+	var targetName, entrypoint string
+	for _, cand := range candidates {
+		for _, t := range c.Config.Targets {
+			if t.Name == cand {
+				targetName = cand
+				if len(t.Sources) > 0 {
+					entrypoint = filepath.Base(t.Sources[0])
+				}
+				break
 			}
+		}
+		if targetName != "" {
 			break
 		}
 	}
-	if !foundTarget {
-		return c.fail(exitFail, "target %q not found in config", targetName)
+	if targetName == "" {
+		return c.fail(exitFail, "no target %q or %q found in config", candidates[0], candidates[1])
 	}
 
 	result, err := buildTargets(c.ProjectRoot, c.Config, []string{targetName})
@@ -61,7 +77,20 @@ func runPluginPush(args []string) int {
 
 	dgst, err := extractPluginDigest(result, targetName)
 	if err != nil {
-		return c.fail(exitFail, "%v", err)
+		// Older project layouts emit the plugin file as a "-plugin.bb" build
+		// output; current plugin mu.cue layouts have no-op build targets that
+		// produce nothing. Fall back to resolving the plugin the same way
+		// `mu plugin info` does (project resolver, then ~/.mu/plugins cache).
+		if _, _, dgst, err = resolveInfoTarget(c.ProjectRoot, c.Config, name); err != nil {
+			return c.fail(exitFail, "no plugin output from build, and plugin resolve failed: %v", err)
+		}
+		if dgst.Hash == "" {
+			// Command-form plugins resolve without a digest; derive one from
+			// the extracted cache under ~/.mu/plugins/<name>/.
+			if _, dgst, err = resolveCachedPlugin(name); err != nil {
+				return c.fail(exitFail, "no plugin output from build, and no digest from cache: %v", err)
+			}
+		}
 	}
 
 	files, isBundle, err := collectPluginFiles(name, entrypoint)
@@ -126,7 +155,8 @@ func runPluginPush(args []string) int {
 	}
 
 	ctx := context.Background()
-	if err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files); err != nil {
+	subject, err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files)
+	if err != nil {
 		return c.fail(exitFail, "push plugin: %v", err)
 	}
 
@@ -135,16 +165,30 @@ func runPluginPush(args []string) int {
 		kind = "bundle"
 	}
 	fmt.Printf("Pushed %s plugin %q → %s:%s\n", kind, name, pluginRepoRef, oci.PluginTag(dgst.Hash))
+
+	// Attach referrers (provenance, SBOMs, logs) to the pushed plugin manifest.
+	if len(attachments) > 0 {
+		created := time.Now().UTC().Format(time.RFC3339)
+		if failed := attachReferrers(ctx, oci.New(pluginRepo), subject, attachments, created); failed > 0 {
+			return c.fail(exitFail, "%d attachment(s) failed (plugin itself was pushed)", failed)
+		}
+	}
 	return exitOK
 }
 
 // pushPluginToRegistry runs the registry-side write: push the artifact, then
-// update the index. Exposed (lowercase, package-internal) for tests.
-func pushPluginToRegistry(ctx context.Context, pluginRepo, indexRepo oci.Registry, cfg oci.PluginConfig, files map[string][]byte) error {
-	if _, err := oci.PushPlugin(ctx, pluginRepo, cfg.Name, cfg, files); err != nil {
-		return err
+// update the index. Returns the descriptor of the pushed plugin manifest so
+// callers can attach referrers to it. Exposed (lowercase, package-internal)
+// for tests.
+func pushPluginToRegistry(ctx context.Context, pluginRepo, indexRepo oci.Registry, cfg oci.PluginConfig, files map[string][]byte) (ocispec.Descriptor, error) {
+	desc, err := oci.PushPlugin(ctx, pluginRepo, cfg.Name, cfg, files)
+	if err != nil {
+		return ocispec.Descriptor{}, err
 	}
-	return oci.UpdatePluginIndex(ctx, indexRepo, cfg.Name)
+	if err := oci.UpdatePluginIndex(ctx, indexRepo, cfg.Name); err != nil {
+		return ocispec.Descriptor{}, err
+	}
+	return desc, nil
 }
 
 // collectPluginFiles reads the on-disk extraction of plugin <name> under

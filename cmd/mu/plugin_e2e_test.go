@@ -107,7 +107,7 @@ func TestPushAndListEndToEndAgainstOCILayout(t *testing.T) {
 			Digest:     s.digest,
 		}
 		files := map[string][]byte{s.name + ".bb": s.body}
-		if err := pushPluginToRegistry(ctx, store, store, cfg, files); err != nil {
+		if _, err := pushPluginToRegistry(ctx, store, store, cfg, files); err != nil {
 			t.Fatalf("pushPluginToRegistry %s: %v", s.name, err)
 		}
 	}
