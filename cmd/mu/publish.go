@@ -185,7 +185,7 @@ func resolvePublishBase(c *cliContext) (string, int, bool) {
 }
 
 // targetSlug turns a target label into a repository path segment: "//image/
-// snooker" -> "image/snooker". Slashes are preserved (snooker accepts
+// akashic" -> "image/akashic". Slashes are preserved (akashic accepts
 // multi-segment repos); the leading "//" is stripped.
 func targetSlug(target string) string {
 	return strings.TrimPrefix(target, "//")

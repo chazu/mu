@@ -151,7 +151,7 @@ type CachePush struct {
 // PublishConfig configures `mu build --publish`. Registry is the OCI registry
 // host (e.g. "registry.platform.loosh.cloud"); Repository is the base repo path
 // the published artifact lands under, to which the target slug is appended
-// (e.g. "loosh-industries" → "loosh-industries/image/snooker"). The first
+// (e.g. "loosh-industries" → "loosh-industries/image/akashic"). The first
 // segment must be an org/user the pusher can push to.
 type PublishConfig struct {
 	Registry   string `json:"registry,omitempty"`

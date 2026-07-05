@@ -19,7 +19,7 @@ import (
 // inside the build so it can record the target, the argv that produced the
 // outputs, and side-band provenance (git revision, source, timestamp).
 type ArtifactMeta struct {
-	Target    string                // e.g. "//image/snooker"
+	Target    string                // e.g. "//image/akashic"
 	Command   []string              // argv that produced the outputs
 	Created   string                // RFC3339 publish time
 	MuVersion string                // mu CLI version
