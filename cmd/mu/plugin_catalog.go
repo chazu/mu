@@ -304,6 +304,9 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 	if err := updateMuCuePlugin(cli.ProjectRoot, selected.Name, resolved.Digest.String()); err != nil {
 		return plugincatalog.LockedPlugin{}, fmt.Errorf("update mu.cue: %w", err)
 	}
+	if err := writeInstalledPluginMetadata(home, selected, resolved.Digest); err != nil {
+		return plugincatalog.LockedPlugin{}, err
+	}
 	lock.Catalog = plugincatalog.LockedCatalog{
 		URL:        catalogURL,
 		Repository: catalog.Repository,
@@ -319,12 +322,59 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 		Entrypoint:     selected.Entrypoint,
 		Toolchain:      selected.Toolchain,
 		BundleDigest:   resolved.Digest.String(),
+		Schemas:        selected.Schemas,
+		PUDLMappings:   selected.PUDLMappings,
 	}
 	lock.Upsert(entry)
 	if err := plugincatalog.WriteLock(lockPath, lock); err != nil {
 		return plugincatalog.LockedPlugin{}, fmt.Errorf("write mu.lock: %w", err)
 	}
 	return entry, nil
+}
+
+// installedPluginMetadata is the cache-side copy of catalog metadata. The
+// extracted bundle deliberately does not need to contain mu.cue, so tools
+// such as pudl can inspect an installed plugin without re-fetching its source
+// archive or importing mu's implementation packages.
+type installedPluginMetadata struct {
+	Name         string                      `json:"name"`
+	Version      string                      `json:"version"`
+	BundleDigest string                      `json:"bundle_digest"`
+	Entrypoint   string                      `json:"entrypoint"`
+	Toolchain    string                      `json:"toolchain,omitempty"`
+	Schemas      []plugincatalog.Schema      `json:"schemas,omitempty"`
+	PUDLMappings []plugincatalog.PUDLMapping `json:"pudl_mappings,omitempty"`
+}
+
+func writeInstalledPluginMetadata(home string, selected plugincatalog.Plugin, digest cas.Digest) error {
+	short := digest.Hash
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	bundleDir := filepath.Join(home, ".mu", "plugins", selected.Name, "bundle-"+short)
+	if info, err := os.Stat(bundleDir); err != nil {
+		return fmt.Errorf("locate installed plugin %q: %w", selected.Name, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("installed plugin %q bundle is not a directory", selected.Name)
+	}
+	metadata := installedPluginMetadata{
+		Name:         selected.Name,
+		Version:      selected.Version,
+		BundleDigest: digest.String(),
+		Entrypoint:   selected.Entrypoint,
+		Toolchain:    selected.Toolchain,
+		Schemas:      selected.Schemas,
+		PUDLMappings: selected.PUDLMappings,
+	}
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode installed plugin %q metadata: %w", selected.Name, err)
+	}
+	path := filepath.Join(bundleDir, "mu-plugin.json")
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write installed plugin %q metadata: %w", selected.Name, err)
+	}
+	return nil
 }
 
 func ensureDirectory(path, root string) error {

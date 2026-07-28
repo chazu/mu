@@ -5,16 +5,18 @@ They are external processes that communicate via NDJSON (see 'mu guide protocol'
 
 LOADING PLUGINS
 
-  There are four ways to reference a plugin, in resolution order:
+  There are four ways to reference a plugin. When a def sets more than
+  one, they resolve in this precedence order (url → script → digest →
+  command):
 
-  1. Local script (preferred for development):
+  1. Remote URL with SHA256 verification:
+     {"name": "file", "url": "https://example.com/file-plugin.bb", "sha256": "abc123..."}
+
+  2. Local script (preferred for development):
      {"name": "file", "script": "plugins/file/plugin.bb"}
 
      Also works with a directory containing mu.cue with a "plugin" key:
      {"name": "go", "script": "plugins/go"}
-
-  2. Remote URL with SHA256 verification:
-     {"name": "file", "url": "https://example.com/file-plugin.bb", "sha256": "abc123..."}
 
   3. CAS digest (for distribution — previously built plugin):
      {"name": "file", "digest": "sha256:abc123..."}
@@ -25,13 +27,15 @@ LOADING PLUGINS
 WRITING A PLUGIN
 
   A plugin is any executable that reads NDJSON on stdin and writes NDJSON
-  on stdout. It must implement at least "discover" and "plan" methods.
+  on stdout. It must implement "discover". Plugins that build or converge
+  targets implement "plan"; observer-only and secret-provider plugins may omit
+  it.
   Optionally it can implement "observe", "resolve_secret", and
   "store_secret".
 
   Capabilities:
     discover         (required)  Identify the plugin and its protocol version.
-    plan             (required)  Translate a target into action specs.
+    plan             (optional)  Translate a target into action specs.
     observe          (optional)  Report current state for drift detection.
     resolve_secret   (optional)  Read a secret value by ref.
     store_secret     (optional)  Write a secret value by ref.
@@ -131,7 +135,7 @@ WRITING A PLUGIN
       (json/generate-string)                 SDK handles all encoding
       (json/parse-string line)               SDK handles all decoding
       (read-line) loop                       SDK dispatch loop
-      "capabilities" ["discover" "plan"]     auto-derived from fields
+      "capabilities" ["discover" "plan"]     auto-derived from handlers
       (clojure.string/split s #"/")          strings.Split(s, "/")
       cheshire map → JSON object             map[string]any
       throwing on bad config                 return error from handler
@@ -203,7 +207,10 @@ OFFICIAL SOURCE-PACKAGE CATALOG
   builds source-only packages when the catalog declares a build command,
   bundles the plugin into the local CAS, extracts it under ~/.mu/plugins/, and
   writes a digest entry into mu.cue. The selected catalog release, asset hash,
-  and local bundle digest are recorded in mu.lock.
+  and local bundle digest are recorded in mu.lock. The lock entry also keeps
+  the package's vendored wire schemas and PUDL mappings, and installation
+  writes the same metadata to `mu-plugin.json` inside the extracted bundle so
+  downstream tools can inspect an installed package without its source tree.
 
   Update one or all catalog-installed plugins:
 
@@ -301,15 +308,27 @@ PLUGIN GUIDES
 
 OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
 
-  A plugin can declare a CUE schema for the data it produces so that
+  A plugin can declare one or more CUE schemas for the data it produces so that
   pudl classifies imports under a meaningful type instead of the
   catchall pudl/core.#Item.
 
-  1. Add output_schema to the discover response:
+  1. Add output_schema for one default schema, or output_schemas for
+     resource-specific schemas, to the discover response:
 
        "output_schema": {"module":     "mu/aws",
                          "version":    "v1",
                          "definition": "#EC2Instance"}
+
+     For plugins that emit multiple resource types:
+
+       "output_schemas": [{"resource_type": "aws.ec2.instance",
+                           "module":        "mu/aws",
+                           "version":       "v1",
+                           "definition":    "#EC2Instance"},
+                          {"resource_type": "aws.ec2.vpc",
+                           "module":        "mu/aws",
+                           "version":       "v1",
+                           "definition":    "#VPC"}]
 
   2. Vendor the schema files with the plugin (mirrored layout):
 

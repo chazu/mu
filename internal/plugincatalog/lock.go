@@ -37,6 +37,11 @@ type LockedPlugin struct {
 	Entrypoint     string `json:"entrypoint"`
 	Toolchain      string `json:"toolchain,omitempty"`
 	BundleDigest   string `json:"bundle_digest"`
+	// Schemas and PUDLMappings are copied from the catalog so consumers of an
+	// installed bundle do not need the source package or mu.cue. They are
+	// metadata about the package, not runtime plugin configuration.
+	Schemas      []Schema      `json:"schemas,omitempty"`
+	PUDLMappings []PUDLMapping `json:"pudl_mappings,omitempty"`
 }
 
 // NewLock returns an empty, valid lockfile.

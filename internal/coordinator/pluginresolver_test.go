@@ -99,6 +99,38 @@ plugin: {entrypoint: "run.sh"}
 	}
 }
 
+func TestResolveDigestDirectoryBundle(t *testing.T) {
+	store := newTestStore(t)
+	projectRoot := t.TempDir()
+	cacheDir := t.TempDir()
+	pluginDir := filepath.Join(projectRoot, "plugins", "bundle")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "mu.cue"), []byte(`plugin: {entrypoint: "plugin.bb"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.bb"), []byte("#!/usr/bin/env bb\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &PluginResolver{Store: store, ProjectRoot: projectRoot, CacheDir: cacheDir}
+	local, err := r.resolveOne(context.Background(), config.PluginDef{Name: "bundle", Script: "plugins/bundle"})
+	if err != nil {
+		t.Fatalf("resolve local bundle: %v", err)
+	}
+	digest, err := r.resolveOne(context.Background(), config.PluginDef{Name: "bundle", Digest: local.Digest.String()})
+	if err != nil {
+		t.Fatalf("resolve digest bundle: %v", err)
+	}
+	if digest.Def.WorkDir == "" {
+		t.Fatal("digest directory plugin should retain WorkDir")
+	}
+	if filepath.Base(digest.Def.Script) != "plugin.bb" {
+		t.Fatalf("digest entrypoint = %q, want plugin.bb", digest.Def.Script)
+	}
+}
+
 func TestResolveLocalDir_MissingManifest(t *testing.T) {
 	store := newTestStore(t)
 	cacheDir := t.TempDir()

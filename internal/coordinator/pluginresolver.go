@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -84,7 +85,26 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 		return nil, fmt.Errorf("plugin digest %s not found in CAS", dgst)
 	}
 
-	// No source hint available for digest-only plugins.
+	// Catalog-installed directory plugins are represented by a tar bundle in
+	// CAS. Prefer the directory extraction path; if the digest belongs to a
+	// legacy single-file plugin, fall back to the single-file extractor below.
+	if bundleDir, bundleErr := r.extractDirFromCAS(ctx, p.Name, dgst); bundleErr == nil {
+		entry, toolchain, entryErr := resolveInstalledBundleEntry(bundleDir)
+		if entryErr != nil {
+			return nil, fmt.Errorf("resolve plugin bundle %s: %w", dgst, entryErr)
+		}
+		return &ResolvedPlugin{
+			Def: plugin.PluginDef{
+				Name:      p.Name,
+				Script:    entry,
+				Toolchain: toolchain,
+				WorkDir:   bundleDir,
+			},
+			Digest: dgst,
+		}, nil
+	}
+
+	// No source hint available for a single-file digest-only plugin.
 	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst, "")
 	if err != nil {
 		return nil, err
@@ -98,6 +118,61 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 		},
 		Digest: dgst,
 	}, nil
+}
+
+type installedBundleMetadata struct {
+	Entrypoint string `json:"entrypoint"`
+	Toolchain  string `json:"toolchain,omitempty"`
+}
+
+// resolveInstalledBundleEntry resolves a directory plugin after its source
+// tree has been reduced to a digest. The generated metadata keeps the
+// catalog's entrypoint available even when the source mu.cue is not bundled.
+func resolveInstalledBundleEntry(bundleDir string) (string, string, error) {
+	metadataPath := filepath.Join(bundleDir, "mu-plugin.json")
+	if data, err := os.ReadFile(metadataPath); err == nil {
+		var metadata installedBundleMetadata
+		if err := json.Unmarshal(data, &metadata); err != nil {
+			return "", "", fmt.Errorf("decode %s: %w", metadataPath, err)
+		}
+		if metadata.Entrypoint != "" {
+			entry := filepath.Join(bundleDir, metadata.Entrypoint)
+			if _, err := os.Stat(entry); err != nil {
+				return "", "", fmt.Errorf("entrypoint %s missing: %w", entry, err)
+			}
+			toolchain := metadata.Toolchain
+			if toolchain == "" {
+				toolchain = inferPluginToolchain(entry)
+			}
+			return entry, toolchain, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
+	for _, candidate := range []string{"plugin.bb", "plugin"} {
+		entry := filepath.Join(bundleDir, candidate)
+		if info, err := os.Stat(entry); err == nil && !info.IsDir() {
+			return entry, inferPluginToolchain(entry), nil
+		}
+	}
+	entries, err := os.ReadDir(bundleDir)
+	if err != nil {
+		return "", "", err
+	}
+	var only string
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == "mu-plugin.json" {
+			continue
+		}
+		if only != "" {
+			return "", "", fmt.Errorf("no unambiguous entrypoint found in %s", bundleDir)
+		}
+		only = filepath.Join(bundleDir, entry.Name())
+	}
+	if only == "" {
+		return "", "", fmt.Errorf("no entrypoint found in %s", bundleDir)
+	}
+	return only, inferPluginToolchain(only), nil
 }
 
 // resolveLocal handles a local plugin path — either a single file or a

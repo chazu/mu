@@ -101,6 +101,7 @@ func runPluginInfo(args []string) int {
 		Produces:        info.Produces,
 		ConfigSchema:    info.ConfigSchema,
 		OutputSchema:    info.OutputSchema,
+		OutputSchemas:   info.OutputSchemas,
 		Toolchain:       def.Toolchain,
 		Path:            def.Script,
 	}
@@ -134,6 +135,7 @@ type pluginInfoOutput struct {
 	Produces        []string           `json:"produces,omitempty"`
 	ConfigSchema    map[string]any     `json:"config_schema,omitempty"`
 	OutputSchema    *plugin.SchemaRef  `json:"output_schema,omitempty"`
+	OutputSchemas   []plugin.SchemaRef `json:"output_schemas,omitempty"`
 }
 
 // resolveInfoTarget locates the plugin by name. Returns the source label
@@ -248,6 +250,28 @@ func resolveCachedPlugin(name string) (plugin.PluginDef, cas.Digest, error) {
 // the conventional plugin.bb / plugin / single-file layouts produced by
 // older bundle artifacts.
 func resolveBundleEntry(bundleDir string) (string, string, error) {
+	if data, err := os.ReadFile(filepath.Join(bundleDir, "mu-plugin.json")); err == nil {
+		var metadata struct {
+			Entrypoint string `json:"entrypoint"`
+			Toolchain  string `json:"toolchain,omitempty"`
+		}
+		if err := json.Unmarshal(data, &metadata); err != nil {
+			return "", "", fmt.Errorf("decode installed plugin metadata: %w", err)
+		}
+		if metadata.Entrypoint != "" {
+			entry := filepath.Join(bundleDir, metadata.Entrypoint)
+			if _, err := os.Stat(entry); err != nil {
+				return "", "", fmt.Errorf("entrypoint %s missing: %w", entry, err)
+			}
+			toolchain := metadata.Toolchain
+			if toolchain == "" {
+				toolchain = inferPluginToolchain(entry)
+			}
+			return entry, toolchain, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
 	if manifest, err := config.LoadPluginManifest(bundleDir); err == nil {
 		entry := filepath.Join(bundleDir, manifest.Plugin.Entrypoint)
 		if _, err := os.Stat(entry); err != nil {
@@ -272,7 +296,7 @@ func resolveBundleEntry(bundleDir string) (string, string, error) {
 	}
 	var only string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || e.Name() == "mu-plugin.json" {
 			continue
 		}
 		if only != "" {
@@ -359,6 +383,24 @@ func printPluginInfo(o pluginInfoOutput) {
 		}
 		if o.OutputSchema.Source != "" {
 			fmt.Println(dim.Render("  source") + "  " + bright.Render(o.OutputSchema.Source))
+		}
+	}
+	if len(o.OutputSchemas) > 0 {
+		fmt.Println()
+		fmt.Println(accent.Bold(true).Render("Output Schemas"))
+		for _, schema := range o.OutputSchemas {
+			label := schema.ResourceType
+			if label == "" {
+				label = "default"
+			}
+			fmt.Println("  " + bright.Render(label))
+			fmt.Println(dim.Render("    module") + "  " + bright.Render(schema.Module+"@"+schema.Version))
+			if schema.Definition != "" {
+				fmt.Println(dim.Render("    def") + "     " + accent.Render(schema.Definition))
+			}
+			if schema.Source != "" {
+				fmt.Println(dim.Render("    source") + "  " + bright.Render(schema.Source))
+			}
 		}
 	}
 
