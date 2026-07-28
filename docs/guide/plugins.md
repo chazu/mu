@@ -186,6 +186,40 @@ BUILDING AND DISTRIBUTING PLUGINS
   mu plugin test <plugin-path>   Run bundled + testdata/*.yaml scenarios
                                  against a plugin.
 
+OFFICIAL SOURCE-PACKAGE CATALOG
+
+  The official catalog is published by the public chazu/mu-plugins GitHub
+  releases. Search it without a project:
+
+    mu plugin search
+    mu plugin search aws
+
+  Install a pinned or latest catalog package from inside a mu project:
+
+    mu plugin install aws
+    mu plugin install aws@0.1.0
+
+  Installation downloads the immutable release asset, verifies its SHA-256,
+  builds source-only packages when the catalog declares a build command,
+  bundles the plugin into the local CAS, extracts it under ~/.mu/plugins/, and
+  writes a digest entry into mu.cue. The selected catalog release, asset hash,
+  and local bundle digest are recorded in mu.lock.
+
+  Update one or all catalog-installed plugins:
+
+    mu plugin update aws
+    mu plugin update
+
+  Inspect the lockfile with `mu plugin lock` or `mu plugin lock --json`.
+  Override the catalog for a mirror or local test server with
+  `--catalog URL` or `MU_PLUGIN_CATALOG`. The URL must serve the generated
+  catalog JSON; package assets are still fetched from the HTTPS asset URLs
+  recorded in that catalog.
+
+  Local `script:` plugins, digest references, direct command plugins, and OCI
+  plugin push/pull remain supported. Catalog installation is a source-package
+  distribution path layered on top of the same CAS resolver.
+
 PLUGIN GUIDES
 
   Plugins can include a guide file that describes their usage. Set the

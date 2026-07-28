@@ -32,6 +32,10 @@ func runPlugin(args []string) int {
 Commands:
   list      List registered plugins
   add       Add a plugin from cache by building its //plugins/<name> target
+  search    Search the official source-package catalog
+  install   Download, verify, bundle, and register a catalog plugin
+  update    Update one or all catalog plugins recorded in mu.lock
+  lock      Show the project's catalog plugin lockfile
   info      Show capabilities and metadata for a plugin (project or cached)
   push      Publish a plugin to the configured OCI cache
   status    Reconcile declared plugins against the local cache
@@ -44,6 +48,14 @@ Commands:
 		return runPluginList(args[1:])
 	case "add":
 		return runPluginAdd(args[1:])
+	case "search":
+		return runPluginSearch(args[1:])
+	case "install":
+		return runPluginInstall(args[1:])
+	case "update":
+		return runPluginUpdate(args[1:])
+	case "lock":
+		return runPluginLock(args[1:])
 	case "info":
 		return runPluginInfo(args[1:])
 	case "push":
