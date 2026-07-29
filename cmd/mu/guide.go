@@ -77,24 +77,24 @@ func printTopic(topic string) {
 	fmt.Print(body)
 }
 
-func printGuideIndex()            { printTopic("index") }
-func printGuideOverview()         { printTopic("overview") }
-func printGuideMuJSON()           { printTopic("mu.cue") }
-func printGuideBuild()            { printTopic("build") }
-func printGuidePlugins()          { printTopic("plugins") }
-func printGuideObserve()          { printTopic("observe") }
-func printGuidePudl()             { printTopic("pudl") }
-func printGuideCache()            { printTopic("cache") }
-func printGuideSecrets()          { printTopic("secrets") }
-func printGuideSecretGen()        { printTopic("secret-gen") }
-func printGuideToolchains()       { printTopic("toolchains") }
-func printGuideShell()            { printTopic("shell") }
-func printGuideSecretProviders()  { printTopic("secret-providers") }
-func printGuideProtocol()         { printTopic("protocol") }
-func printGuidePithPlugins()      { printTopic("pith-plugins") }
-func printGuideSandbox()          { printTopic("sandbox") }
-func printGuideAdvice()           { printTopic("advice") }
-func printGuideSDK()              { printTopic("sdk") }
+func printGuideIndex()           { printTopic("index") }
+func printGuideOverview()        { printTopic("overview") }
+func printGuideMuJSON()          { printTopic("mu.cue") }
+func printGuideBuild()           { printTopic("build") }
+func printGuidePlugins()         { printTopic("plugins") }
+func printGuideObserve()         { printTopic("observe") }
+func printGuidePudl()            { printTopic("pudl") }
+func printGuideCache()           { printTopic("cache") }
+func printGuideSecrets()         { printTopic("secrets") }
+func printGuideSecretGen()       { printTopic("secret-gen") }
+func printGuideToolchains()      { printTopic("toolchains") }
+func printGuideShell()           { printTopic("shell") }
+func printGuideSecretProviders() { printTopic("secret-providers") }
+func printGuideProtocol()        { printTopic("protocol") }
+func printGuidePithPlugins()     { printTopic("pith-plugins") }
+func printGuideSandbox()         { printTopic("sandbox") }
+func printGuideAdvice()          { printTopic("advice") }
+func printGuideSDK()             { printTopic("sdk") }
 
 // printGuideForPlugin finds and prints the guide text for a named plugin.
 // It searches in order:

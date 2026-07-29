@@ -6,9 +6,8 @@
 // store_secret, including the "raw:" ref prefix handling and the three
 // store modes (create, overwrite, create_if_absent).
 //
-// Capabilities: discover, plan (empty), resolve_secret, store_secret.
-// The SDK derives the capabilities list from which optional backend
-// methods are provided; SecretPlugin wires both resolve + store.
+// Capabilities: discover, resolve_secret, store_secret.
+// SecretPlugin wires both resolve + store and derives the capabilities list.
 //
 // Secret ref grammar (resolve_secret):
 //

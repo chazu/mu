@@ -18,18 +18,18 @@ import (
 //
 // Config fields:
 //   - ref         (string, required) — destination secret ref, e.g.
-//                 "pass:registry/admin". Must be of the form scheme:path.
+//     "pass:registry/admin". Must be of the form scheme:path.
 //   - derivation  ([]string, required) — argv whose stdout becomes the
-//                 stored value. Trailing newlines are stripped before
-//                 storing.
+//     stored value. Trailing newlines are stripped before
+//     storing.
 //   - mode        (string, optional) — "create" | "overwrite" |
-//                 "create_if_absent" (default).
+//     "create_if_absent" (default).
 //   - env         (map[string]string, optional) — extra env for the
-//                 derivation; useful for pinning randomness sources.
+//     derivation; useful for pinning randomness sources.
 //   - keep_trailing_newline (bool, optional) — if true, the value is
-//                 stored exactly as the derivation emitted it. Default
-//                 false: trim a trailing newline (the common case for
-//                 `openssl rand`, `uuidgen`, etc.).
+//     stored exactly as the derivation emitted it. Default
+//     false: trim a trailing newline (the common case for
+//     `openssl rand`, `uuidgen`, etc.).
 //
 // The action is always impure (the resolver enforces this for any
 // action with sealed_outputs), so the derivation runs every build. For

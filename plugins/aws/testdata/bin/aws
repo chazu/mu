@@ -1,0 +1,16 @@
+#!/bin/sh
+
+case "$*" in
+  *--version*)
+    echo 'aws-cli/2.15.0 Python/3.11.0'
+    ;;
+  *' sts get-caller-identity'*)
+    echo '{"Account":"123456789012"}'
+    ;;
+  *' describe-instances'*)
+    echo '[{"InstanceId":"i-fixture","InstanceType":"t3.micro","State":{"Name":"running"},"VpcId":"vpc-fixture","SubnetId":"subnet-fixture","PrivateIpAddress":"10.0.0.10","ImageId":"ami-fixture","Tags":[],"SecurityGroups":[]}]'
+    ;;
+  *)
+    echo '{}'
+    ;;
+esac

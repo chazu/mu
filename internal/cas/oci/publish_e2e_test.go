@@ -71,19 +71,19 @@ func TestPublishArtifact_E2E(t *testing.T) {
 		ExitCode: 0,
 		Outputs:  map[string]cas.Digest{"app": dg},
 	}
-	dgst, err := New(repo).PublishArtifact(ctx, meta, src, []string{"e2e", "latest"})
+	desc, err := New(repo).PublishArtifact(ctx, meta, src, []string{"e2e", "latest"})
 	if err != nil {
 		t.Fatalf("PublishArtifact: %v", err)
 	}
-	t.Logf("published %s:e2e -> %s", ref, dgst)
+	t.Logf("published %s:e2e -> %s", ref, desc.Digest)
 
 	// Confirm the tag resolves to what we pushed.
 	got, err := repo.Resolve(ctx, "e2e")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if got.Digest != dgst {
-		t.Fatalf("resolved %s, want %s", got.Digest, dgst)
+	if got.Digest != desc.Digest {
+		t.Fatalf("resolved %s, want %s", got.Digest, desc.Digest)
 	}
 }
 

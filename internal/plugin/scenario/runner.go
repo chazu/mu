@@ -50,6 +50,12 @@ func (r *Runner) Run(ctx context.Context, s *Scenario) Result {
 			return result
 		}
 	}
+	if s.SkipIfMissingEnv != "" && os.Getenv(s.SkipIfMissingEnv) == "" {
+		result.Status = "skip"
+		result.Reason = "environment variable " + s.SkipIfMissingEnv + " is not set"
+		result.Elapsed = time.Since(start)
+		return result
+	}
 
 	// Send request.
 	method, _ := s.Request["method"].(string)

@@ -45,7 +45,9 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 		Plan: func(ctx context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
 			return muplugin.PlanResponse{}, nil
 		},
-		Observe:       func(ctx context.Context, req muplugin.ObserveRequest) (muplugin.ObserveResponse, error) { return muplugin.ObserveResponse{}, nil },
+		Observe: func(ctx context.Context, req muplugin.ObserveRequest) (muplugin.ObserveResponse, error) {
+			return muplugin.ObserveResponse{}, nil
+		},
 		ResolveSecret: func(ctx context.Context, ref string) (string, error) { return "", nil },
 		StoreSecret:   func(ctx context.Context, req muplugin.StoreSecretRequest) error { return nil },
 		Advise:        func(ctx context.Context, req muplugin.AdviseRequest) error { return nil },
@@ -66,6 +68,38 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 	}
 	if len(resp.AdvisePhases) != 1 || resp.AdvisePhases[0] != "after-build" {
 		t.Fatalf("advise_phases %v", resp.AdvisePhases)
+	}
+}
+
+func TestObserveOnlyPluginDoesNotAdvertisePlan(t *testing.T) {
+	p := &muplugin.Plugin{
+		Name:    "observer",
+		Version: "0.1.0",
+		Observe: func(ctx context.Context, req muplugin.ObserveRequest) (muplugin.ObserveResponse, error) {
+			return muplugin.ObserveResponse{Current: map[string]any{"records": []any{}}}, nil
+		},
+	}
+
+	var disc muplugin.DiscoverResponse
+	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewDiscoverRequest(), &disc); err != nil {
+		t.Fatalf("discover exchange: %v", err)
+	}
+	want := []string{"discover", "observe"}
+	if len(disc.Capabilities) != len(want) {
+		t.Fatalf("capabilities = %v, want %v", disc.Capabilities, want)
+	}
+	for i, cap := range want {
+		if disc.Capabilities[i] != cap {
+			t.Errorf("capability[%d] = %q, want %q", i, disc.Capabilities[i], cap)
+		}
+	}
+
+	var plan muplugin.PlanResponse
+	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewPlanRequest(muplugin.TargetInfo{Name: "//x"}, nil, nil), &plan); err != nil {
+		t.Fatalf("plan exchange: %v", err)
+	}
+	if plan.Error != "plan: capability not supported" {
+		t.Fatalf("plan error = %q, want unsupported capability", plan.Error)
 	}
 }
 
@@ -130,7 +164,9 @@ func TestUnsupportedCapabilityReturnsError(t *testing.T) {
 	p := &muplugin.Plugin{
 		Name:    "minimal",
 		Version: "0.1.0",
-		Plan:    func(ctx context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) { return muplugin.PlanResponse{}, nil },
+		Plan: func(ctx context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
+			return muplugin.PlanResponse{}, nil
+		},
 	}
 	var resp muplugin.ObserveResponse
 	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewObserveRequest(muplugin.TargetInfo{Name: "//x"}, nil, nil), &resp); err != nil {
@@ -187,7 +223,7 @@ func TestSecretPluginExposesBackend(t *testing.T) {
 	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewDiscoverRequest(), &disc); err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
-	want := map[string]bool{"discover": true, "plan": true, "resolve_secret": true, "store_secret": true}
+	want := map[string]bool{"discover": true, "resolve_secret": true, "store_secret": true}
 	if len(disc.Capabilities) != len(want) {
 		t.Fatalf("capabilities %v want %v", disc.Capabilities, want)
 	}

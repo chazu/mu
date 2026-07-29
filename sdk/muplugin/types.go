@@ -61,9 +61,10 @@ type DiscoverResponse struct {
 	Consumes        []string       `json:"consumes"` // artifact types this plugin can consume
 	Produces        []string       `json:"produces"` // artifact types this plugin can produce
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
-	Capabilities    []string       `json:"capabilities,omitempty"`  // supported methods, e.g. ["discover","plan","observe","advise"]
-	AdvisePhases    []string       `json:"advise_phases,omitempty"` // lifecycle phases this plugin wants to advise on
-	OutputSchema    *SchemaRef     `json:"output_schema,omitempty"` // optional CUE schema describing this plugin's output
+	Capabilities    []string       `json:"capabilities,omitempty"`   // supported methods, e.g. ["discover","plan","observe","advise"]
+	AdvisePhases    []string       `json:"advise_phases,omitempty"`  // lifecycle phases this plugin wants to advise on
+	OutputSchema    *SchemaRef     `json:"output_schema,omitempty"`  // legacy single-schema form
+	OutputSchemas   []SchemaRef    `json:"output_schemas,omitempty"` // resource-specific output schemas
 }
 
 // SchemaRef is an optional, declarative reference to a CUE schema that
@@ -80,11 +81,12 @@ type DiscoverResponse struct {
 //   - "mu/<plugin-name>" → schemas originated by a mu plugin's authors
 //   - anything else      → third-party / user-defined
 type SchemaRef struct {
-	Module      string `json:"module"`                // CUE module path, e.g. "mu/aws"
-	Version     string `json:"version"`               // module version, e.g. "v1"
-	Definition  string `json:"definition,omitempty"`  // optional CUE definition selector, e.g. "#EC2Instance"
-	Description string `json:"description,omitempty"` // human-readable summary of the schema's purpose
-	Source      string `json:"source,omitempty"`      // advisory: "vendored" | "remote"
+	ResourceType string `json:"resource_type,omitempty"` // emitted record type, e.g. "aws.ec2.instance"
+	Module       string `json:"module"`                  // CUE module path, e.g. "mu/aws"
+	Version      string `json:"version"`                 // module version, e.g. "v1"
+	Definition   string `json:"definition,omitempty"`    // optional CUE definition selector, e.g. "#EC2Instance"
+	Description  string `json:"description,omitempty"`   // human-readable summary of the schema's purpose
+	Source       string `json:"source,omitempty"`        // advisory: "vendored" | "remote"
 }
 
 // HasCapability reports whether the plugin declared support for the given method.

@@ -45,10 +45,10 @@ MINIMAL PLUGIN (30 LINES)
 
 CAPABILITY DERIVATION
 
-  You don't list capabilities. The SDK derives them from which optional
-  function fields are non-nil on Plugin:
+  You don't list capabilities. The SDK derives them from which function
+  fields are non-nil on Plugin:
 
-    Plan           always advertised (required)
+    Plan           adds "plan" (required for build/convergence plugins)
     Observe        adds "observe"
     ResolveSecret  adds "resolve_secret"
     StoreSecret    adds "store_secret"
@@ -65,8 +65,9 @@ THE PLUGIN STRUCT
       Consumes, Produces         []string
       ConfigSchema               map[string]any
       OutputSchema               *SchemaRef
+      OutputSchemas              []SchemaRef
 
-      Plan          func(ctx, PlanRequest) (PlanResponse, error)        // required
+      Plan          func(ctx, PlanRequest) (PlanResponse, error)        // optional
       Observe       func(ctx, ObserveRequest) (ObserveResponse, error)  // optional
       ResolveSecret func(ctx, ref string) (string, error)               // optional
       StoreSecret   func(ctx, StoreSecretRequest) error                 // optional
@@ -92,7 +93,7 @@ SECRET-PROVIDER SHORTCUT
     }
 
   The resulting plugin advertises resolve_secret + store_secret
-  automatically and stubs Plan to an empty action list.
+  automatically and does not advertise plan.
 
 TESTING WITHOUT A SUBPROCESS
 

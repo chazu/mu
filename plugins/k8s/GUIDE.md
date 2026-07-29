@@ -25,6 +25,11 @@ CONFIG FIELDS
   dry_run               Run kubectl --dry-run=server (default: false).
   ignore_paths          List of dot-separated field paths to ignore in drift
                         detection (e.g. ["metadata.annotations.kubectl"]).
+  inventory             Optional live-cluster inventory mode. Set `kinds` to a
+                        non-empty list of kubectl resource kinds; use
+                        `namespace` for one namespace or `all_namespaces: true`
+                        for cluster-wide inventory. Inventory mode does not
+                        require source manifests.
   sealed_output_secrets Capture-mode map: sealed_output NAME ->
                         {namespace, secret, key}. See "Sealed outputs" below.
 
@@ -39,6 +44,12 @@ EXAMPLES
   Dry-run only:
     {"namespace": "staging", "dry_run": true}
 
+  Inventory namespaced workloads:
+    {"inventory": {"kinds": ["pods", "deployments"], "namespace": "production"}}
+
+  Inventory cluster-wide services:
+    {"inventory": {"kinds": ["services"], "all_namespaces": true}}
+
 OBSERVATION (DRIFT DETECTION)
 
   mu observe //deploy/myapp
@@ -51,7 +62,11 @@ OBSERVATION (DRIFT DETECTION)
   It projects live state down to only the keys present in the desired
   state, then reports differences as dotted-path diffs.
 
-  Records include _schema "k8s.<kind>" (e.g. "k8s.deployment").
+  Manifest drift records describe the desired resource comparison. Inventory
+  records contain the live Kubernetes object and include _schema
+  "k8s.resource" so PUDL can route them to its open Kubernetes resource
+  envelope. The object kind remains in the `kind` field, allowing a project to
+  add a stricter kind-specific CUE schema later.
 
 ACTIONS GENERATED
 

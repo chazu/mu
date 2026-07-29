@@ -10,10 +10,10 @@ import (
 	"os"
 )
 
-// Plugin describes a mu plugin. Set the required fields, set whichever
-// optional method handlers you want (Observe, ResolveSecret, StoreSecret,
-// Advise) — any non-nil handler is automatically advertised in the
-// discover response's capabilities array. Then call Main().
+// Plugin describes a mu plugin. Set the required identity fields, then set
+// whichever operation handlers the plugin supports. Any non-nil handler is
+// automatically advertised in the discover response's capabilities array.
+// Then call Main().
 type Plugin struct {
 	// Identity
 	Name        string
@@ -26,10 +26,11 @@ type Plugin struct {
 
 	// Optional: declarative config schema and output schemas. The SDK
 	// passes these through to the discover response unmodified.
-	ConfigSchema map[string]any
-	OutputSchema *SchemaRef
+	ConfigSchema  map[string]any
+	OutputSchema  *SchemaRef
+	OutputSchemas []SchemaRef
 
-	// Required.
+	// Optional. A plugin that supports build/convergence implements Plan.
 	Plan func(ctx context.Context, req PlanRequest) (PlanResponse, error)
 
 	// Optional method handlers. A non-nil handler implies the capability;
@@ -61,9 +62,6 @@ func (p *Plugin) Main() {
 func (p *Plugin) Run(ctx context.Context, r io.Reader, w io.Writer) error {
 	if p.Name == "" {
 		return errors.New("muplugin: Plugin.Name is required")
-	}
-	if p.Plan == nil {
-		return errors.New("muplugin: Plugin.Plan is required")
 	}
 
 	enc := json.NewEncoder(w)
@@ -101,6 +99,9 @@ func (p *Plugin) dispatch(ctx context.Context, req Request) any {
 	case "discover":
 		return p.discover()
 	case "plan":
+		if p.Plan == nil {
+			return PlanResponse{Error: "plan: capability not supported"}
+		}
 		if req.Target == nil {
 			return PlanResponse{Error: "plan: missing target"}
 		}
@@ -178,9 +179,12 @@ func (p *Plugin) dispatch(ctx context.Context, req Request) any {
 }
 
 // discover builds the DiscoverResponse from the Plugin's configured fields.
-// The capabilities array is derived from which optional handlers are non-nil.
+// The capabilities array is derived from which handlers are non-nil.
 func (p *Plugin) discover() DiscoverResponse {
-	caps := []string{"discover", "plan"}
+	caps := []string{"discover"}
+	if p.Plan != nil {
+		caps = append(caps, "plan")
+	}
 	if p.Observe != nil {
 		caps = append(caps, "observe")
 	}
@@ -203,6 +207,7 @@ func (p *Plugin) discover() DiscoverResponse {
 		ConfigSchema:    p.ConfigSchema,
 		Capabilities:    caps,
 		OutputSchema:    p.OutputSchema,
+		OutputSchemas:   p.OutputSchemas,
 	}
 	if p.Consumes == nil {
 		resp.Consumes = []string{}
@@ -227,15 +232,12 @@ type SecretBackend interface {
 
 // SecretPlugin wraps a SecretBackend into a Plugin ready for .Main().
 // Name and Version are required; everything else is wired automatically.
-// The resulting plugin produces no artifacts (Plan returns an empty
-// action list), so it can be registered solely for secret resolution.
+// The resulting plugin can be registered solely for secret resolution and
+// does not advertise a plan capability.
 func SecretPlugin(name, version string, backend SecretBackend) *Plugin {
 	return &Plugin{
-		Name:    name,
-		Version: version,
-		Plan: func(ctx context.Context, req PlanRequest) (PlanResponse, error) {
-			return PlanResponse{Actions: []ActionSpec{}, Outputs: map[string]string{}}, nil
-		},
+		Name:          name,
+		Version:       version,
 		ResolveSecret: backend.Resolve,
 		StoreSecret: func(ctx context.Context, req StoreSecretRequest) error {
 			return backend.Store(ctx, req.Ref, req.Value, req.Mode)

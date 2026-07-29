@@ -192,6 +192,111 @@ func TestProcessDiscover(t *testing.T) {
 	}
 }
 
+func TestValidateDiscoverResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		resp    plugin.DiscoverResponse
+		wantErr string
+	}{
+		{
+			name: "valid explicit capabilities and schemas",
+			resp: plugin.DiscoverResponse{
+				Name:         "aws",
+				Version:      "0.1.0",
+				Capabilities: []string{"discover", "observe"},
+				OutputSchemas: []plugin.SchemaRef{
+					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
+					{ResourceType: "aws.ec2.vpc", Module: "mu/aws", Version: "v1"},
+				},
+			},
+		},
+		{
+			name: "legacy empty capabilities remain compatible",
+			resp: plugin.DiscoverResponse{
+				Name:    "legacy",
+				Version: "0.1.0",
+			},
+		},
+		{
+			name: "name required",
+			resp: plugin.DiscoverResponse{
+				Version: "0.1.0",
+			},
+			wantErr: "name is required",
+		},
+		{
+			name: "version required",
+			resp: plugin.DiscoverResponse{
+				Name: "missing-version",
+			},
+			wantErr: "version is required",
+		},
+		{
+			name: "discover capability required when capabilities are explicit",
+			resp: plugin.DiscoverResponse{
+				Name:         "observer",
+				Version:      "0.1.0",
+				Capabilities: []string{"observe"},
+			},
+			wantErr: "capabilities must include discover",
+		},
+		{
+			name: "unknown capability rejected",
+			resp: plugin.DiscoverResponse{
+				Name:         "unknown",
+				Version:      "0.1.0",
+				Capabilities: []string{"discover", "observe", "teleport"},
+			},
+			wantErr: "unknown capability",
+		},
+		{
+			name: "duplicate capability rejected",
+			resp: plugin.DiscoverResponse{
+				Name:         "duplicate",
+				Version:      "0.1.0",
+				Capabilities: []string{"discover", "discover"},
+			},
+			wantErr: "duplicate capability",
+		},
+		{
+			name: "schema module required",
+			resp: plugin.DiscoverResponse{
+				Name:         "bad-schema",
+				Version:      "0.1.0",
+				OutputSchema: &plugin.SchemaRef{Version: "v1"},
+			},
+			wantErr: "output_schema: module is required",
+		},
+		{
+			name: "resource types unique",
+			resp: plugin.DiscoverResponse{
+				Name:    "duplicate-schema",
+				Version: "0.1.0",
+				OutputSchemas: []plugin.SchemaRef{
+					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
+					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
+				},
+			},
+			wantErr: "duplicate resource_type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := plugin.ValidateDiscoverResponse(tt.resp)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateDiscoverResponse: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestProcessPlan(t *testing.T) {
 	p := startTestPlugin(t, "mock_plugin.sh")
 
@@ -218,6 +323,33 @@ func TestProcessPlan(t *testing.T) {
 	}
 	if resp.Outputs["mock_output"] != "out.txt" {
 		t.Errorf("Outputs[mock_output] = %q, want out.txt", resp.Outputs["mock_output"])
+	}
+}
+
+func TestProcessRecordObserverContract(t *testing.T) {
+	p := startTestPlugin(t, "mock_observer.sh")
+	resp, err := p.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if !resp.HasCapability("observe") {
+		t.Fatalf("capabilities = %v, want observe", resp.Capabilities)
+	}
+
+	observed, err := p.Observe(context.Background(), plugin.TargetInfo{
+		Name:      "//fixture",
+		Toolchain: "mock-observer",
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	if err := plugin.ValidateRecordObserveResponse(*observed); err != nil {
+		t.Fatalf("ValidateRecordObserveResponse: %v", err)
+	}
+	records := observed.Current["records"].([]any)
+	record := records[0].(map[string]any)
+	if record["_schema"] != "mock.record" {
+		t.Errorf("record _schema = %v, want mock.record", record["_schema"])
 	}
 }
 
@@ -275,6 +407,18 @@ func TestProcessBadVersion(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "protocol version mismatch") {
 		t.Errorf("error = %q, want it to contain 'protocol version mismatch'", err)
+	}
+}
+
+func TestProcessRejectsInvalidDiscoverCapabilities(t *testing.T) {
+	p := startTestPlugin(t, "mock_bad_capability.sh")
+
+	_, err := p.Discover(context.Background())
+	if err == nil {
+		t.Fatal("expected invalid capabilities error, got nil")
+	}
+	if !strings.Contains(err.Error(), "capabilities must include discover") {
+		t.Errorf("error = %q, want missing discover capability", err)
 	}
 }
 

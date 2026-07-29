@@ -64,6 +64,26 @@ func TestResolveFileInputs(t *testing.T) {
 	}
 }
 
+func TestResolveAbsoluteFileInput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(path, []byte("absolute input\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	actions, err := Resolve(context.Background(), []plugin.ActionSpec{{
+		ID:      "build",
+		Command: []string{"cat", path},
+		Inputs:  map[string]string{"src": path},
+	}}, dir, nil, nil)
+	if err != nil {
+		t.Fatalf("Resolve absolute input: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Inputs["src"].IsZero() {
+		t.Fatalf("absolute input was not resolved: %#v", actions)
+	}
+}
+
 func TestResolveCrossTargetProducer(t *testing.T) {
 	// Simulate a dependent target whose plugin referenced a dep's declared
 	// output path (e.g. "infra/vpc/state.json"). The file does NOT exist on

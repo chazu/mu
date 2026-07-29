@@ -13,7 +13,7 @@ LIFECYCLE
 
   1. mu starts the plugin process.
   2. mu sends {"method": "discover"} — plugin replies with metadata.
-  3. mu sends plan/observe/resolve_secret requests as needed.
+  3. mu sends plan/observe/resolve_secret/store_secret/advise requests as needed.
   4. mu closes stdin when done — plugin exits.
 
 METHODS
@@ -27,10 +27,15 @@ METHODS
       "consumes": ["source:any"],
       "produces": ["binary"],
       "capabilities": ["discover", "plan", "observe"],
-      "config_schema": {"output": {"type": "string"}}
+      "config_schema": {"output": {"type": "string"}},
+      "output_schema": {"module": "mu/plugin", "version": "v1", "definition": "#Type"},
+      "output_schemas": [{"resource_type": "plugin.type", "module": "mu/plugin", "version": "v1", "definition": "#Type"}]
     }
 
-  plan (required)
+    Plugins must declare every supported method in `capabilities`.
+    `plan` is required only for build/convergence plugins.
+
+  plan (optional; required for build/convergence plugins)
     Request:  {
       "method": "plan",
       "target": {"name": "//app", "toolchain": "go", "sources": [...], "config": {...}},
@@ -103,6 +108,11 @@ ACTION SPEC FIELDS
 
   id                  Unique within the subgraph.
   command             []string — the command to execute.
+  body                []any — pith VM program; mutually exclusive with
+                      command (optional).
+  ewe_source          string — project-relative path to an ewe populator
+                      .cue program; mutually exclusive with command/body
+                      (optional).
   inputs              map[name]path — input files (paths resolved to CAS digests).
   outputs             []string — declared output file paths.
   depends_on          []string — IDs of actions this depends on (within subgraph).

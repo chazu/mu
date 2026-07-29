@@ -27,6 +27,12 @@ type Scenario struct {
 	// response does not include the named capability.
 	SkipIfMissingCapability string `yaml:"skip_if_missing_capability,omitempty" json:"skip_if_missing_capability,omitempty"`
 
+	// SkipIfMissingEnv, if non-empty, causes the scenario to be marked
+	// skipped when the named environment variable is unset or empty. This
+	// keeps real-infrastructure fixtures opt-in while still making them
+	// runnable in CI with fake dependencies.
+	SkipIfMissingEnv string `yaml:"skip_if_missing_env,omitempty" json:"skip_if_missing_env,omitempty"`
+
 	// Path is populated by loaders so Golden can resolve relative paths.
 	Path string `yaml:"-" json:"-"`
 }

@@ -1,6 +1,6 @@
 # Authoring plugin output schemas
 
-A mu plugin can optionally declare a CUE schema for the data it
+A mu plugin can optionally declare one or more CUE schemas for the data it
 produces. Downstream consumers (most notably pudl) use this to classify
 imported data without re-inferring its shape.
 
@@ -26,7 +26,8 @@ into pudl.
 
 ### 1. Declare it in `discover`
 
-Add an `output_schema` field to your discover response:
+Add an `output_schema` field for a single default schema, or an
+`output_schemas` array when the plugin emits multiple resource types:
 
 ```clojure
 {"name"             "aws"
@@ -39,8 +40,26 @@ Add an `output_schema` field to your discover response:
                      "definition" "#EC2Instance"}}
 ```
 
+For resource-specific schemas:
+
+```clojure
+{"name"             "aws"
+ "version"          "0.1.0"
+ "protocol_version" 1
+ "output_schemas"   [{"resource_type" "aws.ec2.instance"
+                      "module"        "mu/aws"
+                      "version"       "v1"
+                      "definition"    "#EC2Instance"}
+                     {"resource_type" "aws.ec2.vpc"
+                      "module"        "mu/aws"
+                      "version"       "v1"
+                      "definition"    "#VPC"}]}
+```
+
 Field meaning:
 
+- `resource_type` — optional emitted record type. Consumers use it to
+  select the matching schema when one plugin emits several shapes.
 - `module` — the CUE module path. Follow the namespace convention in
   `cue-conventions.md` §6: `mu/<plugin-name>` for schemas you own.
 - `version` — opaque version label. `v1`, `2026-05-04`, anything that's
@@ -84,7 +103,8 @@ find them on the consumer side.
 ## How the data reaches pudl
 
 The wire format is an **envelope JSON**: a single document with a
-top-level `schema` (the same fields as your discover `output_schema`),
+top-level `schema` (the same fields as one entry in your discover
+`output_schema` or `output_schemas`),
 optional inline `definitions`, and a `data` payload. pudl detects
 envelopes by shape and unwraps them automatically:
 
@@ -126,7 +146,7 @@ to catch typos and discourage namespace squatting.
 ## Relevant code paths
 
 - `internal/plugin/protocol.go` — `DiscoverResponse.OutputSchema`,
-  `SchemaRef`.
+  `OutputSchemas`, and `SchemaRef`.
 - `internal/config/types.go` — `PluginManifest.Schemas`,
   `SchemaDecl`.
 - `internal/coordinator/pluginschemas.go` — `LoadVendoredSchemas`.

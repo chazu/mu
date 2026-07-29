@@ -42,15 +42,18 @@ WORKFLOW
 
   5. Verify convergence (the ACUTE loop):
 
-     mu observe --json //nginx_conf | pudl import --stdin
+     mu observe --ndjson //nginx_conf | pudl import --stdin
      pudl drift check nginx_conf  # should report no drift
 
 OBSERVATION PIPELINE
 
   mu observe --ndjson <targets> | pudl import --stdin
 
-  mu's observe output streams records with _schema fields. pudl routes
-  each record by schema to the appropriate CUE definition for comparison.
+  mu core emits one record per target (a "records" array with --json, or
+  one JSON object per line with --ndjson). Any _schema tagging that pudl
+  routes on is a plugin/pudl-side convention, not something mu core adds.
+  pudl routes each record by schema to the appropriate CUE definition for
+  comparison.
 
 RESOURCE TYPE MAPPING
 

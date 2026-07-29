@@ -104,7 +104,7 @@ mu build //hello
 ```
 
 That's the whole loop — no toolchain bootstrap needed for Go plugins. The
-SDK derives capabilities from which optional handlers (Observe,
+SDK derives capabilities from which handlers (Plan, Observe,
 ResolveSecret, StoreSecret, Advise) are non-nil. Full SDK reference:
 `mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
 

@@ -84,6 +84,85 @@ func TestObserveResponseJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestValidateRecordObserveResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		resp    plugin.ObserveResponse
+		wantErr string
+	}{
+		{
+			name: "records with schema discriminators",
+			resp: plugin.ObserveResponse{
+				Current: map[string]any{
+					"records": []any{
+						map[string]any{"_schema": "aws.ec2.instance", "instance_id": "i-123"},
+						map[string]any{"_schema": "aws.ec2.vpc", "vpc_id": "vpc-123"},
+					},
+				},
+			},
+		},
+		{
+			name: "empty records are valid",
+			resp: plugin.ObserveResponse{
+				Current: map[string]any{"records": []any{}},
+			},
+		},
+		{
+			name: "error response",
+			resp: plugin.ObserveResponse{Error: "AWS CLI unavailable"},
+		},
+		{
+			name:    "current required",
+			resp:    plugin.ObserveResponse{},
+			wantErr: "current is required",
+		},
+		{
+			name: "records required",
+			resp: plugin.ObserveResponse{
+				Current: map[string]any{"resources": []any{}},
+			},
+			wantErr: "current.records is required",
+		},
+		{
+			name: "record must be object",
+			resp: plugin.ObserveResponse{
+				Current: map[string]any{"records": []any{"not-an-object"}},
+			},
+			wantErr: "current.records[0] must be an object",
+		},
+		{
+			name: "schema discriminator required",
+			resp: plugin.ObserveResponse{
+				Current: map[string]any{"records": []any{map[string]any{"id": "123"}}},
+			},
+			wantErr: "current.records[0]._schema must be a non-empty string",
+		},
+		{
+			name: "error cannot carry partial current",
+			resp: plugin.ObserveResponse{
+				Error:   "partial failure",
+				Current: map[string]any{"records": []any{}},
+			},
+			wantErr: "error response must not include current",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := plugin.ValidateRecordObserveResponse(tt.resp)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateRecordObserveResponse: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNewObserveRequest(t *testing.T) {
 	target := plugin.TargetInfo{Name: "//k8s/api", Toolchain: "k8s"}
 	req := plugin.NewObserveRequest(target, map[string]string{"bin/kubectl": "sha256:abc"}, nil)
@@ -135,6 +214,47 @@ func TestDiscoverResponseOutputSchemaRoundTrip(t *testing.T) {
 	}
 	if got.OutputSchema.Source != "vendored" {
 		t.Errorf("Source = %q, want vendored", got.OutputSchema.Source)
+	}
+}
+
+func TestDiscoverResponseOutputSchemasRoundTrip(t *testing.T) {
+	resp := plugin.DiscoverResponse{
+		Name:            "aws",
+		Version:         "0.1.0",
+		ProtocolVersion: 1,
+		OutputSchemas: []plugin.SchemaRef{
+			{
+				ResourceType: "aws.ec2.instance",
+				Module:       "mu/aws",
+				Version:      "v1",
+				Definition:   "#EC2Instance",
+			},
+			{
+				ResourceType: "aws.ec2.vpc",
+				Module:       "mu/aws",
+				Version:      "v1",
+				Definition:   "#VPC",
+			},
+		},
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got plugin.DiscoverResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(got.OutputSchemas) != 2 {
+		t.Fatalf("OutputSchemas = %+v, want two entries", got.OutputSchemas)
+	}
+	if got.OutputSchemas[0].ResourceType != "aws.ec2.instance" {
+		t.Errorf("resource type = %q, want aws.ec2.instance", got.OutputSchemas[0].ResourceType)
+	}
+	if got.OutputSchemas[1].Definition != "#VPC" {
+		t.Errorf("definition = %q, want #VPC", got.OutputSchemas[1].Definition)
 	}
 }
 

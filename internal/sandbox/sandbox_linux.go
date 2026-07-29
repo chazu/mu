@@ -85,11 +85,11 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 
 // initConfig is passed from parent to the re-exec'd child via stdin.
 type initConfig struct {
-	RootDir string            `json:"root_dir"`
-	WorkDir string            `json:"work_dir"`
-	Command []string          `json:"command"`
-	Env     []string          `json:"env"`
-	Network bool              `json:"network"`
+	RootDir string   `json:"root_dir"`
+	WorkDir string   `json:"work_dir"`
+	Command []string `json:"command"`
+	Env     []string `json:"env"`
+	Network bool     `json:"network"`
 }
 
 // RunInit is called early in main() when os.Args[1] == "__sandbox_init__".

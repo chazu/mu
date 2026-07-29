@@ -131,9 +131,9 @@ func TestActionKey_ConfigFormatInvariant(t *testing.T) {
 
 func sealedBodyAction() *dag.Action {
 	return &dag.Action{
-		ID:   "fetch:run",
-		Body: []any{"'TOKEN", "secret/get"},
-		Env:  map[string]string{"BASE": "https://gitlab.com"},
+		ID:               "fetch:run",
+		Body:             []any{"'TOKEN", "secret/get"},
+		Env:              map[string]string{"BASE": "https://gitlab.com"},
 		SealedInputs:     map[string]string{"TOKEN": "pass:gitlab/token"},
 		SealedInputModes: map[string]string{"TOKEN": "env"},
 		Impure:           true, // bodies that touch secrets are impure in practice

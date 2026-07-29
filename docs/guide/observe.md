@@ -28,9 +28,9 @@ HOW IT WORKS
   3. mu sends an "observe" request to the target's plugin with:
      - target info (name, toolchain, config)
      - resolved secrets (never logged or cached)
-  4. The plugin queries the real system (AWS API, filesystem, etc.)
-     and returns: {"current": {"records": [...]}}
-  5. Each record should include "_schema" for pudl routing:
+  4. A PUDL-facing observer queries the real system (AWS API, filesystem,
+     etc.) and returns: {"current": {"records": [...]}}.
+  5. Each record must include "_schema" for pudl routing:
      {"_schema": "aws.ec2.instance", "instance_id": "i-abc", ...}
 
 OUTPUT FORMATS
@@ -57,7 +57,13 @@ WRITING AN OBSERVE PLUGIN
                  ;; Query the real system using config + secrets.
                  {"current" {"records" [{...} {...}]}})
 
-  Record conventions:
-  - Include "_schema" field for pudl routing (e.g. "aws.ec2.instance").
+  Record conventions for PUDL-facing observers:
+  - Return {"current": {"records": [...]}} on success.
+  - Include a non-empty "_schema" field for pudl routing
+    (e.g. "aws.ec2.instance").
   - Return arrays even for single resources.
-  - Return {"error": "message"} on failure.
+  - Return {"error": "message"} on failure, without a partial "current".
+
+  Convergence-only observers may return a plugin-specific current shape
+  (for example, drift summaries); they are not record-stream producers and
+  must document that distinction.

@@ -7,7 +7,9 @@ this guide tells plugin authors how to IMPLEMENT them correctly.
 Two roles a plugin can play, independently:
 
   1. SECRET PROVIDER — owns a ref scheme (e.g. "pass:") and serves
-     resolve_secret and/or store_secret. Today: 'pass', 'sops'.
+     resolve_secret and/or store_secret. Plugin providers: 'pass',
+     'sops'. mu also ships a built-in 'env' scheme (env:NAME, read-only)
+     that needs no plugin; a plugin explicitly named "env" overrides it.
 
   2. SECRET CONSUMER / EMITTER — an action plugin (k8s, terraform,
      remote-exec, …) that accepts sealed_inputs as runtime values and
@@ -72,8 +74,10 @@ store_secret
     create_if_absent   No-op if exists, create if missing.
                        (This is what secret-gen relies on.)
 
-  The mode comes from the target's sealed_output_modes, defaulting
-  to "overwrite". Validate it and reject anything else explicitly.
+  The mode comes from the action's sealed_output_modes — a field the
+  plugin emits on its ActionSpec at plan time, not a target/mu.cue key —
+  defaulting to "overwrite". Validate it and reject anything else
+  explicitly.
 
   Like resolve_secret, never log the value. If your backend's CLI
   echoes it, redirect that output to /dev/null in your wrapper.

@@ -55,8 +55,14 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 				continue
 			}
 
-			// Treat as file path relative to project root.
-			path := filepath.Clean(filepath.Join(projectRoot, value))
+			// Treat relative paths as project-root-relative. Absolute paths are
+			// accepted for callers that materialize inputs in a temporary
+			// workspace, but remain confined to the project root below.
+			path := value
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(projectRoot, path)
+			}
+			path = filepath.Clean(path)
 			cleanRoot := filepath.Clean(projectRoot) + string(filepath.Separator)
 			if path != filepath.Clean(projectRoot) && !strings.HasPrefix(path, cleanRoot) {
 				return nil, fmt.Errorf("resolve action %q input %q: path %q escapes project root", spec.ID, name, value)

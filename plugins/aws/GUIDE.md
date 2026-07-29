@@ -49,6 +49,13 @@ OBSERVATION OUTPUT
     subnet_id, vpc_id, cidr_block, availability_zone, state,
     map_public_ip_on_launch, available_ip_count, tags
 
+SCHEMA OWNERSHIP
+
+  This plugin declares and ships its wire-format schemas as mu/aws@v1.
+  Discovery advertises the schema definition for each emitted resource type.
+  The bundled pudl.cue file maps those resource types to PUDL's semantic
+  schemas; the wire schema and semantic schema are deliberately separate.
+
 PIPING TO PUDL
 
   mu observe --ndjson //infra/aws-inventory | pudl import --stdin
@@ -58,8 +65,17 @@ PIPING TO PUDL
 PREREQUISITES
 
   AWS CLI v2 must be installed and configured with the named profile.
-  The plugin validates CLI version at discover time.
+  Discovery is dependency-free; the plugin validates the CLI when observe
+  runs.
 
 CAPABILITIES
 
   discover, observe
+
+CONTRACT FIXTURE
+
+  Run the deterministic observer fixture without contacting AWS:
+
+    MU_AWS_FIXTURE=1 \
+      PATH="$PWD/plugins/aws/testdata/bin:$PATH" \
+      mu plugin test plugins/aws

@@ -4,8 +4,13 @@ package mu
 plugin: {
 	entrypoint: "plugin.bb"
 	toolchain:  "bb"
-	files: ["plugin.bb"]
+	files: ["plugin.bb", "pudl.cue"]
 	guide: "GUIDE.md"
+	schemas: [{
+		module:  "mu/aws"
+		version: "v1"
+		path:    "schemas/mu/aws"
+	}]
 }
 targets: [{
 	target:    "build"

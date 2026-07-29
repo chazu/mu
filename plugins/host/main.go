@@ -5,8 +5,7 @@
 // into structured records (OS info, packages, services, mounts, network,
 // users) for pudl to import.
 //
-// Capabilities: discover, observe. (The SDK also advertises "plan" because
-// it requires a Plan func; this plugin's Plan returns no actions.)
+// Capabilities: discover, observe.
 //
 // Config options:
 //
@@ -62,18 +61,8 @@ func main() {
 				"description": "SSH port",
 			},
 		},
-		Plan:    plan,
 		Observe: observe,
 	}).Main()
-}
-
-// plan is required by the SDK but this plugin produces no build actions —
-// it is purely an observer. Returns an empty action list.
-func plan(_ context.Context, _ muplugin.PlanRequest) (muplugin.PlanResponse, error) {
-	return muplugin.PlanResponse{
-		Actions: []muplugin.ActionSpec{},
-		Outputs: map[string]string{},
-	}, nil
 }
 
 // observe SSHs into the configured host, executes the embedded gather.sh

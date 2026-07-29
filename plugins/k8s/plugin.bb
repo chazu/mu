@@ -16,6 +16,9 @@
 ;;   dry_run               - kubectl --dry-run=server (default: false)
 ;;   ignore_paths          - list of dot-separated field paths to ignore in drift
 ;;                           detection (e.g. ["spec.replicas" "metadata.annotations.my-ann"])
+;;   inventory              - optional inventory mode config:
+;;                           {"kinds" ["pods" "deployments"]
+;;                            "namespace" "default" | "all_namespaces" true}
 ;;   sealed_output_secrets - map sealed_output NAME -> {"namespace","secret","key"}.
 ;;                           After apply, the fetch-secrets action runs
 ;;                           `kubectl get secret -n NS NAME -o jsonpath="{.data.KEY}"
@@ -55,6 +58,10 @@
                        "dry_run"               {"type" "boolean" "default" false "description" "Validate without applying changes"}
                        "ignore_paths"          {"type" "array" "items" {"type" "string"}
                                                 "default" [] "description" "JSON paths to ignore during drift detection"}
+                       "inventory"             {"type" "object" "description" "Read live cluster objects instead of diffing declared manifests"
+                                                "properties" {"kinds" {"type" "array" "items" {"type" "string"}}
+                                                              "namespace" {"type" "string"}
+                                                              "all_namespaces" {"type" "boolean"}}}
                        "sealed_output_secrets" {"type" "object" "description" "Map of sealed output names to cluster secret references"}}})
 
 (defn shell-quote
@@ -74,6 +81,52 @@
     (get config "namespace")  (conj "--namespace" (get config "namespace"))
     (get config "context")    (conj "--context" (get config "context"))
     (get config "kubeconfig") (conj "--kubeconfig" (get config "kubeconfig"))))
+
+(defn inventory-config
+  "Validate and normalize the optional live inventory configuration."
+  [config]
+  (when-let [inventory (get config "inventory")]
+    (let [kinds (get inventory "kinds")]
+      (when (or (not (sequential? kinds)) (empty? kinds)
+                (some #(or (not (string? %)) (str/blank? %)) kinds))
+        (throw (ex-info "k8s inventory requires a non-empty kinds list" {})))
+      (when (and (get inventory "all_namespaces")
+                 (or (get inventory "namespace") (get config "namespace")))
+        (throw (ex-info "k8s inventory cannot combine all_namespaces with namespace" {})))
+      (assoc inventory "kinds" (vec kinds)))))
+
+(defn inventory-kubectl-args
+  "Build kubectl flags for live inventory without duplicating namespace flags."
+  [config inventory]
+  (let [base-config (dissoc config "namespace")
+        namespace   (or (get inventory "namespace") (get config "namespace"))]
+    (cond-> (kubectl-base-args base-config)
+      namespace (conj "--namespace" namespace)
+      (get inventory "all_namespaces") (conj "--all-namespaces"))))
+
+(defn fetch-inventory-kind
+  "Return the API objects for one kind, preserving the server's object shape."
+  [base-args kind]
+  (let [result (process/sh (into ["kubectl" "get" kind] (concat base-args ["-o" "json"])))]
+    (if (zero? (:exit result))
+      (let [body (json/parse-string (:out result) true)]
+        (or (:items body) []))
+      (throw (ex-info (str "kubectl get " kind " failed: " (str/trim (:err result)))
+                      {:kind kind :exit (:exit result)})))))
+
+(defn inventory-record
+  "Attach the stable PUDL/mu resource type to a live Kubernetes object."
+  [object]
+  (assoc object "_schema" "k8s.resource"))
+
+(defn handle-inventory-observe
+  "Observe live objects without requiring manifest sources."
+  [target config]
+  (let [inventory (inventory-config config)
+        base-args (inventory-kubectl-args config inventory)
+        records   (mapcat #(map inventory-record (fetch-inventory-kind base-args %))
+                          (get inventory "kinds"))]
+    {"current" {"records" (vec records)}}))
 
 ;;; ─── Plan ───────────────────────────────────────────────────────────
 
@@ -354,7 +407,9 @@
         config    (get target "config" {})
         base-args (kubectl-base-args config)]
     (try
-      (let [manifests (parse-source-manifests sources)
+      (if (get config "inventory")
+        (handle-inventory-observe target config)
+        (let [manifests (parse-source-manifests sources)
             resources (for [manifest manifests
                            :let [rid  (resource-id manifest)
                                  live (fetch-live-object base-args rid)]]
@@ -367,7 +422,7 @@
                                      "matches"   (not (:drifted? d))}
                               (:drifted? d)
                               (assoc "diff" (format-diff rid d))))))]
-        {"current" {"resources" (vec resources)}})
+          {"current" {"resources" (vec resources)}}))
       (catch Exception e
         {"error" (str "observe failed: " (.getMessage e))}))))
 

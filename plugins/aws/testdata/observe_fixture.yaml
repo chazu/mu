@@ -1,0 +1,23 @@
+name: aws_observe_fixture
+description: Observe AWS records through a deterministic fake CLI.
+skip_if_missing_capability: observe
+skip_if_missing_env: MU_AWS_FIXTURE
+request:
+  method: observe
+  target:
+    name: //fixture/aws
+    toolchain: aws
+    config:
+      profile: fixture
+      region: us-test-1
+      resources:
+        - ec2
+expect:
+  match: shape
+  shape:
+    current:
+      records:
+        - _schema: aws.ec2.instance
+          account: "123456789012"
+          region: us-test-1
+          instance_id: i-fixture

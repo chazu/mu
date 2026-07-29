@@ -251,8 +251,82 @@ func (p *Process) Discover(ctx context.Context) (*DiscoverResponse, error) {
 		return nil, fmt.Errorf("plugin %q: protocol version mismatch: got %d, want %d",
 			p.name, resp.ProtocolVersion, ProtocolVersion)
 	}
+	if err := ValidateDiscoverResponse(resp); err != nil {
+		return nil, fmt.Errorf("plugin %q: invalid discover response: %w", p.name, err)
+	}
 
 	return &resp, nil
+}
+
+// ValidateDiscoverResponse checks the structural parts of a discover
+// response that every plugin must satisfy. A missing capabilities array is
+// accepted for compatibility with pre-capability plugins; when present, it
+// must be explicit, unique, and include discover.
+func ValidateDiscoverResponse(resp DiscoverResponse) error {
+	if strings.TrimSpace(resp.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(resp.Version) == "" {
+		return fmt.Errorf("version is required")
+	}
+
+	if len(resp.Capabilities) > 0 {
+		seen := make(map[string]struct{}, len(resp.Capabilities))
+		for _, capability := range resp.Capabilities {
+			if _, ok := validCapabilities[capability]; !ok {
+				return fmt.Errorf("unknown capability %q", capability)
+			}
+			if _, ok := seen[capability]; ok {
+				return fmt.Errorf("duplicate capability %q", capability)
+			}
+			seen[capability] = struct{}{}
+		}
+		if _, ok := seen["discover"]; !ok {
+			return fmt.Errorf("capabilities must include discover")
+		}
+	}
+
+	if err := validateSchemaRef(resp.OutputSchema); err != nil {
+		return fmt.Errorf("output_schema: %w", err)
+	}
+	seenResourceTypes := make(map[string]struct{}, len(resp.OutputSchemas))
+	for i := range resp.OutputSchemas {
+		schema := &resp.OutputSchemas[i]
+		if err := validateSchemaRef(schema); err != nil {
+			return fmt.Errorf("output_schemas[%d]: %w", i, err)
+		}
+		if schema.ResourceType == "" {
+			continue
+		}
+		if _, ok := seenResourceTypes[schema.ResourceType]; ok {
+			return fmt.Errorf("output_schemas: duplicate resource_type %q", schema.ResourceType)
+		}
+		seenResourceTypes[schema.ResourceType] = struct{}{}
+	}
+
+	return nil
+}
+
+var validCapabilities = map[string]struct{}{
+	"discover":       {},
+	"plan":           {},
+	"observe":        {},
+	"resolve_secret": {},
+	"store_secret":   {},
+	"advise":         {},
+}
+
+func validateSchemaRef(schema *SchemaRef) error {
+	if schema == nil {
+		return nil
+	}
+	if strings.TrimSpace(schema.Module) == "" {
+		return fmt.Errorf("module is required")
+	}
+	if strings.TrimSpace(schema.Version) == "" {
+		return fmt.Errorf("version is required")
+	}
+	return nil
 }
 
 // Plan sends a plan request and returns the response.

@@ -170,20 +170,28 @@
 ;;; ─── Discover ───────────────────────────────────────────────────────
 
 (defn handle-discover []
-  (try
-    (check-aws-cli!)
-    {"name"             "aws"
-     "version"          "0.1.0"
-     "protocol_version" 1
-     "description"      "Observe AWS resources via the CLI and emit state records"
-     "consumes"         []
-     "produces"         ["aws_state"]
-     "capabilities"     ["discover" "observe"]
-     "config_schema"    {"profile"   {"type" "string" "description" "AWS CLI named profile"}
-                         "region"    {"type" "string" "description" "AWS region to query"}
-                         "resources" {"type" "array"  "description" "Resource types to gather (e.g. ec2, s3, iam-role)"}}}
-    (catch Exception e
-      {"error" (.getMessage e)})))
+  {"name"             "aws"
+   "version"          "0.1.0"
+   "protocol_version" 1
+   "description"      "Observe AWS resources via the CLI and emit state records"
+   "consumes"         []
+   "produces"         ["aws_state"]
+   "capabilities"     ["discover" "observe"]
+   "output_schemas"   [{"resource_type" "aws.ec2.instance"
+                        "module" "mu/aws"
+                        "version" "v1"
+                        "definition" "#EC2Instance"}
+                       {"resource_type" "aws.ec2.vpc"
+                        "module" "mu/aws"
+                        "version" "v1"
+                        "definition" "#VPC"}
+                       {"resource_type" "aws.ec2.subnet"
+                        "module" "mu/aws"
+                        "version" "v1"
+                        "definition" "#Subnet"}]
+   "config_schema"    {"profile"   {"type" "string" "description" "AWS CLI named profile"}
+                       "region"    {"type" "string" "description" "AWS region to query"}
+                       "resources" {"type" "array"  "description" "Resource types to gather (e.g. ec2, s3, iam-role)"}}})
 
 ;;; ─── Observe ────────────────────────────────────────────────────────
 
@@ -193,6 +201,7 @@
     (if-let [err (validate-config config)]
       {"error" err}
       (try
+        (check-aws-cli!)
         (let [profile   (get config "profile")
               region    (get config "region")
               resources (get config "resources")

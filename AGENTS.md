@@ -342,13 +342,14 @@ Errors at any point: respond with `{"error": "message"}`.
   "capabilities": ["discover", "plan", "observe", "resolve_secret", "store_secret", "advise"],
   "config_schema": { ... JSON-Schema Draft-7 subset ... },
   "advise_phases": ["after-build"],
-  "output_schema": {"module": "mu/plugin", "version": "v1", "definition": "#Type"}
+  "output_schema": {"module": "mu/plugin", "version": "v1", "definition": "#Type"},
+  "output_schemas": [{"resource_type": "plugin.type", "module": "mu/plugin", "version": "v1", "definition": "#Type"}]
 }
 ```
 
 Plugin must: declare every supported method in `capabilities`. Declare `config_schema` so mu can validate target.config before planning.
 
-### `plan` (required, called once per target)
+### `plan` (optional; required for build/convergence plugins, called once per target)
 
 **Request:**
 ```json
