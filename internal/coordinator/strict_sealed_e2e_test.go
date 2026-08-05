@@ -52,7 +52,8 @@ func TestStrictSealedRoutingFakeProviderEndToEnd(t *testing.T) {
 		t.Fatalf("strict routed action = %#v", actions)
 	}
 
-	if _, err := c.Execute(context.Background(), plan); err != nil {
+	result, err := c.Execute(context.Background(), plan)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	stored, err := os.ReadFile(storedPath)
@@ -71,6 +72,15 @@ func TestStrictSealedRoutingFakeProviderEndToEnd(t *testing.T) {
 	}
 	if stdout.String() != "" {
 		t.Fatalf("secret action wrote stdout: %q", stdout.String())
+	}
+	manifest, err := json.Marshal(NewManifest(result, result.ExecResult, result.Targets, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"runtime-only-value", "fake:source", "fake:destination"} {
+		if bytes.Contains(manifest, []byte(forbidden)) {
+			t.Fatalf("build manifest contains sealed material %q: %s", forbidden, manifest)
+		}
 	}
 }
 

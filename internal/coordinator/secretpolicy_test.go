@@ -143,6 +143,41 @@ func TestPlan_SealedOutputAllowedByPolicy(t *testing.T) {
 	}
 }
 
+func TestExecuteRechecksSealedOutputPolicyAgainstTamperedPlan(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name: "//secrets/admin", Toolchain: "secret-gen",
+				Config: map[string]any{"ref": "pass:registry/admin", "derivation": []any{"true"}},
+			}},
+			Secrets: &config.SecretsConfig{WritableRefs: []string{"pass:registry/*"}},
+			Plugins: []config.PluginDef{{Name: "pass", Command: mockPluginCommand(t, "mock_secret_provider.sh")}},
+		},
+		Store: newTestStore(t), Workers: 1,
+	}
+
+	plan, err := c.Plan(context.Background(), []string{"//secrets/admin"})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, action := range plan.Graph.Actions() {
+		for name := range action.SealedOutputs {
+			action.SealedOutputs[name] = "pass:personal/admin"
+		}
+	}
+	result, err := c.Execute(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Execute orchestration: %v", err)
+	}
+	if len(result.ExecResult.Failed) != 1 {
+		t.Fatalf("failed actions = %#v, want one write-policy failure", result.ExecResult.Failed)
+	}
+	if !strings.Contains(result.ExecResult.Failed[0].Err.Error(), "writable_refs") {
+		t.Fatalf("action error = %v, want write-policy rejection", result.ExecResult.Failed[0].Err)
+	}
+}
+
 func TestPlan_DenyAllPolicyBlocksWrites(t *testing.T) {
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),
