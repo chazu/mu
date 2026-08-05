@@ -27,6 +27,8 @@ Plugins decide what to build and how. mu executes.
 - **Actions** — hermetic transformations: input artifacts → output artifacts
 - **Plugins** — external executables that emit action subgraphs via NDJSON protocol
 - **Toolchains** — built from scratch as content-addressed artifacts (download, verify, extract)
+- **Sealed I/O** — provider-backed values resolved at execution time; strict
+  action routing is available for generated least-privilege targets
 
 ### Design Principles
 
@@ -177,6 +179,12 @@ Run `mu guide` for the topic index. Each topic has its own page:
 | Toolchains from scratch | `mu guide toolchains` |
 | Cache (CAS + OCI remote) | `mu guide cache` |
 | pudl integration | `mu guide pudl` |
+
+When PUDL owns a `#SystemModel`, use `pudl run` or the exact-set
+`pudl run-set`; PUDL invokes mu internally. PUDL-generated targets opt into
+`sealed_routing: "strict"`, which requires plugin actions to claim exact sealed
+refs/modes instead of inheriting target-wide access. The retired
+`pudl drift`/`pudl export-actions` workflow is not part of the current CLI.
 
 ## Bundled Plugins
 

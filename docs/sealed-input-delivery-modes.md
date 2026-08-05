@@ -65,6 +65,11 @@ The default mode (when `sealed_input_modes` is unset for that name,
 or set to the empty string, or set to `"env"`) is `env`. Existing
 configs keep working with no changes.
 
+With `sealed_routing: "strict"`, the action that consumes a name must claim the
+same effective mode as its target declaration. Omitting a claim, changing a ref
+or mode, or leaving a target input unused fails planning. The check uses refs
+and modes only; the provider value is resolved immediately before execution.
+
 ---
 
 ## Cache key behavior

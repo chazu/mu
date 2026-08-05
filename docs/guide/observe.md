@@ -19,7 +19,7 @@ EXAMPLES
 
   mu observe //infra/aws-inventory
   mu observe --json //infra/aws-inventory
-  mu observe --ndjson //infra/aws-inventory | pudl import --stdin
+  mu observe --json //infra/aws-inventory | pudl mu ingest-observe
 
 HOW IT WORKS
 

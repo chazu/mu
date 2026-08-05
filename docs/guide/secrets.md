@@ -4,8 +4,9 @@ mu has a symmetric secret system: actions can READ secrets via
 sealed_inputs and WRITE secrets via sealed_outputs, routed through
 provider plugins (e.g. 'pass', 'sops') plus a built-in 'env' scheme
 (env:NAME reads $NAME from the environment, read-only, no plugin
-required). Values never enter the cache, manifests, or logs; refs and
-modes are non-secret metadata and are part of the cache key.
+required). Values never enter the cache, manifests, or logs. Provider refs are
+also omitted from manifests; refs and modes remain non-secret planning metadata
+and are part of the cache key.
 
 This guide is the canonical user-facing reference. Per-feature deep
 dives and the plugin-author counterpart:

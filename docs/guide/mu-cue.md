@@ -85,8 +85,10 @@ STRICT SEALED ROUTING
   exact target ref and effective mode. Every declared input must be claimed
   by at least one action; every output by exactly one action. Undeclared
   claims, unused declarations, mode/ref changes, and ambiguous outputs fail
-  during planning. Without sealed_routing, the existing target-to-action
-  convenience behavior remains in effect.
+  during planning. Planning never resolves provider values; each claiming
+  action resolves its inputs immediately before execution. Without
+  sealed_routing, the existing target-to-action convenience behavior remains
+  in effect. PUDL-generated targets use strict mode.
 
 PREPROCESSOR
 

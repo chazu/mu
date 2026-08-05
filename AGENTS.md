@@ -104,7 +104,7 @@ Adjacency-list graph (`dag.Graph`). Topologically sorted. Workers execute in par
 
 ## Manifest
 
-JSON build result, schema `mu.build.manifest/v1`. Fields: `version`, `type`, `timestamp`, `duration_s`, `targets[]`, `actions[]`, `summary` (completed/cached/failed/cancelled). Each action: `id`, `cached`, `exit_code`, `outputs{name→digest}`. BRICK metadata round-trips. Consumed by `pudl import`.
+JSON build result, schema `mu.build.manifest/v1`. Fields: `version`, `type`, `timestamp`, `duration_s`, `targets[]`, `actions[]`, `summary` (completed/cached/failed/cancelled). Each action: `id`, `cached`, `exit_code`, `outputs{name→digest}`. BRICK metadata round-trips. Ingest with `pudl mu ingest-manifest`.
 
 ## Where things live
 
@@ -121,48 +121,36 @@ Sandbox model: see `personal:tools/mu/sandbox-caching`.
 <!-- BEGIN union:personal:tools/mu/converge-recipes -->
 # Converge recipes — copy-paste ACUTE loop
 
-## One-shot full converge (drift → apply → re-observe)
+## One-shot full converge (observe → apply → re-observe)
 
 ```bash
-# T: export drifted resources as mu targets
-pudl export-actions --drifted > /tmp/converge.json
+# PUDL owns planning, mu execution, receipt ingestion, and re-observation.
+pudl run <model> --converge
 
-# Safety: plan first, inspect what would happen
-mu build --plan --config /tmp/converge.json //...
-
-# E: execute convergence + emit manifest
-mu build --emit-manifest --config /tmp/converge.json //... > /tmp/manifest.json
-
-# A: ingest manifest back into pudl
-pudl import /tmp/manifest.json --origin mu
-
-# A: re-observe to confirm convergence
-mu observe --json --config /tmp/converge.json //... | pudl import --origin mu
+# For cross-model values, name the exact closed set.
+pudl run-set <producer> <consumer> --converge
 ```
 
 ## Observe-only (drift check without applying)
 
 ```bash
-mu observe --json --config /tmp/converge.json //... | pudl import --origin mu
-pudl facts list --relation drift
+pudl run <model>
+pudl run-set <producer> <consumer>
 ```
 
 ## Partial converge (specific target)
 
 ```bash
-pudl export-actions --drifted --target //k8s/myapp > /tmp/c.json
-mu build --plan --config /tmp/c.json //k8s/myapp
-mu build --emit-manifest --config /tmp/c.json //k8s/myapp > /tmp/m.json
-pudl import /tmp/m.json --origin mu
+pudl run <model> --converge --only myapp
 ```
 
 ## When loop stalls (target keeps drifting after apply)
 
 ```bash
-pudl drift                                  # see what's still drifted
-pudl facts list --relation drift            # full drift history
-pudl facts show <drift-id>                  # specific drift record
-mu observe --verbose --config /tmp/c.json //target  # what plugin actually sees
+pudl run <model> --json                     # fresh observed verdict + binding issues
+pudl run report [run-id] --json             # durable phase/report evidence
+pudl run-set report [run-set-id]            # exact-set member and binding evidence
+mu observe --verbose //target                # direct plugin view when mu.cue owns target
 ```
 
 Common causes:
@@ -184,30 +172,27 @@ diff <(jq -S . /tmp/plan1.json) <(jq -S . /tmp/plan2.json)
 ```bash
 mu build --emit-manifest //... > manifest.json
 mu cache push ghcr.io/org/mu-cache
-pudl import manifest.json --origin mu --source ci
+pudl mu ingest-manifest --path manifest.json
 ```
 
-## Loop with observation between iterations (slow but safest)
+## Iteration and approval
 
 ```bash
-while true; do
-  pudl export-actions --drifted > /tmp/c.json
-  count=$(jq '.targets | length' /tmp/c.json)
-  [ "$count" = "0" ] && break
-  mu build --emit-manifest --config /tmp/c.json //... > /tmp/m.json
-  pudl import /tmp/m.json --origin mu
-  mu observe --json --config /tmp/c.json //... | pudl import --origin mu
-done
+pudl run <model> --converge --max-iters 5
+pudl run-set <models...> --converge --require-approval
+pudl run-set resume <run-set-id>   # or reject
 ```
 
-Stops when no drift remains.
+PUDL re-observes between applies and stops when clean or the cap is reached.
+Any mutating run-set with a sealed output requires exact-plan approval even
+without `--require-approval`.
 
 ## Safety habits
 
-- **Always `--plan` before applying** on convergence targets (anything impure)
-- **Pass `--source mu` or `--source ci`** on pudl imports so attribution is preserved
+- **Use `--converge --dry-run`** to inspect a single-model mutation plan
+- **Use exact run-set approval** when a human must authorize the whole set
 - **Inspect `mu cache size`** periodically; cache grows fast on convergence loops
-- **Use `pudl observe` (the `kind=fact`) to record manual interventions** that bypass the loop, so future drift detection sees them
+- **Use `pudl facts observe`** to record manual interventions that bypass the loop
 <!-- END union:personal:tools/mu/converge-recipes -->
 
 <!-- BEGIN union:personal:tools/mu/cue-config -->
@@ -276,6 +261,7 @@ One of:
   sealed_input_modes:  { NAME: "env" | "file" }
   sealed_outputs:      { NAME: "scheme:path" }
   sealed_output_modes: { NAME: "create" | "overwrite" | "create_if_absent" }
+  sealed_routing:      "strict" // optional: exact action claims, no inheritance
 
   // BRICK metadata (used by pudl, ignored by mu execution)
   kind:       "relationship" | "interface" | "component" | "kit"
@@ -363,6 +349,7 @@ Plugin must: declare every supported method in `capabilities`. Declare `config_s
     "sealed_inputs": {"NAME": "scheme:path"},
     "sealed_input_modes": {"NAME": "env" | "file"},
     "sealed_outputs": {"NAME": "scheme:path"}
+    "sealed_routing": "strict"
   },
   "deps": [{"target": "//lib", "artifacts": {"binary": "lib.a"}}],
   "toolchain_artifacts": {"go": "/path/to/go"}
@@ -394,7 +381,12 @@ Plugin must: declare every supported method in `capabilities`. Declare `config_s
 }
 ```
 
-Plugin must: translate target → actions. Forward `sealed_inputs/outputs` from target onto actions that need them. Consume deps via the `artifacts` map. Populate `declared_outputs` (artifact-type → file path) so downstream targets can consume.
+Plugin must: translate target → actions. Consume deps via the `artifacts` map.
+Populate `declared_outputs` (artifact-type → file path) so downstream targets
+can consume. In convenience mode mu may inherit target sealed maps. In strict
+mode, explicitly claim exact refs/modes on the actions that need them; every
+target input must be claimed at least once and every output exactly once.
+Provider values are not available while planning.
 
 ### `observe` (optional — drift detection)
 
@@ -502,141 +494,54 @@ Plugin must: declare `advise_phases` in discover. Errors are non-fatal (logged, 
 <!-- BEGIN union:personal:tools/mu/pudl-integration -->
 # Mu ↔ pudl integration
 
-Mu = **Execution** layer. Pudl = **Knowledge** layer (Intention + Definition + Application). This clause covers: IDEA/ACUTE model, BRICK classification, and the 3 JSON docs that flow between tools.
+Mu is the execution layer; PUDL is the model/observation/approval layer. When a
+registered `#SystemModel` is the source of truth, PUDL owns the loop:
 
-## IDEA — four layers of knowledge
-
-| Layer | Holds | Pudl implementation |
-|-------|-------|---------------------|
-| **I**ntention | schemas, constraints, policies | `~/.pudl/schema/` (git-tracked CUE repo) |
-| **D**efinition | desired-state values | `~/.pudl/schema/definitions/*.cue` |
-| **E**xecution | tool-computed results | mu manifests imported as `pudl/mu.#Manifest` |
-| **A**pplication | actual live state | raw imported data, bitemporally versioned |
-
-Mu owns **E**. Pudl owns **I**, **D**, **A**.
-
-## ACUTE — five-phase pipeline
-
-| Phase | Action | Owner |
-|-------|--------|-------|
-| **A**ccumulate | import actual state from live systems | pudl (`pudl import`, `mu observe \| pudl import`) |
-| **C**onfigure | normalize imported data, resolve naming | pudl |
-| **U**nify | compare desired vs actual, detect drift | pudl (CUE unification) |
-| **T**ransform | export drifted resources as convergence targets | pudl (`pudl export-actions --drifted`) |
-| **E**xecute | run convergence actions, report results | mu (`mu build --emit-manifest`) |
-
-Loop closes when manifest re-ingested → re-observe → next iteration.
-
-## The loop
-
-```
-   ┌──────────────────────────────────────────────────────────┐
-   ▼                                                          │
-[pudl: Application layer]                                     │
-       │ U: pudl unifies with Definition layer                │
-       ▼                                                      │
-[pudl: drift detected]                                        │
-       │ T: pudl export-actions --drifted                     │
-       ▼                                                      │
-[mu.json — desired targets]                                   │
-       │ E: mu build --emit-manifest                          │
-       ▼                                                      │
-[manifest.json — Execution layer]                             │
-       │ A: pudl import manifest + mu observe                 │
-       ▼                                                      │
-[pudl: refreshed Application layer] ──────────────────────────┘
+```bash
+pudl run <model>                              # observe-only
+pudl run <model> --converge                   # apply through mu, then verify
+pudl run-set <producer> <consumer>            # exact observe-only set
+pudl run-set <producer> <consumer> --converge # whole-set preflight, then apply
 ```
 
-## BRICK — composable infrastructure blocks
+There is no current `pudl drift` or `pudl export-actions` command. PUDL renders
+temporary mu configuration, invokes `mu build`/`mu observe`, ingests receipts,
+and records durable run reports internally.
 
-Classification system for infra/code blocks. Pudl validates BRICK constraints via CUE unification; mu executes resulting actions. **Mu does NOT enforce BRICK — pudl does.**
+## Exact value wiring
 
-### Four kinds
+Plain scalar bindings come from successful PUDL catalog snapshots. Both the
+consumer input and source schema field must declare `@pudl(binding=plain)`.
+`run-set` is closed and explicit: it rejects missing producers/cycles, orders
+producers first, and pins their observations. It never expands the named set.
 
-| kind | what it is |
-|------|-----------|
-| `relationship` | typed link between two blocks (depends-on, exposes, owns) |
-| `interface` | contract — fields + constraints other blocks must satisfy |
-| `component` | concrete implementation claiming to satisfy an interface |
-| `kit` | curated bundle of interfaces + components + relationships |
+Sealed values remain in mu's provider channel. PUDL-generated targets use
+`sealed_routing: "strict"`; actions must explicitly claim exact declared refs
+and modes. Every input must be claimed at least once and every output exactly
+once. Planning validates routing without resolving values. Mu resolves inputs
+immediately before execution and re-checks `secrets.writable_refs` before each
+write. PUDL stores only redacted fingerprints. Sealed outputs are converge-only,
+and any mutating set containing one requires exact-plan approval:
 
-Components carry `implements: "//interface/name"`. Pudl validates via CUE unification at planning time.
-
-### Five registers
-
-| Register | pudl side | mu side |
-|----------|-----------|---------|
-| Building block | CUE definition | Target in mu.cue |
-| Role | CUE schema type (interface, component, kit) | Toolchain name |
-| Implementation | (delegates to mu) | Plugin |
-| Configuration | CUE values, constraints | `config{}` map on target |
-| Kit | CUE package / workspace | mu.cue file + plugins/ dir |
-
-### When BRICK matters
-
-Use BRICK kinds when:
-- Multiple components could satisfy same contract (swap implementations without rewriting consumers)
-- Want pudl to surface contract violations as drift
-
-Skip when: one-off resources with no contract; pure build targets (Go binaries, Docker images) — leave `kind` unset.
-
-## Three JSON docs
-
-### 1. `mu.json` (pudl → mu) — desired state
-
-```
-pudl export-actions --drifted > /tmp/converge.json
+```bash
+pudl run-set report [run-set-id]
+pudl run-set resume <run-set-id>   # or reject
 ```
 
-Pudl maps CUE schema prefixes to mu toolchain names:
+## Direct mu use
 
-| CUE prefix | mu toolchain |
-|------------|--------------|
-| `file.*`, `config.*` | `file` |
-| `k8s.*`, `kubernetes.*` | `k8s` |
-| `terraform.*`, `tf.*` | `terraform` |
-| `shell.*`, `exec.*` | `shell` |
-| (unknown) | `generic` |
+When hand-written `mu.cue` is the source of truth, use mu directly:
 
-Consumed via `mu build --config <file> //...`.
-
-### 2. Manifest (mu → pudl) — execution result
-
-```
-mu build --emit-manifest --config /tmp/converge.json //... > /tmp/manifest.json
-pudl import /tmp/manifest.json --origin mu
+```bash
+mu build --plan //target
+mu build --emit-manifest //target > manifest.json
+mu observe --json //target > observe.json
+pudl mu ingest-manifest --path manifest.json --model <model>
+pudl mu ingest-observe --path observe.json
 ```
 
-Schema `mu.build.manifest/v1`. Auto-matches `pudl/mu.#Manifest`. BRICK metadata (kind, implements) round-trips.
-
-### 3. Observe (mu → pudl, fast path) — current state
-
-```
-mu observe --json --config /tmp/converge.json //... | pudl import --origin mu
-```
-
-Plugin's `observe` returns `current.records[]` with `_schema` fields — pudl routes them.
-
-## Design principle
-
-Pudl emits **desired state**, not drift diffs. File plugin receives `{"path": "...", "content": "..."}` — knows nothing about CUE, drift, or pudl. **Any mu plugin works whether the target came from pudl or hand-written `mu.cue`.**
-
-## What each tool answers
-
-**Pudl**: what should exist, what does exist, what changed and when, where contracts violated, what needs to converge.
-
-**Mu**: what happened in last build (manifest), what is cached vs needs rebuild, what plugins reported as current state (observe).
-
-## When you need the full loop
-
-- Live infrastructure that drifts (cloud, k8s, files)
-- Multi-step convergence depending on observed state
-- Audit trail of every change
-
-## When you don't
-
-- Pure builds, no live state → just `mu build`
-- Read-only analysis of repo → just `pudl import`
+Plugins remain ignorant of PUDL: they receive ordinary target/config data and
+emit ordinary actions. See `mu guide pudl` for the full current contract.
 
 <!-- END union:personal:tools/mu/pudl-integration -->
 
@@ -677,6 +582,19 @@ config: {
 ```
 
 Action writes to `$MU_SEALED_OUT_DIR/<NAME>`; mu routes through provider's `store_secret`. `sealed_outputs` forces `impure: true` (never cached — store side effect must fire).
+
+## Strict action routing
+
+```cue
+sealed_routing: "strict"
+```
+
+Target sealed maps become the complete availability declaration, not implicit
+action grants. Each action claims its exact refs and effective modes. All inputs
+must be claimed at least once; every output exactly once. Undeclared/unused
+names, ref or mode changes, and ambiguous output writers fail planning. Provider
+values are resolved only immediately before action execution. PUDL-generated
+targets always use strict mode.
 
 ## Ref scheme grammar
 

@@ -103,9 +103,12 @@ TARGET INFO FIELDS
   sealed_routing      "strict" — action claims must exactly cover the
                       target declarations; no implicit inheritance.
 
-  Plugins are responsible for forwarding these fields onto the
-  ActionSpecs they emit (TargetInfo carries them; ActionSpec
-  honors them at exec time).
+  In convenience mode, mu may inherit target sealed maps onto emitted
+  ActionSpecs. In strict mode the plugin must put exact claims on the actions
+  that need them: every target input is claimed at least once, and every target
+  output exactly once. Mu validates claim names, refs, and effective modes
+  during planning. Provider values are still resolved only immediately before
+  each action executes.
 
 ACTION SPEC FIELDS
 
