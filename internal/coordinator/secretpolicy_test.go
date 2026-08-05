@@ -125,6 +125,7 @@ func TestPlan_SealedOutputAllowedByPolicy(t *testing.T) {
 			Secrets: &config.SecretsConfig{
 				WritableRefs: []string{"pass:registry/*"},
 			},
+			Plugins: []config.PluginDef{{Name: "pass", Command: mockPluginCommand(t, "mock_secret_provider.sh")}},
 		},
 		Store:   newTestStore(t),
 		Workers: 1,

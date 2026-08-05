@@ -47,6 +47,11 @@ TARGET FIELDS
                        (optional, default env).
   sealed_outputs       {NAME: "scheme:path"} — destinations to capture
                        from $MU_SEALED_OUT_DIR/<NAME> (optional).
+  sealed_output_modes  {NAME: "create" | "overwrite" |
+                       "create_if_absent"} — store mode per output
+                       (optional, default overwrite).
+  sealed_routing       "strict" — require actions to claim target-level
+                       sealed declarations explicitly (optional).
   kind                 BRICK classification: "relationship",
                        "interface", "component", "kit" (optional).
   implements           Interface this component satisfies (optional).
@@ -70,6 +75,18 @@ SECRETS POLICY
   Allow-list of glob patterns; sealed_outputs whose ref does not
   match is rejected at plan time. Omit the block to allow all
   writes; set to [] for explicit deny-all. See 'mu guide secrets'.
+
+STRICT SEALED ROUTING
+
+  sealed_routing: "strict"
+
+  Strict mode treats target-level sealed maps as the complete capability
+  declaration. Plan actions must claim each input they consume using the
+  exact target ref and effective mode. Every declared input must be claimed
+  by at least one action; every output by exactly one action. Undeclared
+  claims, unused declarations, mode/ref changes, and ambiguous outputs fail
+  during planning. Without sealed_routing, the existing target-to-action
+  convenience behavior remains in effect.
 
 PREPROCESSOR
 

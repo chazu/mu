@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/chazu/mu/internal/config"
@@ -65,6 +66,58 @@ func TestPlan_SealedInputsAttachToPithPlanAction(t *testing.T) {
 	}
 }
 
+func TestPlan_StrictSealedInputResolutionWaitsUntilExecute(t *testing.T) {
+	const variable = "MU_TEST_STRICT_PLAN_SECRET"
+	previous, existed := os.LookupEnv(variable)
+	requireNoError(t, os.Unsetenv(variable))
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(variable, previous)
+		} else {
+			_ = os.Unsetenv(variable)
+		}
+	})
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{Targets: []config.Target{{
+			Name:             "//strict",
+			SealedRouting:    "strict",
+			SealedInputs:     map[string]string{"TOKEN": "env:" + variable},
+			SealedInputModes: map[string]string{"TOKEN": "env"},
+			Plan: []any{
+				map[string]any{
+					"id":                 "read",
+					"body":               []any{"'TOKEN", "secret/get", "drop"},
+					"outputs":            []any{},
+					"sealed_inputs":      map[string]any{"TOKEN": "env:" + variable},
+					"sealed_input_modes": map[string]any{"TOKEN": "env"},
+				},
+				"action/emit",
+			},
+		}}},
+		Store: newTestStore(t), Workers: 1,
+	}
+
+	plan, err := c.Plan(context.Background(), []string{"//strict"})
+	if err != nil {
+		t.Fatalf("Plan resolved a secret value: %v", err)
+	}
+	if _, err := c.Execute(context.Background(), plan); err == nil || !contains(err.Error(), variable) {
+		t.Fatalf("Execute error = %v, want missing execute-time env secret", err)
+	}
+	requireNoError(t, os.Setenv(variable, "runtime-only-value"))
+	if _, err := c.Execute(context.Background(), plan); err != nil {
+		t.Fatalf("Execute with secret: %v", err)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestPlan_ExplicitActionSealedInputsNotOverridden verifies that if an emitted
 // action declares its own sealed_inputs, the coordinator does NOT clobber them
 // with the target-level set (the convenience only fills in the empty case).
@@ -113,6 +166,32 @@ func TestPlan_ExplicitActionSealedInputsNotOverridden(t *testing.T) {
 		return
 	}
 	t.Fatal("emitted action //multi:explicit not found")
+}
+
+func TestPlan_StrictSealedRoutingDoesNotInheritTargetInputs(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{
+				{
+					Name:          "//strict",
+					SealedRouting: "strict",
+					SealedInputs:  map[string]string{"TOKEN": "env:TOKEN"},
+					Plan: []any{
+						map[string]any{"id": "read", "body": []any{"'TOKEN", "secret/get"}, "outputs": []any{}},
+						"action/emit",
+					},
+				},
+			},
+		},
+		Store:   newTestStore(t),
+		Workers: 1,
+	}
+
+	_, err := c.Plan(context.Background(), []string{"//strict"})
+	if err == nil || !contains(err.Error(), `declared input "TOKEN" is not claimed`) {
+		t.Fatalf("Plan error = %v, want unused strict sealed input", err)
+	}
 }
 
 // actionView is a tiny copy of the fields under test, kept local so the test

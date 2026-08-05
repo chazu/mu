@@ -133,6 +133,26 @@ ENFORCEMENT
   before calling store_secret.
 
 ────────────────────────────────────────────────────────────────────
+STRICT ACTION ROUTING — sealed_routing: "strict"
+────────────────────────────────────────────────────────────────────
+
+By default mu preserves its convenience behavior: target-level sealed
+inputs are attached to emitted actions that do not declare their own map,
+and target outputs may be attached to a single emitted action.
+
+Set `sealed_routing: "strict"` on a target when its planner must use
+least-privilege action routing. In strict mode mu does not inherit either
+map. Each action must claim the exact target-level ref and effective mode
+for every sealed name it uses. Inputs may be claimed by multiple actions,
+but every declared input must be claimed at least once. Each declared output
+must be claimed by exactly one action. Undeclared claims, unused declarations,
+ref or mode changes, and ambiguous outputs fail during planning.
+
+The mode is opt-in so existing handwritten targets and plugins retain their
+current behavior. Generated targets can use it as a planning-time capability
+boundary.
+
+────────────────────────────────────────────────────────────────────
 SECURITY MODEL
 ────────────────────────────────────────────────────────────────────
 

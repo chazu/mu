@@ -101,6 +101,11 @@ WHAT YOU RECEIVE
     target.sealed_inputs       NAME -> "scheme:path"   (still refs)
     target.sealed_input_modes  NAME -> "env" | "file"
 
+  TargetInfo also carries sealed_outputs, sealed_output_modes, and
+  sealed_routing. When sealed_routing is "strict", forward only the sealed
+  names each emitted action actually uses. Mu rejects implicit fan-out,
+  undeclared or unused claims, and outputs without exactly one producer.
+
   Refs are NOT resolved at plan time. They are resolved by the
   runner just before each action runs and delivered per-mode. Your
   plan output should pass them through unchanged on the ActionSpec:

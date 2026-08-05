@@ -99,6 +99,9 @@ TARGET INFO FIELDS
                       after exec. Action writes the value to
                       $MU_SEALED_OUT_DIR/<NAME>; mu routes
                       through the scheme's plugin's store_secret.
+  sealed_output_modes map[NAME]mode — store mode per output.
+  sealed_routing      "strict" — action claims must exactly cover the
+                      target declarations; no implicit inheritance.
 
   Plugins are responsible for forwarding these fields onto the
   ActionSpecs they emit (TargetInfo carries them; ActionSpec

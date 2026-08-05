@@ -118,7 +118,11 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 		}
 		sort.Strings(outNames)
 		for _, k := range outNames {
-			fmt.Fprintf(h, "sealed_out:%s=%s\n", k, a.SealedOutputs[k])
+			mode := a.SealedOutputModes[k]
+			if mode == "" {
+				mode = "overwrite"
+			}
+			fmt.Fprintf(h, "sealed_out:%s=%s mode=%s\n", k, a.SealedOutputs[k], mode)
 		}
 	}
 
