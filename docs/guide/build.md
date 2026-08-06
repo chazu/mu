@@ -32,13 +32,14 @@ BUILD PIPELINE
   4. Resolve target dependency graph (topological order).
   5. Plan each target via its plugin (plugin emits action specs).
      Built-in toolchains 'shell' and 'secret-gen' bypass plugins.
-  6. Merge action subgraphs into a unified DAG.
-  7. Resolve sealed_inputs (secret values held in memory only).
-  8. Enforce secrets.writable_refs against any sealed_outputs in
+  6. Validate strict sealed-routing claims (when requested) and merge action
+     subgraphs into a unified DAG. No provider values are resolved while
+     planning.
+  7. Enforce secrets.writable_refs against any sealed_outputs in
      the graph; abort if any ref is not allowed.
-  9. Execute DAG: topological sort, worker pool, per-action:
+  8. Execute DAG: topological sort, worker pool, per-action:
      - check cache (skip if impure or sealed_outputs declared)
-     - inject secrets (env or file mode per sealed_input_modes)
+     - resolve and inject that action's sealed_inputs (env or file mode)
      - mint $MU_SEALED_OUT_DIR if sealed_outputs declared
      - run command
      - capture sealed_outputs and route via store_secret
@@ -50,6 +51,7 @@ ACTION CACHING
   command + sorted input digests + env + network + impure +
   sealed-input refs/modes + sealed-output refs are hashed.
   Sealed-input/output VALUES are never hashed.
+  Build manifests omit both sealed values and provider refs.
 
 OTHER COMMANDS
 

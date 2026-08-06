@@ -139,7 +139,8 @@ type TargetInfo struct {
 	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name -> secret reference (e.g. "pass:deploy/token")
 	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name -> delivery mode: "env" (default) or "file"
 	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name -> secret reference; action writes to $MU_SEALED_OUT_DIR/<name>
-	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"` // name -> store mode: "create", "overwrite", or "create_if_absent"
+	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"` // file name -> store mode: create, overwrite, or create_if_absent
+	SealedRouting     string            `json:"sealed_routing,omitempty"`      // empty = convenience routing; "strict" = explicit action claims
 }
 
 // DepInfo carries what a dependency produced.

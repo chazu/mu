@@ -143,6 +143,16 @@ WRITING A PLUGIN
     Action shapes (id/command/inputs/outputs/depends_on/env/network)
     map field-for-field via muplugin.ActionSpec.
 
+  SEALED ACTION ROUTING
+
+    TargetInfo carries sealed_inputs, sealed_input_modes, sealed_outputs,
+    sealed_output_modes, and sealed_routing. In convenience mode mu retains its
+    inheritance behavior. When sealed_routing is "strict", emit explicit action
+    claims using the exact target refs and effective modes. Each declared input
+    must be claimed by at least one action; each output by exactly one. Do not
+    resolve provider values in the plugin planner: mu resolves inputs only when
+    the claiming action is about to execute.
+
 PLUGIN DIRECTORY STRUCTURE
 
   For bundling and distribution, plugins use this layout:
@@ -282,6 +292,8 @@ PLUGIN GUIDES
       - If the plugin is itself a secret provider (resolve_secret /
         store_secret), describe its ref grammar and any 'raw:' /
         scoping prefixes — see 'mu guide secret-providers'.
+      - State whether the plugin emits exact action claims suitable for
+        `sealed_routing: "strict"`. PUDL-generated targets require them.
 
     OBSERVATION OUTPUT (omit if no observe capability)
       Sketch the shape of the JSON the plugin returns. If you ship

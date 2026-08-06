@@ -32,6 +32,27 @@ func TestActionSpecImpureJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTargetInfoStrictSealedRoutingJSONRoundTrip(t *testing.T) {
+	target := plugin.TargetInfo{
+		Name:              "//secrets/create",
+		Toolchain:         "secret-writer",
+		SealedOutputs:     map[string]string{"TOKEN": "pass:generated/token"},
+		SealedOutputModes: map[string]string{"TOKEN": "create_if_absent"},
+		SealedRouting:     "strict",
+	}
+	payload, err := json.Marshal(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got plugin.TargetInfo
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SealedRouting != "strict" || got.SealedOutputModes["TOKEN"] != "create_if_absent" {
+		t.Fatalf("round trip = %#v", got)
+	}
+}
+
 func TestHasCapability_WithCapabilities(t *testing.T) {
 	resp := &plugin.DiscoverResponse{
 		Capabilities: []string{"discover", "plan", "observe"},

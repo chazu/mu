@@ -1,135 +1,105 @@
 mu guide pudl — how mu and pudl work together
 
-mu and pudl are decoupled tools that communicate through mu.cue.
+mu and pudl are decoupled tools with a clear ownership boundary:
 
-  pudl: defines desired state (CUE), observes actual state, computes drift.
-  mu:   takes desired-state targets and converges them using plugins.
+  pudl: model selection, observation, drift, value wiring, approvals, reports.
+  mu:   plugin planning, action execution, caching, and secret-provider I/O.
 
-Neither tool imports or depends on the other.
+Neither tool imports the other. PUDL renders temporary mu configuration and
+exchanges versioned JSON results with the mu CLI.
 
-WORKFLOW
+PRIMARY WORKFLOW — PUDL OWNS THE LOOP
 
-  1. Define desired state in CUE (pudl's schema system):
+  # Observe one registered #SystemModel. No mutation.
+  pudl run app
 
-     package definitions
-     nginx_conf: file.#Config & {
-         path:    "/etc/nginx/nginx.conf"
-         content: "server { listen 80; }"
-         mode:    "0644"
-     }
+  # Observe exactly the named producer/consumer set in dependency order.
+  pudl run-set network app
 
-  2. Observe actual state and check for drift:
+  # Close drift. PUDL renders desired sources and invokes mu internally.
+  pudl run app --converge
 
-     pudl import --path /etc/nginx/nginx.conf
-     pudl drift check nginx_conf
+  # Whole-set read-only preflight, then mutation.
+  pudl run-set network app --converge
 
-  3. Export drifted resources as a mu config:
+There is no separate `pudl drift` or `pudl export-actions` command. Those were
+part of the retired pre-#SystemModel workflow. Do not manually synthesize an
+intermediate config when PUDL owns the model run.
 
-     pudl export-actions --definition nginx_conf > converge.json
+EXACT RUN-SETS
 
-     This produces a mu.cue with desired-state targets:
-     {
-       "targets": [{
-         "target": "//nginx_conf",
-         "toolchain": "file",
-         "config": {"path": "/etc/nginx/nginx.conf", "content": "...", "mode": "0644"}
-       }]
-     }
+`pudl run-set <models...>` is closed and explicit. PUDL does not discover and
+start an omitted producer. It rejects missing producers and cycles before any
+member runs, orders producers first, and pins successful producer observations
+for downstream consumers.
 
-  4. Converge with mu:
+Without `--converge` all members are observe-only. With it, PUDL completes
+read-only planning for the full set before the first mutation. Durable reports
+are available through:
 
-     mu build --config converge.json //nginx_conf
+  pudl run-set report [run-set-id]
+  pudl run-set resume <run-set-id>
+  pudl run-set reject <run-set-id>
 
-  5. Verify convergence (the ACUTE loop):
+PLAIN VALUE BINDINGS
 
-     mu observe --ndjson //nginx_conf | pudl import --stdin
-     pudl drift check nginx_conf  # should report no drift
+Plain bindings are scalar projections from PUDL catalog snapshots. A consumer
+model names its producer, resource schema and identity, and RFC 6901 field path.
+Both the consumer input and source schema field must declare
+`@pudl(binding=plain)`. PUDL type-checks the elaborated model and persists the
+producer run, snapshot, identity, path, age, and value digest as evidence.
 
-OBSERVATION PIPELINE
+SEALED VALUE BINDINGS
 
-  mu observe --ndjson <targets> | pudl import --stdin
+Secrets never take the catalog/plain path. PUDL-generated targets declare
+provider refs and set:
 
-  mu core emits one record per target (a "records" array with --json, or
-  one JSON object per line with --ndjson). Any _schema tagging that pudl
-  routes on is a plugin/pudl-side convention, not something mu core adds.
-  pudl routes each record by schema to the appropriate CUE definition for
-  comparison.
+  sealed_routing: "strict"
 
-RESOURCE TYPE MAPPING
+In strict mode target-level sealed maps define availability and policy, not
+implicit grants. Plugin actions must explicitly claim the exact target ref and
+effective mode for each sealed name they use. Every declared input must be
+claimed at least once; every declared output exactly once. Undeclared claims,
+unused declarations, ref/mode changes, and ambiguous outputs fail planning.
 
-  pudl maps CUE schema prefixes to mu toolchain names:
+Mu does not resolve provider values during planning. It resolves each claimed
+input immediately before action execution and re-checks
+`secrets.writable_refs` before each provider write. PUDL persists only redacted
+fingerprints, not values or provider refs. Sealed outputs are converge-only in
+PUDL, and a mutating run-set containing one always pauses for exact-plan
+approval:
 
-    file.*, config.*            → file
-    ec2.*, s3.*, iam.*, aws.*   → aws
-    k8s.*, kubernetes.*         → k8s
-    (unknown)                   → generic
+  pudl run-set network app --converge
+  pudl run-set resume <run-set-id>   # or reject
 
-DATA IMPORT (mu → pudl)
+STANDALONE MU OPERATIONS
 
-  Beyond the drift loop above, mu plugins can also produce data that
-  flows into pudl's catalog. Plugins optionally declare a CUE schema
-  for their output so pudl classifies the data under a meaningful
-  type instead of the catchall pudl/core.#Item.
+Use mu directly when mu.cue is the source of truth rather than a PUDL model:
 
-  See 'mu guide plugins' (OUTPUT SCHEMAS section) for the plugin-side
-  contract, or docs/plugin-output-schemas.md for the full guide.
+  mu build --plan //app
+  mu build --emit-manifest //app > manifest.json
+  mu observe --json //app > observe.json
 
-  On import, pudl auto-detects an envelope JSON with shape
-  {"schema": {...}, "definitions": [...], "data": <payload>} and
-  classifies the data under the declared schema. Raw JSON (no
-  envelope) can still be typed explicitly via
-  'pudl import --schema mu/aws@v1#EC2Instance'. Items can satisfy
-  multiple schemas; unresolved refs are tagged for later upgrade via
-  'pudl reclassify'.
+Results can be ingested explicitly when needed:
 
-KEY DESIGN PRINCIPLE
+  pudl mu ingest-manifest --path manifest.json --model app
+  pudl mu ingest-observe --path observe.json
 
-  pudl emits desired state, not drift diffs. The file plugin receives
-  {"path": "...", "content": "..."} — it doesn't know about pudl, CUE,
-  or drift reports. It just makes the file match the config. Any mu plugin
-  works whether the target came from pudl or a hand-written mu.cue.
+An ingested manifest records an apply as converging; a later real PUDL
+observation is what can verify clean state.
 
-PUDL AS A BUILD TARGET
+PLUGIN OUTPUT SCHEMAS
 
-  pudl can also run inside the build graph as a consumer of another
-  target's declared outputs. The common case: run terraform (or any
-  toolchain that emits state/artifacts) and feed the result into pudl
-  in a single 'mu build' invocation.
+Mu plugins may ship wire schemas plus PUDL semantic mappings. Catalog-installed
+packages record this metadata in mu.lock and `mu-plugin.json`; PUDL synchronizes
+it before observe ingestion. Plugin records can also use a typed envelope:
 
-    {
-      "targets": [
-        {
-          "target": "//infra/vpc",
-          "toolchain": "terraform",
-          "sources": ["infra/vpc/*.tf"],
-          "config": {"dir": "infra/vpc"}
-        },
-        {
-          "target": "//pudl/vpc-catalog",
-          "toolchain": "pudl",
-          "deps": ["//infra/vpc"],
-          "config": {"from": "terraform_state"}
-        }
-      ]
-    }
+  {"schema": {...}, "definitions": [...], "data": <payload>}
 
-  The terraform plugin declares outputs:
+See `mu guide plugins` (OUTPUT SCHEMAS) and docs/plugin-output-schemas.md.
 
-    "declared_outputs": {
-      "terraform_state":   "infra/vpc/state.json",
-      "terraform_outputs": "infra/vpc/outputs.json"
-    }
+DESIGN PRINCIPLE
 
-  mu threads those into the pudl plan request as:
-
-    "deps": [{"target": "//infra/vpc",
-              "artifacts": {"terraform_state": "infra/vpc/state.json",
-                            "terraform_outputs": "infra/vpc/outputs.json"}}]
-
-  A pudl plugin that declares an action with
-  inputs = {"state": "infra/vpc/state.json"} gets an implicit
-  DependsOn edge to the terraform show action, so the DAG runs the
-  producer first and the consumer after.
-
-  See 'mu guide protocol' for the declared_outputs / deps[].artifacts
-  contract and how to consume cross-target artifacts from a plugin.
+Mu plugins remain ignorant of PUDL. They receive ordinary target/config data and
+emit ordinary actions. PUDL coordinates desired/observed state around that
+stable mu protocol.

@@ -155,7 +155,10 @@ func runBuild(args []string) int {
 func printPlanJSON(g *dag.Graph, targets []string) int {
 	type planAction struct {
 		ID                string            `json:"id"`
+		ActionKey         string            `json:"action_key"`
 		Command           []string          `json:"command"`
+		Body              []any             `json:"body,omitempty"`
+		EweDigest         string            `json:"ewe_digest,omitempty"`
 		Inputs            map[string]string `json:"inputs"`
 		Outputs           []string          `json:"outputs"`
 		DependsOn         []string          `json:"depends_on"`
@@ -166,6 +169,12 @@ func printPlanJSON(g *dag.Graph, targets []string) int {
 		SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"`
 		Network           bool              `json:"network,omitempty"`
 		WorkDir           string            `json:"work_dir,omitempty"`
+		Impure            bool              `json:"impure,omitempty"`
+		TimeoutS          int               `json:"timeout_s,omitempty"`
+		Retries           int               `json:"retries,omitempty"`
+		RetryBackoffMs    int               `json:"retry_backoff_ms,omitempty"`
+		Toolchain         map[string]string `json:"toolchain,omitempty"`
+		Sources           []string          `json:"sources,omitempty"`
 	}
 
 	actions := g.Actions()
@@ -183,24 +192,28 @@ func printPlanJSON(g *dag.Graph, targets []string) int {
 		if outputs == nil {
 			outputs = []string{}
 		}
+		toolchain := make(map[string]string, len(a.Toolchain))
+		for name, digest := range a.Toolchain {
+			toolchain[name] = digest.String()
+		}
+		eweDigest := ""
+		if !a.EweRef.IsZero() {
+			eweDigest = a.EweRef.String()
+		}
 		out = append(out, planAction{
-			ID:                a.ID,
-			Command:           a.Command,
-			Inputs:            inputs,
-			Outputs:           outputs,
-			DependsOn:         deps,
-			Env:               a.Env,
-			SealedInputs:      a.SealedInputs,
-			SealedInputModes:  a.SealedInputModes,
-			SealedOutputs:     a.SealedOutputs,
-			SealedOutputModes: a.SealedOutputModes,
-			Network:           a.Network,
-			WorkDir:           a.WorkDir,
+			ID: a.ID, ActionKey: dag.ComputeActionKey(a).Digest.String(),
+			Command: a.Command, Body: a.Body, EweDigest: eweDigest,
+			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env,
+			SealedInputs: a.SealedInputs, SealedInputModes: a.SealedInputModes,
+			SealedOutputs: a.SealedOutputs, SealedOutputModes: a.SealedOutputModes,
+			Network: a.Network, WorkDir: a.WorkDir, Impure: a.Impure,
+			TimeoutS: a.TimeoutS, Retries: a.Retries, RetryBackoffMs: a.RetryBackoffMs,
+			Toolchain: toolchain, Sources: a.Sources,
 		})
 	}
 
 	plan := map[string]any{
-		"version": 1,
+		"version": 2,
 		"targets": targets,
 		"actions": out,
 		"summary": map[string]int{

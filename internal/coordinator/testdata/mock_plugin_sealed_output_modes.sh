@@ -4,7 +4,7 @@ while IFS= read -r line; do
   method=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["method"])' <<<"$line")
   case "$method" in
     discover)
-      echo '{"name":"sealed-output","version":"0.1.0","protocol_version":1,"capabilities":["discover","plan"]}'
+      echo '{"name":"sealed-output","version":"0.1.0","protocol_version":1,"capabilities":["discover","plan","store_secret"]}'
       ;;
     plan)
       python3 -c '
@@ -23,6 +23,9 @@ print(json.dumps({
     "declared_outputs": {},
 }))
 ' <<<"$line"
+      ;;
+    store_secret)
+      echo '{}'
       ;;
     *)
       echo '{"error":"unknown method"}'

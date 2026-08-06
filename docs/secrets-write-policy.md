@@ -27,6 +27,11 @@ sealed-output write is gated against it. Refs that don't match are
 rejected at plan time (so the offending build can't even start a
 provider manager).
 
+This policy composes with `sealed_routing: "strict"`: strict routing proves
+which action owns each declared output, while `writable_refs` bounds where that
+action may store it. Mu validates both during planning and re-checks the write
+policy immediately before `store_secret`.
+
 ---
 
 ## Configuration

@@ -178,3 +178,14 @@ func TestActionKey_SealedModeAffectsKey(t *testing.T) {
 		t.Fatal("changing the sealed-input mode should change the key")
 	}
 }
+
+func TestActionKey_SealedOutputModeAffectsKey(t *testing.T) {
+	a1 := baseAction()
+	a1.SealedOutputs = map[string]string{"TOKEN": "pass:generated/token"}
+	a1.SealedOutputModes = map[string]string{"TOKEN": "create"}
+	a2 := *a1
+	a2.SealedOutputModes = map[string]string{"TOKEN": "overwrite"}
+	if dag.ComputeActionKey(a1) == dag.ComputeActionKey(&a2) {
+		t.Fatal("sealed output store mode must affect action key")
+	}
+}

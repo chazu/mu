@@ -4,8 +4,9 @@ mu has a symmetric secret system: actions can READ secrets via
 sealed_inputs and WRITE secrets via sealed_outputs, routed through
 provider plugins (e.g. 'pass', 'sops') plus a built-in 'env' scheme
 (env:NAME reads $NAME from the environment, read-only, no plugin
-required). Values never enter the cache, manifests, or logs; refs and
-modes are non-secret metadata and are part of the cache key.
+required). Values never enter the cache, manifests, or logs. Provider refs are
+also omitted from manifests; refs and modes remain non-secret planning metadata
+and are part of the cache key.
 
 This guide is the canonical user-facing reference. Per-feature deep
 dives and the plugin-author counterpart:
@@ -131,6 +132,26 @@ ENFORCEMENT
   forbidden ref aborts Plan() before the provider manager starts.
   Write time: the SealedOutputWriter closure re-checks defensively
   before calling store_secret.
+
+────────────────────────────────────────────────────────────────────
+STRICT ACTION ROUTING — sealed_routing: "strict"
+────────────────────────────────────────────────────────────────────
+
+By default mu preserves its convenience behavior: target-level sealed
+inputs are attached to emitted actions that do not declare their own map,
+and target outputs may be attached to a single emitted action.
+
+Set `sealed_routing: "strict"` on a target when its planner must use
+least-privilege action routing. In strict mode mu does not inherit either
+map. Each action must claim the exact target-level ref and effective mode
+for every sealed name it uses. Inputs may be claimed by multiple actions,
+but every declared input must be claimed at least once. Each declared output
+must be claimed by exactly one action. Undeclared claims, unused declarations,
+ref or mode changes, and ambiguous outputs fail during planning.
+
+The mode is opt-in so existing handwritten targets and plugins retain their
+current behavior. Generated targets can use it as a planning-time capability
+boundary.
 
 ────────────────────────────────────────────────────────────────────
 SECURITY MODEL
