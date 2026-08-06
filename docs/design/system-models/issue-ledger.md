@@ -1,5 +1,9 @@
 # Issue ledger — System Models / ewe-in-CUE
 
+> **Historical decision ledger (superseded as usage guidance 2026-08-05).** It
+> remains useful for rationale, but current behavior is documented by
+> `mu guide pudl` and PUDL's CLI/cross-resource wiring documents.
+
 Consolidated, deduplicated, dependency-ordered tracker for every finding from
 [adversarial-review.md](archive/adversarial-review.md) (C/M/m) and
 [adversarial-review-2.md](archive/adversarial-review-2.md) (CRIT/MAJOR/MIN), plus the

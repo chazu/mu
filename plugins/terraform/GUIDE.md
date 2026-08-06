@@ -2,17 +2,17 @@ mu guide plugin terraform — Terraform convergence plugin
 
 Manages Terraform-provisioned infrastructure: init, plan, and apply.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//infra/vpc",
-    "toolchain": "terraform",
-    "sources": ["infra/vpc/*.tf"],
-    "config": {
-      "dir": "infra/vpc",
-      "auto_approve": true
+  targets: [{
+    target: "//infra/vpc"
+    toolchain: "terraform"
+    sources: ["infra/vpc/*.tf"]
+    config: {
+      dir: "infra/vpc"
+      auto_approve: true
     }
-  }
+  }]
 
 CONFIG FIELDS
 
@@ -108,19 +108,21 @@ SEALED OUTPUTS (sensitive terraform outputs -> secret backend)
   Pair target.sealed_outputs with config.sealed_output_outputs (NAME ->
   terraform output name):
 
-    {
-      "target": "//infra/rds",
-      "toolchain": "terraform",
-      "sources": ["infra/rds/*.tf"],
-      "config": {
-        "dir": "infra/rds",
-        "sealed_output_outputs": {"DBPASS": "db_master_password"}
-      },
-      "sealed_inputs":       {"AWS_ACCESS_KEY_ID":     "pass:aws/key",
-                              "AWS_SECRET_ACCESS_KEY": "pass:aws/secret"},
-      "sealed_outputs":      {"DBPASS": "pass:rds/master-password"},
-      "sealed_output_modes": {"DBPASS": "create_if_absent"}
-    }
+    targets: [{
+      target: "//infra/rds"
+      toolchain: "terraform"
+      sources: ["infra/rds/*.tf"]
+      config: {
+        dir: "infra/rds"
+        sealed_output_outputs: DBPASS: "db_master_password"
+      }
+      sealed_inputs: {
+        AWS_ACCESS_KEY_ID: "pass:aws/key"
+        AWS_SECRET_ACCESS_KEY: "pass:aws/secret"
+      }
+      sealed_outputs: DBPASS: "pass:rds/master-password"
+      sealed_output_modes: DBPASS: "create_if_absent"
+    }]
 
   The fetch-secrets action runs `terraform output -raw db_master_password`
   and pipes the value into $MU_SEALED_OUT_DIR/DBPASS. The runner then

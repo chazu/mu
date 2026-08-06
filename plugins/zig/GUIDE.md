@@ -3,18 +3,18 @@ mu guide plugin zig — Zig toolchain plugin
 Builds Zig projects using either 'zig build' (build.zig) or direct
 compilation ('zig build-exe', 'zig build-lib').
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//cmd/myapp",
-    "toolchain": "zig",
-    "sources": ["src/*.zig", "build.zig"],
-    "config": {
-      "output": "myapp",
-      "mode": "build",
-      "optimize": "ReleaseSafe"
+  targets: [{
+    target: "//cmd/myapp"
+    toolchain: "zig"
+    sources: ["src/*.zig", "build.zig"]
+    config: {
+      output: "myapp"
+      mode: "build"
+      optimize: "ReleaseSafe"
     }
-  }
+  }]
 
 CONFIG FIELDS
 

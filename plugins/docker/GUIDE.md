@@ -2,17 +2,17 @@ mu guide plugin docker — Docker image builder
 
 Builds Docker/OCI images from Dockerfiles.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//images/myapp",
-    "toolchain": "docker",
-    "sources": ["Dockerfile", "src/**"],
-    "config": {
-      "tag": "myapp:latest",
-      "context": "."
+  targets: [{
+    target: "//images/myapp"
+    toolchain: "docker"
+    sources: ["Dockerfile", "src/**"]
+    config: {
+      tag: "myapp:latest"
+      context: "."
     }
-  }
+  }]
 
 CONFIG FIELDS
 

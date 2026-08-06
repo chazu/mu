@@ -10,19 +10,50 @@ FLAGS
   --dry-run         Alias for --plan.
   --json            Output as JSON.
   --emit-manifest   Emit a build manifest to stdout (for pudl's ACUTE loop).
+  --expect-plan-sha256 HEX
+                    Plan once, compare exact plan-v2 identity, and execute that
+                    same in-memory graph only on a match.
   --no-cache        Skip cache reads — rebuild everything.
+  --no-discover-cache
+                    Force live plugin discovery instead of its digest cache.
   --jobs N          Max parallel actions (default: NumCPU).
   --config PATH     Path to mu.cue (default: discover by walking up).
   --verbose         Show plugin I/O.
+  --publish         Publish each successful target's outputs as an artifact.
+  --attach TYPE=PATH
+                    Attach a referrer file to the published artifact
+                    (repeatable; requires --publish).
 
 EXAMPLES
 
   mu build //cmd/myapp                     Build a single target.
   mu build //cmd/myapp //lib/utils         Build multiple targets.
   mu build --plan //cmd/myapp              Preview the action DAG.
+  mu build --plan --json //cmd/myapp       Emit exact plan schema v2.
   mu build --emit-manifest //cmd/myapp     Build and emit manifest JSON.
   mu build --no-cache //cmd/myapp          Force full rebuild.
   mu build --jobs 4 //cmd/myapp            Limit parallelism.
+
+JSON PLAN CONTRACT
+
+  `mu build --plan --json` emits plan schema version 2. Its top-level fields
+  are version, plan_sha256, targets, plugins, actions, and summary. The digest
+  commits the canonical document with plan_sha256 omitted. Plugin rows commit
+  resolved content digest, version, protocol version, and capabilities. Each
+  action includes its ID,
+  computed action_key, and every execution-affecting field: command or body,
+  ewe_digest, input digests, outputs, dependencies, environment, sealed refs
+  and modes, network/work-dir/impure/retry settings, toolchain digests, and
+  sources. Empty optional fields may be omitted.
+
+  Planning resolves file and toolchain digests but never secret values. Sealed
+  provider refs and modes are non-secret plan metadata and are projected so an
+  exact-plan consumer such as PUDL can validate and hash the executable plan.
+  Build manifests remain a separate schema and omit provider refs and values.
+
+  `--expect-plan-sha256` is mutually exclusive with planning and publishing.
+  It rejects mutable zero-digest command plugins, compares before any secret
+  read or action, and executes the same PlanResult that was compared.
 
 BUILD PIPELINE
 

@@ -49,7 +49,7 @@ type Target struct {
 	SealedRouting     string            `json:"sealed_routing,omitempty"`      // empty = convenience routing; "strict" = explicit action claims
 	Plan              []any             `json:"plan,omitempty"`                // pith plan program (alternative to plugin planning)
 	Transform         []any             `json:"transform,omitempty"`           // pith transform program (runs after deps complete)
-	// BRICK classification (optional, set by pudl export-actions).
+	// Optional BRICK classification metadata. PUDL validates these fields.
 	// mu does not validate these — pudl enforces BRICK constraints via CUE.
 	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"
 	Implements string `json:"implements,omitempty"` // interface this component satisfies

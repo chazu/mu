@@ -122,7 +122,7 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 			if mode == "" {
 				mode = "overwrite"
 			}
-			fmt.Fprintf(h, "sealed_out:%s=%s mode=%s\n", k, a.SealedOutputs[k], mode)
+			_, _ = fmt.Fprintf(h, "sealed_out:%s=%s mode=%s\n", k, a.SealedOutputs[k], mode)
 		}
 	}
 

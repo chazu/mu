@@ -73,22 +73,38 @@ type PlanResult struct {
 	Graph   *dag.Graph
 	Targets []config.Target // the resolved targets (for manifest metadata)
 
-	// SealedInputProviders is the set of plugin definitions needed to resolve
+	// Plugins records the immutable identities of every external plugin used
+	// to produce or execute this plan. Exact-plan consumers commit these rows
+	// alongside the action graph.
+	Plugins []PluginIdentity
+
+	// SealedInputProviders is the set of resolved plugin artifacts needed to resolve
 	// sealed_inputs at execute time. Planning validates capability but never
 	// resolves a value, so --plan remains a reference-only operation.
-	SealedInputProviders []config.PluginDef
+	SealedInputProviders []ResolvedPlugin
 
-	// SealedOutputProviders is the set of resolved plugin definitions
+	// SealedOutputProviders is the set of resolved plugin artifacts
 	// needed at execute time to satisfy sealed_outputs writes. Empty if
 	// no action in the graph declares sealed_outputs. Populated even
 	// after the planning manager is shut down so Execute can spin up
 	// a provider-only manager.
-	SealedOutputProviders []config.PluginDef
+	SealedOutputProviders []ResolvedPlugin
 
 	// SecretWritePolicy is the project's writable-ref allow-list,
 	// enforced at write time as a defense-in-depth check on top of
 	// the plan-time enforcement. Nil means no allow-list configured.
 	SecretWritePolicy *secretWritePolicy
+}
+
+// PluginIdentity is the stable, public identity of a plugin that participated
+// in a plan. Digest is empty only for mutable command plugins; guarded exact
+// execution rejects such plans rather than pretending the command is pinned.
+type PluginIdentity struct {
+	Name            string   `json:"name"`
+	Digest          string   `json:"digest"`
+	Version         string   `json:"version"`
+	ProtocolVersion int      `json:"protocol_version"`
+	Capabilities    []string `json:"capabilities"`
 }
 
 // Plan runs the planning pipeline: build toolchains, resolve plugins, start
@@ -392,8 +408,8 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	//    sealed_outputs writes. We collect schemes from the graph and
 	//    capture the plugin defs so Execute can start a provider-only
 	//    manager after this Plan() returns.
-	inputProviderDefs := collectSealedProviders(graph, c.Config.Plugins, true)
-	outputProviderDefs := collectSealedProviders(graph, c.Config.Plugins, false)
+	inputProviderDefs := collectSealedProviders(graph, resolvedPlugins, true)
+	outputProviderDefs := collectSealedProviders(graph, resolvedPlugins, false)
 
 	// 8. Enforce the secret write-policy at plan time. We check every
 	//    sealed_output ref in the graph against the configured allow-list
@@ -420,8 +436,10 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
+	identities := collectPluginIdentities(targets, graph, resolvedPlugins, mgr)
 	return &PlanResult{
 		Graph: graph, Targets: targets,
+		Plugins:              identities,
 		SealedInputProviders: inputProviderDefs, SealedOutputProviders: outputProviderDefs,
 		SecretWritePolicy: policy,
 	}, nil
@@ -430,7 +448,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 // collectSealedProviders returns plugin definitions needed at execute time for
 // either input resolution or output storage. The built-in env input scheme has
 // no definition and therefore contributes no row.
-func collectSealedProviders(graph *dag.Graph, plugins []config.PluginDef, inputs bool) []config.PluginDef {
+func collectSealedProviders(graph *dag.Graph, plugins []ResolvedPlugin, inputs bool) []ResolvedPlugin {
 	schemes := make(map[string]struct{})
 	for _, a := range graph.Actions() {
 		refs := a.SealedOutputs
@@ -448,13 +466,63 @@ func collectSealedProviders(graph *dag.Graph, plugins []config.PluginDef, inputs
 	if len(schemes) == 0 {
 		return nil
 	}
-	out := make([]config.PluginDef, 0, len(schemes))
+	out := make([]ResolvedPlugin, 0, len(schemes))
 	for _, p := range plugins {
-		if _, want := schemes[p.Name]; want {
+		if _, want := schemes[p.Def.Name]; want {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+func collectPluginIdentities(targets []config.Target, graph *dag.Graph, resolved []ResolvedPlugin, mgr *plugin.Manager) []PluginIdentity {
+	used := make(map[string]struct{})
+	for _, target := range targets {
+		if target.Toolchain != "" && target.Toolchain != "shell" && target.Toolchain != "secret-gen" && len(target.Plan) == 0 {
+			used[target.Toolchain] = struct{}{}
+		}
+	}
+	for _, action := range graph.Actions() {
+		for _, refs := range []map[string]string{action.SealedInputs, action.SealedOutputs} {
+			for _, ref := range refs {
+				if scheme, _, ok := parseSecretRef(ref); ok && scheme != "env" {
+					used[scheme] = struct{}{}
+				}
+			}
+		}
+	}
+
+	byName := make(map[string]ResolvedPlugin, len(resolved))
+	for _, item := range resolved {
+		byName[item.Def.Name] = item
+	}
+	names := make([]string, 0, len(used))
+	for name := range used {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	identities := make([]PluginIdentity, 0, len(names))
+	for _, name := range names {
+		item, ok := byName[name]
+		if !ok {
+			continue
+		}
+		identity := PluginIdentity{Name: name}
+		if !item.Digest.IsZero() {
+			identity.Digest = item.Digest.String()
+		}
+		if info := mgr.DiscoverInfo(name); info != nil {
+			identity.Version = info.Version
+			identity.ProtocolVersion = info.ProtocolVersion
+			identity.Capabilities = append([]string(nil), info.Capabilities...)
+			sort.Strings(identity.Capabilities)
+			if identity.Capabilities == nil {
+				identity.Capabilities = []string{}
+			}
+		}
+		identities = append(identities, identity)
+	}
+	return identities
 }
 
 func validateSealedProviderCapabilities(graph *dag.Graph, mgr *plugin.Manager) error {
@@ -510,16 +578,16 @@ func graphHasSealedOutputs(graph *dag.Graph) bool {
 	return false
 }
 
-func mergePluginDefs(groups ...[]config.PluginDef) []config.PluginDef {
+func mergePluginDefs(groups ...[]ResolvedPlugin) []ResolvedPlugin {
 	seen := map[string]struct{}{}
-	var merged []config.PluginDef
+	var merged []ResolvedPlugin
 	for _, group := range groups {
-		for _, def := range group {
-			if _, exists := seen[def.Name]; exists {
+		for _, resolved := range group {
+			if _, exists := seen[resolved.Def.Name]; exists {
 				continue
 			}
-			seen[def.Name] = struct{}{}
-			merged = append(merged, def)
+			seen[resolved.Def.Name] = struct{}{}
+			merged = append(merged, resolved)
 		}
 	}
 	return merged
@@ -527,18 +595,7 @@ func mergePluginDefs(groups ...[]config.PluginDef) []config.PluginDef {
 
 // startSealedProviderManager spins up the provider-only plugin manager used for
 // execute-time input resolution and output storage. The caller must Close it.
-func (c *Coordinator) startSealedProviderManager(ctx context.Context, defs []config.PluginDef) (*plugin.Manager, error) {
-	home, _ := os.UserHomeDir()
-	resolver := &PluginResolver{
-		Store:       c.Store,
-		ProjectRoot: c.ProjectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
-	}
-	resolved, err := resolver.Resolve(ctx, defs)
-	if err != nil {
-		return nil, err
-	}
-
+func (c *Coordinator) startSealedProviderManager(ctx context.Context, resolved []ResolvedPlugin) (*plugin.Manager, error) {
 	mgr := plugin.NewManager(c.ProjectRoot)
 	if c.Verbose {
 		sink := c.VerboseSink
@@ -547,7 +604,14 @@ func (c *Coordinator) startSealedProviderManager(ctx context.Context, defs []con
 		}
 		mgr.SetVerbose(sink)
 	}
-	if needsScriptRuntime(defs, c.ProjectRoot) {
+	needsRuntime := false
+	for _, item := range resolved {
+		if item.Def.Toolchain != "" {
+			needsRuntime = true
+			break
+		}
+	}
+	if needsRuntime {
 		bbPath, err := c.resolveScriptRuntime(ctx, c.ToolchainRegistry)
 		if err != nil {
 			return nil, err
@@ -574,8 +638,8 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 
 	// Start providers only at the execution boundary. This is where sealed input
 	// values are first resolved; plan/approval paths carry references only.
-	var resolvedSecrets map[string]map[string]string
 	var writer dag.SealedOutputWriter
+	var resolver dag.SealedInputResolver
 	if graphHasSealedInputs(plan.Graph) || graphHasSealedOutputs(plan.Graph) {
 		providerDefs := mergePluginDefs(plan.SealedInputProviders, plan.SealedOutputProviders)
 		pmgr, err := c.startSealedProviderManager(ctx, providerDefs)
@@ -584,9 +648,8 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 		}
 		defer pmgr.Close()
 		if graphHasSealedInputs(plan.Graph) {
-			resolvedSecrets, err = resolveSecrets(ctx, plan.Graph, pmgr)
-			if err != nil {
-				return nil, fmt.Errorf("coordinator: resolving sealed inputs: %w", err)
+			resolver = func(ctx context.Context, action *dag.Action) (map[string]string, error) {
+				return resolveActionSecrets(ctx, action, pmgr)
 			}
 		}
 		if graphHasSealedOutputs(plan.Graph) {
@@ -608,11 +671,11 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	}
 
 	executor := &dag.Executor{
-		Store:              c.Store,
-		Workers:            workers,
-		ResolvedSecrets:    resolvedSecrets,
-		SubprocessStdout:   c.SubprocessStdout,
-		SealedOutputWriter: writer,
+		Store:               c.Store,
+		Workers:             workers,
+		SealedInputResolver: resolver,
+		SubprocessStdout:    c.SubprocessStdout,
+		SealedOutputWriter:  writer,
 	}
 	execResult, err := executor.Execute(ctx, plan.Graph)
 	if err != nil {
@@ -628,11 +691,23 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 
 // Build orchestrates the full build pipeline: Plan() + Execute() + advice + bundle plugins.
 func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
+	return c.BuildValidated(ctx, targetNames, nil)
+}
+
+// BuildValidated plans once, invokes validate before any execution boundary,
+// then executes and finalizes that exact PlanResult. A validation error stops
+// before sealed providers, actions, advice, or plugin bundling are invoked.
+func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, validate func(*PlanResult) error) (*BuildResult, error) {
 	start := time.Now()
 
 	plan, err := c.Plan(ctx, targetNames)
 	if err != nil {
 		return nil, err
+	}
+	if validate != nil {
+		if err := validate(plan); err != nil {
+			return nil, err
+		}
 	}
 	result, err := c.Execute(ctx, plan)
 	if err != nil {
@@ -1144,40 +1219,26 @@ func prefixActions(target string, actions []plugin.ActionSpec) {
 	}
 }
 
-// resolveSecrets walks all actions in the graph, finds those with SealedInputs,
-// parses the scheme from each reference, and calls the appropriate plugin's
-// resolve_secret method. Returns a map of actionID → envName → resolved value.
-//
-// Secret references use the format "scheme:path" (e.g. "pass:deploy/token").
-// The scheme maps to a plugin name. The path is sent to the plugin.
-func resolveSecrets(ctx context.Context, graph *dag.Graph, mgr *plugin.Manager) (map[string]map[string]string, error) {
-	resolved := make(map[string]map[string]string)
-
-	for _, a := range graph.Actions() {
-		if len(a.SealedInputs) == 0 {
-			continue
-		}
-
-		secrets := make(map[string]string, len(a.SealedInputs))
-		for envName, ref := range a.SealedInputs {
-			scheme, path, ok := parseSecretRef(ref)
-			if !ok {
-				return nil, fmt.Errorf("action %q: sealed input %q: invalid reference %q (expected scheme:path)", a.ID, envName, ref)
-			}
-
-			value, err := mgr.ResolveSecret(ctx, scheme, path)
-			if err != nil {
-				return nil, fmt.Errorf("action %q: sealed input %q: %w", a.ID, envName, err)
-			}
-			secrets[envName] = value
-		}
-		resolved[a.ID] = secrets
-	}
-
-	if len(resolved) == 0 {
+// resolveActionSecrets resolves only the sealed inputs of the action that the
+// scheduler is about to run. Keeping this at the action boundary avoids
+// provider reads for cached or dependency-cancelled actions.
+func resolveActionSecrets(ctx context.Context, action *dag.Action, mgr *plugin.Manager) (map[string]string, error) {
+	if len(action.SealedInputs) == 0 {
 		return nil, nil
 	}
-	return resolved, nil
+	secrets := make(map[string]string, len(action.SealedInputs))
+	for envName, ref := range action.SealedInputs {
+		scheme, path, ok := parseSecretRef(ref)
+		if !ok {
+			return nil, fmt.Errorf("action %q: sealed input %q: invalid reference %q (expected scheme:path)", action.ID, envName, ref)
+		}
+		value, err := mgr.ResolveSecret(ctx, scheme, path)
+		if err != nil {
+			return nil, fmt.Errorf("action %q: sealed input %q: %w", action.ID, envName, err)
+		}
+		secrets[envName] = value
+	}
+	return secrets, nil
 }
 
 // parseSecretRef splits a secret reference "scheme:path" into its components.

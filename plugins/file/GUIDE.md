@@ -6,18 +6,18 @@ mu guide plugin file — file convergence plugin
 Converges files to a desired state: write content, set permissions,
 create symlinks, or delete files.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//etc/nginx-conf",
-    "toolchain": "file",
-    "sources": [],
-    "config": {
-      "path": "/etc/nginx/nginx.conf",
-      "content": "server { listen 80; root /var/www/html; }",
-      "mode": "0644"
+  targets: [{
+    target: "//etc/nginx-conf"
+    toolchain: "file"
+    sources: []
+    config: {
+      path: "/etc/nginx/nginx.conf"
+      content: "server { listen 80; root /var/www/html; }"
+      mode: "0644"
     }
-  }
+  }]
 
 CONFIG FIELDS
 
@@ -54,15 +54,13 @@ CAPTURE MODE — local file -> sealed output
   to $MU_SEALED_OUT_DIR/NAME (chmod 0600); the runner then routes each
   through the configured provider's store_secret.
 
-    {
-      "target": "//capture/server-key",
-      "toolchain": "file",
-      "config": {
-        "sealed_output_files": {"KEY": "/tmp/openssl-server.key"}
-      },
-      "sealed_outputs":      {"KEY": "pass:tls/server-key"},
-      "sealed_output_modes": {"KEY": "create_if_absent"}
-    }
+    targets: [{
+      target: "//capture/server-key"
+      toolchain: "file"
+      config: sealed_output_files: KEY: "/tmp/openssl-server.key"
+      sealed_outputs: KEY: "pass:tls/server-key"
+      sealed_output_modes: KEY: "create_if_absent"
+    }]
 
   Constraints:
     - Keys in sealed_output_files MUST exactly match sealed_outputs.

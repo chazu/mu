@@ -74,10 +74,10 @@ store_secret
     create_if_absent   No-op if exists, create if missing.
                        (This is what secret-gen relies on.)
 
-  The mode comes from the action's sealed_output_modes — a field the
-  plugin emits on its ActionSpec at plan time, not a target/mu.cue key —
-  defaulting to "overwrite". Validate it and reject anything else
-  explicitly.
+  The mode comes from sealed_output_modes. Target authors may declare it in
+  mu.cue, and action plugins forward the per-name mode onto each ActionSpec at
+  plan time. Missing modes default to "overwrite". Validate the effective mode
+  and reject anything else explicitly.
 
   Like resolve_secret, never log the value. If your backend's CLI
   echoes it, redirect that output to /dev/null in your wrapper.

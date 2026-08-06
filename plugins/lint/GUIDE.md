@@ -3,16 +3,14 @@ mu guide plugin lint — language-agnostic linter wrapper
 Wraps any linter command as a mu plugin. Supports running linters,
 auto-fix commands, and observing lint status.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//lint/go-vet",
-    "toolchain": "lint",
-    "sources": ["cmd/**/*.go", "internal/**/*.go"],
-    "config": {
-      "command": ["go", "vet", "./..."]
-    }
-  }
+  targets: [{
+    target: "//lint/go-vet"
+    toolchain: "lint"
+    sources: ["cmd/**/*.go", "internal/**/*.go"]
+    config: command: ["go", "vet", "./..."]
+  }]
 
 CONFIG FIELDS
 
@@ -39,14 +37,14 @@ EXAMPLES
 
   Aggregate lint target (using shell kit):
 
-    {
-      "target": "//lint",
-      "toolchain": "shell",
-      "kind": "kit",
-      "sources": [],
-      "deps": ["//lint/go-vet", "//lint/gofmt"],
-      "config": {"command": ["true"], "impure": false}
-    }
+    targets: [{
+      target: "//lint"
+      toolchain: "shell"
+      kind: "kit"
+      sources: []
+      deps: ["//lint/go-vet", "//lint/gofmt"]
+      config: {command: ["true"], impure: false}
+    }]
 
 OBSERVATION
 

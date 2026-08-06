@@ -6,36 +6,32 @@ mu guide plugin scratch — toolchain downloader and registrar
 Downloads, verifies, extracts, and registers toolchains from source
 archives. This is the plugin implementation of 'mu scratch'.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
   Typically used via the toolchains array rather than as a direct target:
 
-    {
-      "toolchains": [
-        {
-          "toolchain": "go",
-          "from": "scratch",
-          "config": {
-            "version": "1.25.8",
-            "url": "https://go.dev/dl/go1.25.8.darwin-arm64.tar.gz",
-            "sha256": "abc123..."
-          }
-        }
-      ]
-    }
+    toolchains: [{
+      toolchain: "go"
+      from: "scratch"
+      config: {
+        version: "1.26.2"
+        url: "https://go.dev/dl/go1.26.2.darwin-arm64.tar.gz"
+        sha256: "abc123..."
+      }
+    }]
 
   Can also be used as a direct target:
 
-    {
-      "target": "//toolchains/bb",
-      "toolchain": "scratch",
-      "sources": [],
-      "config": {
-        "url": "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-macos-aarch64.tar.gz",
-        "sha256": "91499b3f...",
-        "version": "1.12.216"
+    targets: [{
+      target: "//toolchains/bb"
+      toolchain: "scratch"
+      sources: []
+      config: {
+        url: "https://github.com/babashka/babashka/releases/download/v1.12.216/babashka-1.12.216-macos-aarch64.tar.gz"
+        sha256: "91499b3f..."
+        version: "1.12.216"
       }
-    }
+    }]
 
 CONFIG FIELDS
 

@@ -3,18 +3,18 @@ mu guide plugin aws — AWS resource observer
 Observes AWS resource state via the AWS CLI. Returns structured JSON
 records for drift detection with pudl.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//infra/aws-inventory",
-    "toolchain": "aws",
-    "sources": [],
-    "config": {
-      "profile": "production",
-      "region": "us-east-1",
-      "resources": ["ec2", "vpc", "subnet"]
+  targets: [{
+    target: "//infra/aws-inventory"
+    toolchain: "aws"
+    sources: []
+    config: {
+      profile: "production"
+      region: "us-east-1"
+      resources: ["ec2", "vpc", "subnet"]
     }
-  }
+  }]
 
 CONFIG FIELDS
 

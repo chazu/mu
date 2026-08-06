@@ -2,18 +2,18 @@ mu guide plugin k8s — Kubernetes convergence plugin
 
 Applies Kubernetes manifests and detects drift between desired and live state.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//deploy/myapp",
-    "toolchain": "k8s",
-    "sources": ["deploy/*.yaml"],
-    "config": {
-      "namespace": "production",
-      "context": "my-cluster",
-      "server_side": true
+  targets: [{
+    target: "//deploy/myapp"
+    toolchain: "k8s"
+    sources: ["deploy/*.yaml"]
+    config: {
+      namespace: "production"
+      context: "my-cluster"
+      server_side: true
     }
-  }
+  }]
 
 CONFIG FIELDS
 
@@ -107,19 +107,21 @@ SEALED OUTPUTS (cluster Secret -> secret backend)
   Pair target.sealed_outputs with config.sealed_output_secrets, mapping
   each sealed-output NAME to a {namespace, secret, key} triple:
 
-    {
-      "target": "//deploy/db-creds-capture",
-      "toolchain": "k8s",
-      "sources": ["deploy/db.yaml"],
-      "config": {
-        "context": "prod",
-        "sealed_output_secrets": {
-          "DBPASS": {"namespace": "db", "secret": "creds", "key": "password"}
+    targets: [{
+      target: "//deploy/db-creds-capture"
+      toolchain: "k8s"
+      sources: ["deploy/db.yaml"]
+      config: {
+        context: "prod"
+        sealed_output_secrets: DBPASS: {
+          namespace: "db"
+          secret: "creds"
+          key: "password"
         }
-      },
-      "sealed_outputs":      {"DBPASS": "pass:rds/master-password"},
-      "sealed_output_modes": {"DBPASS": "create_if_absent"}
-    }
+      }
+      sealed_outputs: DBPASS: "pass:rds/master-password"
+      sealed_output_modes: DBPASS: "create_if_absent"
+    }]
 
   After the apply action succeeds, fetch-secrets runs:
 

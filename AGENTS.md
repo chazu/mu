@@ -73,7 +73,7 @@ Mu = language-agnostic, plugin-driven build coordinator. NOT `go build` / `cargo
 ## Bootstrap pointers
 
 ```
-mu --version
+mu version
 mu guide                 # topic index — authoritative
 mu guide overview        # mental model
 mu guide pudl            # how mu pairs with pudl

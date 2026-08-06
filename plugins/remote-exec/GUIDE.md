@@ -69,20 +69,20 @@ Pair `sealed_outputs` (target-level) with `config.sealed_output_files`
 (plugin-specific) to tell the wrapper which remote file backs each
 named output:
 
-```json
-{
-  "target": "//bootstrap/k8s-join-token",
-  "toolchain": "remote-exec",
-  "config": {
-    "host":    "control.example.com",
-    "user":    "root",
-    "command": ["bash", "-c", "kubeadm token create --print-join-command > /tmp/join"],
-    "sealed_output_files": {"JOIN": "/tmp/join"}
-  },
-  "sealed_inputs":  {"SSH_PASS": "pass:servers/root@control"},
-  "sealed_outputs": {"JOIN": "pass:bootstrap/k8s-join"},
-  "sealed_output_modes": {"JOIN": "create_if_absent"}
-}
+```cue
+targets: [{
+  target: "//bootstrap/k8s-join-token"
+  toolchain: "remote-exec"
+  config: {
+    host: "control.example.com"
+    user: "root"
+    command: ["bash", "-c", "kubeadm token create --print-join-command > /tmp/join"]
+    sealed_output_files: JOIN: "/tmp/join"
+  }
+  sealed_inputs: SSH_PASS: "pass:servers/root@control"
+  sealed_outputs: JOIN: "pass:bootstrap/k8s-join"
+  sealed_output_modes: JOIN: "create_if_absent"
+}]
 ```
 
 After the remote command succeeds, the wrapper opens a second ssh
@@ -110,20 +110,20 @@ runner then routes each file through the configured secret provider's
 
 To re-run an exec only when a dep changes:
 
-```json
-{
-  "target": "//caddy/reload",
-  "toolchain": "remote-exec",
-  "deps": ["//caddy/config"],
-  "config": {
-    "host": "example.com",
-    "user": "deploy",
-    "command": ["systemctl", "reload", "caddy"],
-    "sudo": true,
-    "impure": false
-  },
-  "sealed_inputs": {"SSH_PASS": "pass:servers/deploy@example.com"}
-}
+```cue
+targets: [{
+  target: "//caddy/reload"
+  toolchain: "remote-exec"
+  deps: ["//caddy/config"]
+  config: {
+    host: "example.com"
+    user: "deploy"
+    command: ["systemctl", "reload", "caddy"]
+    sudo: true
+    impure: false
+  }
+  sealed_inputs: SSH_PASS: "pass:servers/deploy@example.com"
+}]
 ```
 
 `impure: false` + `deps` means the cache key incorporates the dep's
@@ -131,17 +131,17 @@ digest. The action re-runs exactly when the Caddyfile changes.
 
 ## check-based idempotency
 
-```json
-{
-  "target": "//install/jq",
-  "toolchain": "remote-exec",
-  "config": {
-    "host": "example.com",
-    "user": "deploy",
-    "command": ["apt-get", "install", "-y", "jq"],
-    "check":   ["which", "jq"],
-    "sudo": true
-  },
-  "sealed_inputs": {"SSH_PASS": "pass:servers/deploy@example.com"}
-}
+```cue
+targets: [{
+  target: "//install/jq"
+  toolchain: "remote-exec"
+  config: {
+    host: "example.com"
+    user: "deploy"
+    command: ["apt-get", "install", "-y", "jq"]
+    check: ["which", "jq"]
+    sudo: true
+  }
+  sealed_inputs: SSH_PASS: "pass:servers/deploy@example.com"
+}]
 ```

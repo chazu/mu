@@ -1,8 +1,13 @@
 # System Models: a swamp-equivalent over pudl + mu
 
-> **⮕ Building V1 convergence? Go to [`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md)** — the
-> single canonical, self-contained build doc. This README is the vision/concept
-> doc; the build spec is the work. (Full doc map at the bottom of the build spec.)
+> **Historical vision record (superseded 2026-08-05).** V1 convergence,
+> `pudl run`, exact `run-set` approvals, and sealed routing are implemented.
+> Current operator guidance is `mu guide pudl` and the PUDL repository's CLI and
+> cross-resource wiring documentation. Retired commands such as
+> `pudl export-actions` below are preserved only as design history.
+
+> The former build contract is preserved in
+> [`V1-BUILD-SPEC.md`](V1-BUILD-SPEC.md); it is no longer current usage text.
 
 > **Status (2026-06-20).** This is the original vision doc. Every CRITICAL/MAJOR
 > finding from the two adversarial reviews has since been worked through in

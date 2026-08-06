@@ -1,15 +1,23 @@
 # V1 Build Spec — `#SystemModel` convergence
 
-> **THIS IS THE CANONICAL DOCUMENT for the V1 convergence build.**
+> **Historical design record (superseded 2026-08-05).** The convergence and
+> exact run-set path described here is implemented. This file is no longer
+> canonical operator guidance. Use `mu guide pudl` and the PUDL repository's
+> `docs/cli-reference.md` plus
+> `docs/design/2026-07-28-cross-resource-value-wiring.md` for current behavior.
+
+> **This was the canonical document for the V1 convergence build.**
 > It is self-contained: a builder needs only this file to know *what to build*.
 > Everything else in this directory is vision, rationale archive, or detail —
 > see the [Document map](#document-map) at the bottom. Where a decision needs its
 > *why*, this doc links to the rationale; the link is optional reading.
 
-**Status:** design resolved (V1.1–V1.4, V1.6; V1.5 cut), including the **apply
-path** (§5.5 — plugin-owned translation, desired routed as generated sources). Not
-built. Remaining *open* items are build-time, not design: the ewe-populate path and
-some missing plugins ([§10](#10-open--build-time-prerequisites)). Decision
+**Status:** design resolved and subsequently implemented, including the **apply
+path** (§5.5 — plugin-owned translation, desired routed as generated sources).
+The remaining text preserves the pre-implementation contract and may use retired
+command names; it is not live usage guidance. Earlier open items included the
+ewe-populate path and some missing plugins
+([§10](#10-open--build-time-prerequisites)). Decision
 rationale: [`issue-ledger.md`](issue-ledger.md) V1 section. Scope was corrected by
 an adversarial source-grounded review (2026-06-21).
 

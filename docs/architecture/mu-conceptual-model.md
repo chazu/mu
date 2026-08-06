@@ -369,7 +369,7 @@ If anything changes, the cache misses and the action re-executes. If nothing
 changes, the cached result is used regardless of wall-clock time, filesystem
 state, or anything else.
 
-Toolchains built from scratch are fully content-addressed. The Go 1.25.7
+Toolchains built from scratch are fully content-addressed. The Go 1.26.2
 toolchain is not "the go binary on my PATH" — it's a specific set of artifacts
 at specific SHA-256 digests, downloaded from a specific URL whose checksum was
 verified. When a plugin receives `toolchain_artifacts`, it references binaries

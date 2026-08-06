@@ -50,11 +50,20 @@ type ExecuteResult struct {
 // bytes must never be logged or cached by the implementation.
 type SealedOutputWriter func(ctx context.Context, ref, value, mode string) error
 
+// SealedInputResolver resolves one scheduled action's sealed inputs immediately
+// before execution. It is never called for cached or dependency-cancelled
+// actions, keeping provider reads aligned with actual execution.
+type SealedInputResolver func(ctx context.Context, action *Action) (map[string]string, error)
+
 // Executor runs a DAG of actions with parallel scheduling and CAS caching.
 type Executor struct {
 	Store           cas.Store
 	Workers         int                          // 0 means runtime.NumCPU()
 	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
+	// SealedInputResolver is the production lazy-resolution path. The
+	// ResolvedSecrets map remains as a test/library compatibility seam; values
+	// returned by this callback take precedence for the scheduled action.
+	SealedInputResolver SealedInputResolver
 	// SubprocessStdout overrides where action stdout is written. Nil
 	// means os.Stdout. Set to os.Stderr when the caller is using
 	// stdout for structured output (e.g. `mu build --emit-manifest`).
@@ -248,6 +257,13 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// and secrets must never be part of the cache key.
 	execEnv := a.Env
 	secrets := e.ResolvedSecrets[a.ID]
+	if e.SealedInputResolver != nil && len(a.SealedInputs) > 0 {
+		resolved, err := e.SealedInputResolver(ctx, a)
+		if err != nil {
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("resolve sealed inputs: %w", err)}
+		}
+		secrets = resolved
+	}
 	var sealedInDir string
 	if len(secrets) > 0 {
 		execEnv = make(map[string]string, len(a.Env)+len(secrets)+1)

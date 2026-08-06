@@ -6,19 +6,19 @@ mu guide plugin host — remote host observer
 Observes the state of a remote host via SSH. Gathers OS info, packages,
 services, filesystems, network interfaces, and users.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//infra/webserver",
-    "toolchain": "host",
-    "sources": [],
-    "config": {
-      "host": "192.168.1.100",
-      "user": "admin",
-      "key": "~/.ssh/id_ed25519",
-      "port": 22
+  targets: [{
+    target: "//infra/webserver"
+    toolchain: "host"
+    sources: []
+    config: {
+      host: "192.168.1.100"
+      user: "admin"
+      key: "~/.ssh/id_ed25519"
+      port: 22
     }
-  }
+  }]
 
 CONFIG FIELDS
 
@@ -31,7 +31,7 @@ SECRETS (via sealed_inputs)
 
   For password authentication:
 
-    "sealed_inputs": {"SSH_PASS": "pass:infra/webserver-password"}
+    sealed_inputs: SSH_PASS: "pass:infra/webserver-password"
 
   When SSH_PASS is set, the plugin uses sshpass for authentication.
   Otherwise it uses key-based authentication. SSH_PASS is short and

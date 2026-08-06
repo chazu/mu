@@ -3,16 +3,14 @@ mu guide plugin cowsay — cowsay text transform (demo plugin)
 A simple example plugin that transforms text files through cowsay.
 Primarily useful as a reference for writing new plugins.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//fun/greeting",
-    "toolchain": "cowsay",
-    "sources": ["message.txt"],
-    "config": {
-      "output": "greeting.txt"
-    }
-  }
+  targets: [{
+    target: "//fun/greeting"
+    toolchain: "cowsay"
+    sources: ["message.txt"]
+    config: output: "greeting.txt"
+  }]
 
 CONFIG FIELDS
 

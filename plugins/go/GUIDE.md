@@ -2,18 +2,18 @@ mu guide plugin go — Go toolchain plugin
 
 Compiles Go packages into executables, archives, or shared libraries.
 
-USAGE IN mu.json
+USAGE IN mu.cue
 
-  {
-    "target": "//cmd/myapp",
-    "toolchain": "go",
-    "sources": ["go.mod", "go.sum", "cmd/myapp/*.go", "internal/**/*.go"],
-    "config": {
-      "output": "myapp",
-      "pkg": "./cmd/myapp",
-      "trimpath": true
+  targets: [{
+    target: "//cmd/myapp"
+    toolchain: "go"
+    sources: ["go.mod", "go.sum", "cmd/myapp/*.go", "internal/**/*.go"]
+    config: {
+      output: "myapp"
+      pkg: "./cmd/myapp"
+      trimpath: true
     }
-  }
+  }]
 
 CONFIG FIELDS
 

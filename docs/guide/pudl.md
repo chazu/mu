@@ -72,6 +72,12 @@ approval:
   pudl run-set network app --converge
   pudl run-set resume <run-set-id>   # or reject
 
+For each exact apply, PUDL rechecks the workspace-normalized approved plan,
+then invokes `mu build --expect-plan-sha256 <raw-plan-digest>`. Mu compares a
+single in-process plan before provider access and executes that same graph.
+Resolved plugin/provider content identities are part of plan schema v2;
+mutable command plugins are rejected on this guarded path.
+
 STANDALONE MU OPERATIONS
 
 Use mu directly when mu.cue is the source of truth rather than a PUDL model:

@@ -3,6 +3,44 @@
 All notable changes to mu are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
+## [v0.3.5] — 2026-08-05
+
+### Added
+
+- **Strict sealed action routing.** Targets may set
+  `sealed_routing: "strict"` to make target-level sealed maps capability
+  bounds rather than implicit grants. Every declared input must be claimed by
+  at least one action, every output by exactly one, and undeclared claims or
+  ref/mode changes fail during planning before provider resolution or writes.
+- `TargetInfo` and the bundled file, keypair-gen, and remote-exec planners now
+  carry sealed output modes through the plugin boundary.
+- **Guarded exact execution.** `mu build --expect-plan-sha256 HEX` plans once,
+  compares plan schema v2 before provider access, and executes that same
+  in-memory graph. Mutable zero-digest command plugins are rejected.
+
+### Changed
+
+- **`mu build --plan --json` is plan schema version 2.** Each action now
+  includes its computed action key and every execution-affecting field:
+  command/body/ewe digest, inputs/outputs/dependencies, environment, sealed
+  refs and modes, network/work-dir/impure/retry settings, toolchain digests,
+  and sources. The top-level plan identity also commits resolved plugin content,
+  version, protocol, and capabilities. This is the exact-plan surface used by
+  PUDL approval/resume.
+- PUDL integration documentation now describes the current `#SystemModel` and
+  `pudl run-set` workflow, including mandatory approval for sealed-output sets.
+
+### Security
+
+- Strict sealed routing rejects unused declarations, undeclared claims,
+  mismatched modes/refs, and ambiguous writers before action execution.
+- Provider write-policy checks remain enforced both during planning and at the
+  final write boundary.
+- Execute-time providers use the exact content-addressed artifacts resolved by
+  planning rather than resolving mutable definitions a second time.
+- Sealed inputs resolve only when their action is actually scheduled, so cached
+  or dependency-cancelled actions do not cause provider reads.
+
 ## [v0.2.2] — 2026-06-17
 
 ### Fixed

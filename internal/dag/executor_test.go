@@ -621,6 +621,31 @@ func TestSealedInputsNoResolvedSecretsIsNoOp(t *testing.T) {
 	}
 }
 
+func TestSealedInputResolverSkipsDependencyCancelledAction(t *testing.T) {
+	graph := dag.NewGraph()
+	if err := graph.AddAction(&dag.Action{ID: "fail", Command: []string{"sh", "-c", "exit 1"}, Impure: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AddAction(&dag.Action{
+		ID: "cancelled", Command: []string{"true"}, DependsOn: []string{"fail"}, Impure: true,
+		SealedInputs: map[string]string{"TOKEN": "fake:apps/token"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolved := 0
+	executor := &dag.Executor{Workers: 1, SealedInputResolver: func(context.Context, *dag.Action) (map[string]string, error) {
+		resolved++
+		return map[string]string{"TOKEN": "secret"}, nil
+	}}
+	result, err := executor.Execute(context.Background(), graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Cancelled) != 1 || resolved != 0 {
+		t.Fatalf("cancelled = %v, provider resolutions = %d; want one cancellation and zero reads", result.Cancelled, resolved)
+	}
+}
+
 func TestPithBodyResultPropagates(t *testing.T) {
 	g := dag.NewGraph()
 

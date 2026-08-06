@@ -52,7 +52,7 @@ git clone https://github.com/chazu/mu.git
 cd mu && go build -o mu ./cmd/mu
 ```
 
-Requires Go 1.25+.
+Requires Go 1.26.2+.
 
 ## Quick Start
 
@@ -160,7 +160,7 @@ server.
 Run `mu guide` for the topic index. Each topic has its own page:
 `overview`, `mu.cue`, `plugins`, `build`, `observe`, `pudl`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
-`secret-providers`, `pith-plugins`, `sandbox`, `advice`.
+`secret-providers`, `pith-plugins`, `sandbox`, `advice`, `sdk`.
 
 ## Topics
 

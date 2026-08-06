@@ -1,21 +1,21 @@
-// Package mu defines the CUE schema for mu.json files.
+// Package mu defines the CUE schema for mu.cue project files.
 //
 // Two top-level definitions:
-//   - #ProjectConfig: the root mu.json of a repository.
-//   - #PluginConfig:  the mu.json of a plugin directory (has a "plugin" key).
+//   - #ProjectConfig: the root mu.cue of a repository.
+//   - #PluginConfig:  the mu.cue of a plugin directory (has a "plugin" key).
 //
 // This schema enforces structural constraints only. Cross-record constraints
 // such as "target names must be unique" and "plugin names must be unique"
 // remain the responsibility of the Go validator in internal/config.
 package mu
 
-// #ProjectConfig is the schema for the repository root mu.json.
+// #ProjectConfig is the schema for the repository root mu.cue.
 #ProjectConfig: {
-	targets?:      [...#Target]
-	toolchains?:   [...#Toolchain]
-	cache?:        #CacheConfig
-	publish?:      #PublishConfig
-	plugins?:      [...#PluginDef]
+	targets?: [...#Target]
+	toolchains?: [...#Toolchain]
+	cache?:   #CacheConfig
+	publish?: #PublishConfig
+	plugins?: [...#PluginDef]
 	preprocessor?: #Preprocessor
 	secrets?:      #SecretsConfig
 	...
@@ -38,11 +38,11 @@ package mu
 	...
 }
 
-// #PluginConfig is the schema for a plugin directory's mu.json.
+// #PluginConfig is the schema for a plugin directory's mu.cue.
 // Presence of the "plugin" key distinguishes plugin configs from the root.
 #PluginConfig: {
-	plugin:      #PluginManifest
-	targets?:    [...#Target]
+	plugin: #PluginManifest
+	targets?: [...#Target]
 	toolchains?: [...#Toolchain]
 	...
 }
@@ -53,20 +53,20 @@ package mu
 
 // #Target describes a single build target.
 #Target: {
-	target:                   #TargetName
-	toolchain?:               string & !=""
-	sources?:                 [...string]
-	deps?:                    [...string]
-	config?:                  {...}
-	plan?:                    [...]
-	transform?:               [...]
-	sealed_inputs?:           {[string]: string}
-	sealed_input_modes?:      {[string]: "env" | "file"}
-	sealed_outputs?:          {[string]: string}
-	sealed_output_modes?:     {[string]: "create" | "overwrite" | "create_if_absent"}
-	sealed_routing?:          "strict"
-	kind?:                    "relationship" | "interface" | "component" | "kit" | ""
-	implements?:              string
+	target:     #TargetName
+	toolchain?: string & !=""
+	sources?: [...string]
+	deps?: [...string]
+	config?: {...}
+	plan?: [...]
+	transform?: [...]
+	sealed_inputs?: {[string]: string}
+	sealed_input_modes?: {[string]: "env" | "file"}
+	sealed_outputs?: {[string]: string}
+	sealed_output_modes?: {[string]: "create" | "overwrite" | "create_if_absent"}
+	sealed_routing?: "strict"
+	kind?:           "relationship" | "interface" | "component" | "kit" | ""
+	implements?:     string
 	...
 }
 
@@ -103,21 +103,21 @@ package mu
 		digest?: _|_
 	} | {
 		// Form 2: local .bb script (hashed and stored in CAS).
-		script:  string & !=""
+		script:   string & !=""
 		command?: _|_
 		url?:     _|_
 		sha256?:  _|_
 		digest?:  _|_
 	} | {
 		// Form 3: remote .bb script with SHA256 verification.
-		url:    string & !=""
-		sha256: #SHA256
+		url:      string & !=""
+		sha256:   #SHA256
 		command?: _|_
 		script?:  _|_
 		digest?:  _|_
 	} | {
 		// Form 4: CAS digest referencing a previously stored plugin.
-		digest:  string & !=""
+		digest:   string & !=""
 		command?: _|_
 		script?:  _|_
 		url?:     _|_
@@ -145,7 +145,7 @@ package mu
 
 // #CacheConfig configures the build cache system.
 #CacheConfig: {
-	backends?:      [...#CacheBackend]
+	backends?: [...#CacheBackend]
 	read_repair?:   bool
 	write_through?: bool
 	push?:          #CachePush
@@ -155,17 +155,17 @@ package mu
 // #Preprocessor transforms non-JSON config files into JSON before loading.
 #Preprocessor: {
 	extension: string & !=""
-	command:   [string, ...string]
+	command: [string, ...string]
 	...
 }
 
-// #PluginManifest is the "plugin" key in a plugin directory's mu.json.
+// #PluginManifest is the "plugin" key in a plugin directory's mu.cue.
 #PluginManifest: {
 	entrypoint: string & !=""
 	toolchain?: string
-	files?:     [...string]
-	guide?:     string
-	schemas?:   [...#SchemaDecl]
+	files?: [...string]
+	guide?: string
+	schemas?: [...#SchemaDecl]
 	...
 }
 

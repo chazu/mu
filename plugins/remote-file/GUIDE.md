@@ -60,24 +60,22 @@ capturing `/etc/kubernetes/admin.conf` after `kubeadm init`), use the
 
 ## Example
 
-```json
-{
-  "target": "//etc/caddy-config",
-  "toolchain": "remote-file",
-  "sources": ["caddy/Caddyfile"],
-  "config": {
-    "host": "example.com",
-    "user": "deploy",
-    "path": "/etc/caddy/Caddyfile",
-    "mode": "0644",
-    "owner": "root",
-    "group": "root",
-    "sudo": true
-  },
-  "sealed_inputs": {
-    "SSH_PASS": "pass:servers/deploy@example.com"
+```cue
+targets: [{
+  target: "//etc/caddy-config"
+  toolchain: "remote-file"
+  sources: ["caddy/Caddyfile"]
+  config: {
+    host: "example.com"
+    user: "deploy"
+    path: "/etc/caddy/Caddyfile"
+    mode: "0644"
+    owner: "root"
+    group: "root"
+    sudo: true
   }
-}
+  sealed_inputs: SSH_PASS: "pass:servers/deploy@example.com"
+}]
 ```
 
 ## Observe record schema

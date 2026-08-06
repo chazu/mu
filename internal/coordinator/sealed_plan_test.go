@@ -156,6 +156,7 @@ func TestPlan_StrictSealedInputResolutionWaitsUntilExecute(t *testing.T) {
 					"outputs":            []any{},
 					"sealed_inputs":      map[string]any{"TOKEN": "env:" + variable},
 					"sealed_input_modes": map[string]any{"TOKEN": "env"},
+					"impure":             true,
 				},
 				"action/emit",
 			},
@@ -167,8 +168,12 @@ func TestPlan_StrictSealedInputResolutionWaitsUntilExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan resolved a secret value: %v", err)
 	}
-	if _, err := c.Execute(context.Background(), plan); err == nil || !contains(err.Error(), variable) {
-		t.Fatalf("Execute error = %v, want missing execute-time env secret", err)
+	result, err := c.Execute(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(result.ExecResult.Failed) != 1 || !contains(result.ExecResult.Failed[0].Err.Error(), variable) {
+		t.Fatalf("Execute failures = %#v, want missing execute-time env secret", result.ExecResult.Failed)
 	}
 	requireNoError(t, os.Setenv(variable, "runtime-only-value"))
 	if _, err := c.Execute(context.Background(), plan); err != nil {

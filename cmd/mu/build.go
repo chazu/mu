@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,9 +29,10 @@ func runBuild(args []string) int {
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
 	dryRun := fs.Bool("dry-run", false, "alias for --plan")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
+	expectPlanSHA256 := fs.String("expect-plan-sha256", "", "execute only if the single in-process plan has this SHA-256")
 	publish := fs.Bool("publish", false, "after a successful build, publish each target's outputs as an artifact (config.publish)")
 	var attach stringSliceFlag
-	fs.Var(&attach, "attach", "attach a file to the published artifact as a referrer: <artifactType>=<path> (repeatable; implies --publish)")
+	fs.Var(&attach, "attach", "attach a file to the published artifact as a referrer: <artifactType>=<path> (repeatable; requires --publish)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -44,6 +48,18 @@ func runBuild(args []string) int {
 	}
 	if *publish && *planOnly {
 		return cli.fail(exitUsage, "--publish and --plan are mutually exclusive")
+	}
+	if *expectPlanSHA256 != "" && *planOnly {
+		return cli.fail(exitUsage, "--expect-plan-sha256 and --plan are mutually exclusive")
+	}
+	if *expectPlanSHA256 != "" && *publish {
+		return cli.fail(exitUsage, "--expect-plan-sha256 and --publish are mutually exclusive")
+	}
+	if *expectPlanSHA256 != "" {
+		decoded, err := hex.DecodeString(*expectPlanSHA256)
+		if err != nil || len(decoded) != sha256.Size {
+			return cli.fail(exitUsage, "--expect-plan-sha256 requires a 64-character hexadecimal SHA-256")
+		}
 	}
 
 	targets := fs.Args()
@@ -101,7 +117,7 @@ func runBuild(args []string) int {
 		}
 
 		if cli.JSON {
-			return printPlanJSON(plan.Graph, targets)
+			return printPlanJSON(plan, targets)
 		}
 		return printPlanHuman(plan.Graph, targets)
 	}
@@ -111,7 +127,13 @@ func runBuild(args []string) int {
 	fmt.Fprintln(os.Stderr, "  building...")
 
 	start := time.Now()
-	result, err := c.Build(ctx, targets)
+	var validate func(*coordinator.PlanResult) error
+	if *expectPlanSHA256 != "" {
+		validate = func(plan *coordinator.PlanResult) error {
+			return validateExpectedPlan(plan, targets, *expectPlanSHA256)
+		}
+	}
+	result, err := c.BuildValidated(ctx, targets, validate)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -151,33 +173,57 @@ func runBuild(args []string) int {
 	return exitOK
 }
 
-// printPlanJSON emits the planned action DAG as JSON to stdout.
-func printPlanJSON(g *dag.Graph, targets []string) int {
-	type planAction struct {
-		ID                string            `json:"id"`
-		ActionKey         string            `json:"action_key"`
-		Command           []string          `json:"command"`
-		Body              []any             `json:"body,omitempty"`
-		EweDigest         string            `json:"ewe_digest,omitempty"`
-		Inputs            map[string]string `json:"inputs"`
-		Outputs           []string          `json:"outputs"`
-		DependsOn         []string          `json:"depends_on"`
-		Env               map[string]string `json:"env,omitempty"`
-		SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`
-		SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`
-		SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`
-		SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"`
-		Network           bool              `json:"network,omitempty"`
-		WorkDir           string            `json:"work_dir,omitempty"`
-		Impure            bool              `json:"impure,omitempty"`
-		TimeoutS          int               `json:"timeout_s,omitempty"`
-		Retries           int               `json:"retries,omitempty"`
-		RetryBackoffMs    int               `json:"retry_backoff_ms,omitempty"`
-		Toolchain         map[string]string `json:"toolchain,omitempty"`
-		Sources           []string          `json:"sources,omitempty"`
+func validateExpectedPlan(plan *coordinator.PlanResult, targets []string, expected string) error {
+	for _, identity := range plan.Plugins {
+		if identity.Digest == "" {
+			return fmt.Errorf("exact plan contains mutable command plugin %q; use a content-addressed script, URL, or digest", identity.Name)
+		}
 	}
+	actual, err := planJSONDigest(plan, targets)
+	if err != nil {
+		return fmt.Errorf("encoding exact plan identity: %w", err)
+	}
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return fmt.Errorf("exact plan SHA-256 mismatch: expected %s, planned %s", expected, actual)
+	}
+	return nil
+}
 
-	actions := g.Actions()
+type planAction struct {
+	ID                string            `json:"id"`
+	ActionKey         string            `json:"action_key"`
+	Command           []string          `json:"command"`
+	Body              []any             `json:"body,omitempty"`
+	EweDigest         string            `json:"ewe_digest,omitempty"`
+	Inputs            map[string]string `json:"inputs"`
+	Outputs           []string          `json:"outputs"`
+	DependsOn         []string          `json:"depends_on"`
+	Env               map[string]string `json:"env,omitempty"`
+	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`
+	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`
+	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`
+	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"`
+	Network           bool              `json:"network,omitempty"`
+	WorkDir           string            `json:"work_dir,omitempty"`
+	Impure            bool              `json:"impure,omitempty"`
+	TimeoutS          int               `json:"timeout_s,omitempty"`
+	Retries           int               `json:"retries,omitempty"`
+	RetryBackoffMs    int               `json:"retry_backoff_ms,omitempty"`
+	Toolchain         map[string]string `json:"toolchain,omitempty"`
+	Sources           []string          `json:"sources,omitempty"`
+}
+
+type planJSONDocument struct {
+	Version    int                          `json:"version"`
+	PlanSHA256 string                       `json:"plan_sha256,omitempty"`
+	Targets    []string                     `json:"targets"`
+	Plugins    []coordinator.PluginIdentity `json:"plugins"`
+	Actions    []planAction                 `json:"actions"`
+	Summary    map[string]int               `json:"summary"`
+}
+
+func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSONDocument {
+	actions := plan.Graph.Actions()
 	out := make([]planAction, 0, len(actions))
 	for _, a := range actions {
 		inputs := make(map[string]string, len(a.Inputs))
@@ -212,18 +258,50 @@ func printPlanJSON(g *dag.Graph, targets []string) int {
 		})
 	}
 
-	plan := map[string]any{
-		"version": 2,
-		"targets": targets,
-		"actions": out,
-		"summary": map[string]int{
-			"total": len(out),
-		},
+	plugins := append([]coordinator.PluginIdentity(nil), plan.Plugins...)
+	if plugins == nil {
+		plugins = []coordinator.PluginIdentity{}
 	}
+	return planJSONDocument{
+		Version: 2, Targets: targets, Plugins: plugins, Actions: out,
+		Summary: map[string]int{"total": len(out)},
+	}
+}
+
+func planJSONDigest(plan *coordinator.PlanResult, targets []string) (string, error) {
+	document := newPlanJSONDocument(plan, targets)
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return "", err
+	}
+	var canonical any
+	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&canonical); err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+// printPlanJSON emits the planned action DAG as JSON to stdout. plan_sha256 is
+// the digest of the same document with that self-referential field omitted.
+func printPlanJSON(plan *coordinator.PlanResult, targets []string) int {
+	document := newPlanJSONDocument(plan, targets)
+	digest, err := planJSONDigest(plan, targets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu build: encoding plan identity: %v\n", err)
+		return 1
+	}
+	document.PlanSHA256 = digest
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(plan); err != nil {
+	if err := enc.Encode(document); err != nil {
 		fmt.Fprintf(os.Stderr, "mu build: encoding plan: %v\n", err)
 		return 1
 	}

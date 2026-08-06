@@ -16,7 +16,7 @@ for plugin and project authors writing CUE today.
 - **CUE language version: `>= v0.11.0`** (required for stable `@embed`).
 - **Recommended: `>= v0.13.0`** for bug fixes around `@embed` glob patterns and
   sibling-module resolution.
-- **Go toolchain: `>= 1.22`** (the `mu` module itself is on Go 1.25).
+- **Go toolchain: `>= 1.26.2`** (matching the `go` directive in this module).
 - Pin the exact version in `go.mod` via `cuelang.org/go`.
 
 If you are using `CUE_EXPERIMENT=embed=1`, upgrade — `@embed` is default-on from

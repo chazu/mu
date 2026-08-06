@@ -1,5 +1,11 @@
 # System Model examples — under the current (post-review) design
 
+> **Historical examples (superseded 2026-08-05).** These snapshots predate the
+> shipped convergence and exact run-set workflow. Use `mu guide pudl` and the
+> PUDL repository's current CLI/design docs for runnable examples. References
+> below to observe-only v1, `pudl drift check`, or unbuilt convergence are kept
+> only to explain the original design progression.
+
 Each of the five examples from [../archive/examples.md](../archive/examples.md),
 re-expressed as it would actually look after the issue-ledger resolutions. These
 supersede the inline sketches in the archived `examples.md`, which predate the
