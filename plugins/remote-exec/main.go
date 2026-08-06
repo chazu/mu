@@ -95,9 +95,7 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 
 	sealedInputs := target.SealedInputs
 	sealedModes := target.SealedInputModes
-	// sealed_output_modes is not on TargetInfo (coordinator never sends it
-	// for targets, only for actions); treat as empty, matching file plugin.
-	sealedOutModes := map[string]string{}
+	sealedOutModes := target.SealedOutputModes
 
 	wrapper := buildWrapper(cfg, host, user, port, sudo, sortedKeys(sealedInputs), sealedFiles)
 

@@ -142,6 +142,32 @@ func TestPlanRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPlanRequestPreservesSealedOutputModes(t *testing.T) {
+	p := &muplugin.Plugin{
+		Name:    "sealed-output",
+		Version: "0.1.0",
+		Plan: func(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
+			if got := req.Target.SealedOutputModes["TOKEN"]; got != "create_if_absent" {
+				return muplugin.PlanResponse{}, errors.New("sealed output mode missing from target")
+			}
+			return muplugin.PlanResponse{}, nil
+		},
+	}
+	req := muplugin.NewPlanRequest(muplugin.TargetInfo{
+		Name:              "//secrets/token",
+		Toolchain:         "sealed-output",
+		SealedOutputs:     map[string]string{"TOKEN": "fake:apps/token"},
+		SealedOutputModes: map[string]string{"TOKEN": "create_if_absent"},
+	}, nil, nil)
+	var resp muplugin.PlanResponse
+	if err := muplugin.ExchangeInto(t.Context(), p, req, &resp); err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("plan returned error: %s", resp.Error)
+	}
+}
+
 func TestPlanErrorSurfacedInResponse(t *testing.T) {
 	p := &muplugin.Plugin{
 		Name:    "boom",

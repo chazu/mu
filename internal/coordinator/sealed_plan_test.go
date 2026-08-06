@@ -65,6 +65,69 @@ func TestPlan_SealedInputsAttachToPithPlanAction(t *testing.T) {
 	}
 }
 
+func TestPlan_TargetSealedOutputModeAttachesToSingleAction(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name:              "//secrets/token",
+				Toolchain:         "mock",
+				SealedOutputs:     map[string]string{"TOKEN": "fake:apps/token"},
+				SealedOutputModes: map[string]string{"TOKEN": "create_if_absent"},
+			}},
+			Plugins: []config.PluginDef{{
+				Name: "mock", Command: mockPluginCommand(t, "mock_plugin.sh"),
+			}},
+		},
+		Store: newTestStore(t),
+	}
+
+	plan, err := c.Plan(context.Background(), []string{"//secrets/token"})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	actions := plan.Graph.Actions()
+	if len(actions) != 1 {
+		t.Fatalf("actions = %d, want 1", len(actions))
+	}
+	if got := actions[0].SealedOutputs["TOKEN"]; got != "fake:apps/token" {
+		t.Fatalf("sealed output TOKEN = %q", got)
+	}
+	if got := actions[0].SealedOutputModes["TOKEN"]; got != "create_if_absent" {
+		t.Fatalf("sealed output mode TOKEN = %q, want create_if_absent", got)
+	}
+}
+
+func TestPlan_PluginReceivesTargetSealedOutputModes(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name:              "//secrets/token",
+				Toolchain:         "sealed-output",
+				SealedOutputs:     map[string]string{"TOKEN": "fake:apps/token"},
+				SealedOutputModes: map[string]string{"TOKEN": "create_if_absent"},
+			}},
+			Plugins: []config.PluginDef{{
+				Name: "sealed-output", Command: mockPluginCommand(t, "mock_plugin_sealed_output_modes.sh"),
+			}},
+		},
+		Store: newTestStore(t),
+	}
+
+	plan, err := c.Plan(context.Background(), []string{"//secrets/token"})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	actions := plan.Graph.Actions()
+	if len(actions) != 1 {
+		t.Fatalf("actions = %d, want 1", len(actions))
+	}
+	if got := actions[0].SealedOutputModes["TOKEN"]; got != "create_if_absent" {
+		t.Fatalf("plugin-planned sealed output mode TOKEN = %q, want create_if_absent", got)
+	}
+}
+
 // TestPlan_ExplicitActionSealedInputsNotOverridden verifies that if an emitted
 // action declares its own sealed_inputs, the coordinator does NOT clobber them
 // with the target-level set (the convenience only fills in the empty case).

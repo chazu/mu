@@ -99,6 +99,30 @@ targets: [{target: "//app", toolchain: "go", sources: ["*.go"]}]
 	}
 }
 
+func TestLoad_SealedOutputModes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), `
+plugins: [{name: "fake", command: ["fake-plugin"]}]
+targets: [{
+  target: "//app"
+  toolchain: "fake"
+  sealed_outputs: {TOKEN: "fake:apps/token"}
+  sealed_output_modes: {TOKEN: "create_if_absent"}
+}]
+`)
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("targets = %d, want 1", len(cfg.Targets))
+	}
+	if got := cfg.Targets[0].SealedOutputModes["TOKEN"]; got != "create_if_absent" {
+		t.Fatalf("sealed_output_modes TOKEN = %q, want create_if_absent", got)
+	}
+}
+
 func TestLoad_MergeSubdir(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root-target"))

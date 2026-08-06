@@ -50,11 +50,7 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 		mode = "0644"
 	}
 	sealedOut := target.SealedOutputs
-	// The bb plugin reads sealed_output_modes from target, but the
-	// coordinator never sends it on the target envelope (only on actions),
-	// so it is effectively always empty here. The SDK's TargetInfo lacks
-	// the field, matching that reality.
-	sealedOutModes := map[string]string{}
+	sealedOutModes := target.SealedOutputModes
 	sealedFiles := stringMap(cfg["sealed_output_files"])
 
 	capture := len(sealedOut) > 0 || len(sealedFiles) > 0

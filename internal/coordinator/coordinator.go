@@ -254,13 +254,14 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 		} else {
 			ti := plugin.TargetInfo{
-				Name:             t.Name,
-				Toolchain:        t.Toolchain,
-				Sources:          t.Sources,
-				Config:           t.Config,
-				SealedInputs:     t.SealedInputs,
-				SealedInputModes: t.SealedInputModes,
-				SealedOutputs:    t.SealedOutputs,
+				Name:              t.Name,
+				Toolchain:         t.Toolchain,
+				Sources:           t.Sources,
+				Config:            t.Config,
+				SealedInputs:      t.SealedInputs,
+				SealedInputModes:  t.SealedInputModes,
+				SealedOutputs:     t.SealedOutputs,
+				SealedOutputModes: t.SealedOutputModes,
 			}
 
 			// Thread each dep's declared_outputs (artifact-type → path,
@@ -344,6 +345,9 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 					return nil, fmt.Errorf("coordinator: target %q: sealed_outputs declared at target level but plan has %d actions; route them explicitly via the plugin", t.Name, len(planActions))
 				}
 				planActions[0].SealedOutputs = cloneStringMap(t.SealedOutputs)
+				if len(t.SealedOutputModes) > 0 {
+					planActions[0].SealedOutputModes = cloneStringMap(t.SealedOutputModes)
+				}
 			}
 		}
 

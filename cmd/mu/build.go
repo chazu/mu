@@ -154,14 +154,18 @@ func runBuild(args []string) int {
 // printPlanJSON emits the planned action DAG as JSON to stdout.
 func printPlanJSON(g *dag.Graph, targets []string) int {
 	type planAction struct {
-		ID        string            `json:"id"`
-		Command   []string          `json:"command"`
-		Inputs    map[string]string `json:"inputs"`
-		Outputs   []string          `json:"outputs"`
-		DependsOn []string          `json:"depends_on"`
-		Env       map[string]string `json:"env,omitempty"`
-		Network   bool              `json:"network,omitempty"`
-		WorkDir   string            `json:"work_dir,omitempty"`
+		ID                string            `json:"id"`
+		Command           []string          `json:"command"`
+		Inputs            map[string]string `json:"inputs"`
+		Outputs           []string          `json:"outputs"`
+		DependsOn         []string          `json:"depends_on"`
+		Env               map[string]string `json:"env,omitempty"`
+		SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`
+		SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`
+		SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`
+		SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"`
+		Network           bool              `json:"network,omitempty"`
+		WorkDir           string            `json:"work_dir,omitempty"`
 	}
 
 	actions := g.Actions()
@@ -180,14 +184,18 @@ func printPlanJSON(g *dag.Graph, targets []string) int {
 			outputs = []string{}
 		}
 		out = append(out, planAction{
-			ID:        a.ID,
-			Command:   a.Command,
-			Inputs:    inputs,
-			Outputs:   outputs,
-			DependsOn: deps,
-			Env:       a.Env,
-			Network:   a.Network,
-			WorkDir:   a.WorkDir,
+			ID:                a.ID,
+			Command:           a.Command,
+			Inputs:            inputs,
+			Outputs:           outputs,
+			DependsOn:         deps,
+			Env:               a.Env,
+			SealedInputs:      a.SealedInputs,
+			SealedInputModes:  a.SealedInputModes,
+			SealedOutputs:     a.SealedOutputs,
+			SealedOutputModes: a.SealedOutputModes,
+			Network:           a.Network,
+			WorkDir:           a.WorkDir,
 		})
 	}
 
