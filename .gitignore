@@ -44,3 +44,7 @@ plugins/envsecret/envsecret
 
 # stray metrics output
 metrics.json
+
+# agent state / example scratch output
+.claude/
+/summary.txt
