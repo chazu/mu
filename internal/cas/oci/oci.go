@@ -356,28 +356,13 @@ func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas
 		return nil, fmt.Errorf("oci: resolve action tag %s: %w", tag, err)
 	}
 
-	// Fetch the manifest.
-	manifestRC, err := s.repo.Fetch(ctx, manifestDesc)
-	if err != nil {
-		return nil, fmt.Errorf("oci: fetch action manifest: %w", err)
-	}
-	defer manifestRC.Close()
-
 	var manifest ocispec.Manifest
-	if err := json.NewDecoder(manifestRC).Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("oci: decode action manifest: %w", err)
+	if err := fetchMetadata(ctx, s.repo, manifestDesc, "action manifest", MaxManifestBytes, &manifest); err != nil {
+		return nil, err
 	}
-
-	// Fetch the config to get the ActionResult.
-	configRC, err := s.repo.Fetch(ctx, manifest.Config)
-	if err != nil {
-		return nil, fmt.Errorf("oci: fetch action config: %w", err)
-	}
-	defer configRC.Close()
-
 	var result cas.ActionResult
-	if err := json.NewDecoder(configRC).Decode(&result); err != nil {
-		return nil, fmt.Errorf("oci: decode action result: %w", err)
+	if err := fetchMetadata(ctx, s.repo, manifest.Config, "action result", MaxActionConfigBytes, &result); err != nil {
+		return nil, err
 	}
 
 	return &result, nil

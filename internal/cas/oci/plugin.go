@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -192,35 +191,17 @@ func FetchPluginConfig(ctx context.Context, repo Registry, ref string) (PluginCo
 	if err != nil {
 		return PluginConfig{}, fmt.Errorf("resolve %s: %w", ref, err)
 	}
-	mrc, err := repo.Fetch(ctx, mdesc)
-	if err != nil {
-		return PluginConfig{}, fmt.Errorf("fetch manifest %s: %w", ref, err)
-	}
-	mb, err := io.ReadAll(mrc)
-	mrc.Close()
-	if err != nil {
-		return PluginConfig{}, fmt.Errorf("read manifest %s: %w", ref, err)
-	}
 	var manifest ocispec.Manifest
-	if err := json.Unmarshal(mb, &manifest); err != nil {
-		return PluginConfig{}, fmt.Errorf("decode manifest %s: %w", ref, err)
+	if err := fetchMetadata(ctx, repo, mdesc, "plugin manifest", MaxManifestBytes, &manifest); err != nil {
+		return PluginConfig{}, err
 	}
 	if manifest.Config.MediaType != MediaTypePluginConfig {
 		return PluginConfig{}, fmt.Errorf("ref %s is not a mu plugin: config media type %q (want %q)",
 			ref, manifest.Config.MediaType, MediaTypePluginConfig)
 	}
-	crc, err := repo.Fetch(ctx, manifest.Config)
-	if err != nil {
-		return PluginConfig{}, fmt.Errorf("fetch plugin config: %w", err)
-	}
-	cb, err := io.ReadAll(crc)
-	crc.Close()
-	if err != nil {
-		return PluginConfig{}, fmt.Errorf("read plugin config: %w", err)
-	}
 	var cfg PluginConfig
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return PluginConfig{}, fmt.Errorf("decode plugin config: %w", err)
+	if err := fetchMetadata(ctx, repo, manifest.Config, "plugin config", MaxPluginConfigBytes, &cfg); err != nil {
+		return PluginConfig{}, err
 	}
 	return cfg, nil
 }
@@ -237,35 +218,17 @@ func FetchPluginIndex(ctx context.Context, repo Registry) (PluginIndex, error) {
 		}
 		return PluginIndex{}, fmt.Errorf("resolve plugin index: %w", err)
 	}
-	mrc, err := repo.Fetch(ctx, mdesc)
-	if err != nil {
-		return PluginIndex{}, fmt.Errorf("fetch plugin index manifest: %w", err)
-	}
-	mb, err := io.ReadAll(mrc)
-	mrc.Close()
-	if err != nil {
-		return PluginIndex{}, err
-	}
 	var manifest ocispec.Manifest
-	if err := json.Unmarshal(mb, &manifest); err != nil {
-		return PluginIndex{}, fmt.Errorf("decode plugin index manifest: %w", err)
+	if err := fetchMetadata(ctx, repo, mdesc, "plugin index manifest", MaxManifestBytes, &manifest); err != nil {
+		return PluginIndex{}, err
 	}
 	if manifest.Config.MediaType != MediaTypePluginIndexConfig {
 		return PluginIndex{}, fmt.Errorf("plugin index ref %q has config media type %q (want %q) — not a mu index",
 			PluginIndexTag, manifest.Config.MediaType, MediaTypePluginIndexConfig)
 	}
-	crc, err := repo.Fetch(ctx, manifest.Config)
-	if err != nil {
-		return PluginIndex{}, fmt.Errorf("fetch plugin index config: %w", err)
-	}
-	cb, err := io.ReadAll(crc)
-	crc.Close()
-	if err != nil {
-		return PluginIndex{}, err
-	}
 	var idx PluginIndex
-	if err := json.Unmarshal(cb, &idx); err != nil {
-		return PluginIndex{}, fmt.Errorf("decode plugin index: %w", err)
+	if err := fetchMetadata(ctx, repo, manifest.Config, "plugin index", MaxPluginIndexBytes, &idx); err != nil {
+		return PluginIndex{}, err
 	}
 	return idx, nil
 }
