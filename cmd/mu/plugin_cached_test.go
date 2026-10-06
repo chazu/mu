@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,10 +39,10 @@ func TestCachedPluginSelectionRequiresExplicitIdentity(t *testing.T) {
 	if err != nil || len(versions) != 2 {
 		t.Fatalf("listing hid cached versions: %+v, %v", versions, err)
 	}
-	if code := printGuideForPlugin(name); code != 1 {
+	if code := printGuideForPlugin(context.Background(), name); code != 1 {
 		t.Fatalf("ambiguous guide selected a version: %d", code)
 	}
-	if code := printGuideForPlugin(name, "sha256:"+a); code != 0 {
+	if code := printGuideForPlugin(context.Background(), name, "sha256:"+a); code != 0 {
 		t.Fatalf("explicit guide failed: %d", code)
 	}
 	if _, _, err := resolveCachedPlugin(name, "sha256:"+a[:12]); err == nil {

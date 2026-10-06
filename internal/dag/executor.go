@@ -58,6 +58,7 @@ type SealedInputResolver func(ctx context.Context, action *Action) (map[string]s
 
 // Executor runs a DAG of actions with parallel scheduling and CAS caching.
 type Executor struct {
+	NoCache         bool // skip action-result reads; retain CAS for dependencies and outputs
 	Store           cas.Store
 	Workers         int                          // 0 means runtime.NumCPU()
 	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
@@ -250,7 +251,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	}
 
 	// Cache check — only for pure actions.
-	if !a.Impure {
+	if !a.Impure && !e.NoCache {
 		key := ComputeActionKey(a)
 		if e.Store != nil {
 			cached, err := e.Store.GetActionResult(ctx, key)

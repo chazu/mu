@@ -186,6 +186,8 @@ func PushPlugin(ctx context.Context, repo Registry, name string, cfg PluginConfi
 // artifact (config media type == MediaTypePluginConfig), and returns the
 // decoded PluginConfig. Returns a clear error if the artifact at ref is not
 // a mu plugin (e.g. another tool wrote to the same tag).
+var ErrNotPlugin = errors.New("not a mu plugin artifact")
+
 func FetchPluginConfig(ctx context.Context, repo Registry, ref string) (PluginConfig, error) {
 	mdesc, err := repo.Resolve(ctx, ref)
 	if err != nil {
@@ -196,8 +198,8 @@ func FetchPluginConfig(ctx context.Context, repo Registry, ref string) (PluginCo
 		return PluginConfig{}, err
 	}
 	if manifest.Config.MediaType != MediaTypePluginConfig {
-		return PluginConfig{}, fmt.Errorf("ref %s is not a mu plugin: config media type %q (want %q)",
-			ref, manifest.Config.MediaType, MediaTypePluginConfig)
+		return PluginConfig{}, fmt.Errorf("ref %s is not a mu plugin: config media type %q (want %q): %w",
+			ref, manifest.Config.MediaType, MediaTypePluginConfig, ErrNotPlugin)
 	}
 	var cfg PluginConfig
 	if err := fetchMetadata(ctx, repo, manifest.Config, "plugin config", MaxPluginConfigBytes, &cfg); err != nil {

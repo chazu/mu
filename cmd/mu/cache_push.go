@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chazu/mu/internal/registryhttp"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
@@ -67,7 +68,11 @@ func runCachePush(args []string) int {
 		return exitOK
 	}
 
-	ctx := context.Background()
+	if !c.requireRegistry() {
+		return exitUsage
+	}
+
+	ctx := c.networkContext(context.Background())
 
 	local, err := ocilayout.New(cacheDir)
 	if err != nil {
@@ -87,7 +92,7 @@ func runCachePush(args []string) int {
 		if _, err := oras.Copy(ctx, local, tag, remoteRepo, tag, copyOpts); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", tag, err)
 			failed++
-			continue
+			break
 		}
 		if c.Verbose {
 			fmt.Printf("  pushed %s\n", tag)
@@ -136,12 +141,13 @@ func newPushRepository(ref string) (*remote.Repository, error) {
 		repo.PlainHTTP = true
 	}
 
-	client := &auth.Client{Cache: auth.NewCache()}
+	httpClient := registryhttp.NewClient(registryhttp.Options{})
+	client := &auth.Client{Cache: auth.NewCache(), Client: httpClient}
 	if credStore, err := openCredentialStore(); err == nil {
 		client.Credential = credentials.Credential(credStore)
 	}
 	if os.Getenv("MU_HTTP_TRACE") != "" {
-		client.Client = &http.Client{Transport: &tracingTransport{inner: http.DefaultTransport}}
+		httpClient.Transport = &tracingTransport{inner: httpClient.Transport}
 	}
 	repo.Client = client
 	return repo, nil
@@ -154,14 +160,14 @@ type tracingTransport struct {
 }
 
 func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if dump, err := httputil.DumpRequestOut(req, false); err == nil {
+	if dump, err := httputil.DumpRequestOut(redactedRequest(req), false); err == nil {
 		fmt.Fprintf(os.Stderr, "--> %s\n", dump)
 	}
 	resp, err := t.inner.RoundTrip(req)
 	if err != nil {
 		return resp, err
 	}
-	if dump, derr := httputil.DumpResponse(resp, true); derr == nil {
+	if dump, derr := httputil.DumpResponse(redactedResponse(resp), false); derr == nil {
 		fmt.Fprintf(os.Stderr, "<-- %s\n", dump)
 	}
 	return resp, err
@@ -209,4 +215,24 @@ func isLocalRegistryHost(ref string) bool {
 		host = host[:i]
 	}
 	return host == "localhost" || host == "127.0.0.1"
+}
+
+func redactedHeaders(header http.Header) http.Header {
+	copy := header.Clone()
+	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"} {
+		if copy.Get(name) != "" {
+			copy.Set(name, "[redacted]")
+		}
+	}
+	return copy
+}
+func redactedRequest(req *http.Request) *http.Request {
+	copy := req.Clone(req.Context())
+	copy.Header = redactedHeaders(req.Header)
+	return copy
+}
+func redactedResponse(resp *http.Response) *http.Response {
+	copy := *resp
+	copy.Header = redactedHeaders(resp.Header)
+	return &copy
 }

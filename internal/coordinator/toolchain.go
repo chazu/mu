@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -95,6 +96,9 @@ func (r *ToolchainRegistry) Lookup(ctx context.Context, name, version string) (*
 	// Look up in CAS.
 	key := actionKey(name, version)
 	result, err := r.store.GetActionResult(ctx, key)
+	if errors.Is(err, cas.ErrUnavailable) && ctx.Err() == nil {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("toolchain: get action result: %w", err)
 	}
@@ -161,36 +165,75 @@ func (r *ToolchainRegistry) ExtractBinary(ctx context.Context, name, artifact, b
 		return "", fmt.Errorf("parse digest for %s/%s: %w", name, artifact, err)
 	}
 
-	destDir := filepath.Join(baseDir, name)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return "", fmt.Errorf("create dir %s: %w", destDir, err)
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return "", fmt.Errorf("invalid toolchain cache name %q", name)
 	}
-
+	if dgst.Algorithm != "sha256" || len(dgst.Hash) != 64 {
+		return "", fmt.Errorf("toolchain binary requires a full SHA-256 identity")
+	}
+	if _, err := hex.DecodeString(dgst.Hash); err != nil {
+		return "", err
+	}
+	destDir := filepath.Join(baseDir, name, dgst.Hash)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
 	destPath := filepath.Join(destDir, filepath.Base(artifact))
-
-	// Skip if already extracted and correct size.
-	if _, err := os.Stat(destPath); err == nil {
+	matches := func(path string) bool {
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return false
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		actual, err := cas.ComputeDigest(cas.ContextReader(ctx, f))
+		return err == nil && actual == dgst
+	}
+	if matches(destPath) {
 		return destPath, nil
 	}
-
-	rc, err := r.store.Get(ctx, dgst)
+	// A legacy name-only binary may be adopted only after digest verification.
+	// Snapshot it at a full-digest path so another version cannot replace it.
+	var source io.ReadCloser
+	legacy := filepath.Join(baseDir, name, filepath.Base(artifact))
+	if matches(legacy) {
+		source, err = os.Open(legacy)
+	} else {
+		source, err = r.store.Get(ctx, dgst)
+	}
 	if err != nil {
-		return "", fmt.Errorf("get blob %s: %w", dgst, err)
+		return "", fmt.Errorf("required toolchain binary %s unavailable locally: %w", dgst, err)
 	}
-	defer rc.Close()
-
-	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	tmp, err := os.CreateTemp(destDir, ".tool-*")
 	if err != nil {
+		source.Close()
 		return "", err
 	}
-	if _, err := io.Copy(f, rc); err != nil {
-		f.Close()
+	defer os.Remove(tmp.Name())
+	actual, copyErr := cas.ComputeDigest(io.TeeReader(cas.ContextReader(ctx, source), tmp))
+	readCloseErr := source.Close()
+	if copyErr == nil {
+		copyErr = readCloseErr
+	}
+	if copyErr == nil && actual != dgst {
+		copyErr = fmt.Errorf("toolchain bytes do not match %s", dgst)
+	}
+	if copyErr == nil {
+		copyErr = tmp.Chmod(0o755)
+	}
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if err := os.Rename(tmp.Name(), destPath); err != nil {
 		return "", err
 	}
-	if err := f.Close(); err != nil {
-		return "", err
-	}
-
 	return destPath, nil
 }
 

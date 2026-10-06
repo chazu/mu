@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/chazu/mu/internal/builtin"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 const (
@@ -117,7 +118,7 @@ func Fetch(ctx context.Context, rawURL string) (*Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create catalog request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := registryhttp.NewClient(registryhttp.Options{}).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch catalog: %w", err)
 	}

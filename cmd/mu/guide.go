@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/chazu/mu/internal/registryhttp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +59,7 @@ func runGuide(args []string) int {
 		fs := flag.NewFlagSet("guide plugin", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		digest := fs.String("digest", "", "select a cached guide by full SHA-256 digest")
+		offline := fs.Bool("offline", false, "use cached/local guides without downloads")
 		if err := fs.Parse(args[1:]); err != nil {
 			return exitUsage
 		}
@@ -64,7 +67,11 @@ func runGuide(args []string) int {
 			fmt.Fprintln(os.Stderr, "usage: mu guide plugin [--digest sha256:...] <name>")
 			return exitUsage
 		}
-		return printGuideForPlugin(fs.Arg(0), *digest)
+		ctx := context.Background()
+		if *offline {
+			ctx = registryhttp.WithOffline(ctx)
+		}
+		return printGuideForPlugin(ctx, fs.Arg(0), *digest)
 	default:
 		fmt.Fprintf(os.Stderr, "mu guide: unknown topic %q\n", args[0])
 		fmt.Fprintln(os.Stderr, "Run 'mu guide' for a list of topics.")
@@ -108,7 +115,7 @@ func printGuideSDK()             { printTopic("sdk") }
 // It searches in order:
 //  1. Extracted CAS bundles in ~/.mu/plugins/<name>/bundle-*/
 //  2. Local plugin directory in the current project (plugins/<name>/)
-func printGuideForPlugin(name string, selection ...string) int {
+func printGuideForPlugin(ctx context.Context, name string, selection ...string) int {
 	requested := ""
 	if len(selection) > 0 {
 		requested = selection[0]
@@ -116,15 +123,15 @@ func printGuideForPlugin(name string, selection ...string) int {
 	root, rootErr := findGuideProjectRoot()
 	var cfg *config.ProjectConfig
 	if rootErr == nil {
-		cfg, _ = config.Load(root)
+		cfg, _ = config.LoadOffline(root, registryhttp.IsOffline(ctx))
 	}
-	source, def, _, err := resolveInfoTarget(root, cfg, name, requested)
+	source, def, _, err := resolveInfoTarget(ctx, root, cfg, name, requested)
 	if err == nil {
 		dir := def.WorkDir
 		if dir == "" {
 			dir = filepath.Dir(def.Script)
 		}
-		if path := findGuideInDir(dir); path != "" {
+		if path := findGuideInDir(dir, registryhttp.IsOffline(ctx)); path != "" {
 			return printGuideFile(name, path)
 		}
 		// Once an identity is selected, never take another version's guide.
@@ -136,7 +143,7 @@ func printGuideForPlugin(name string, selection ...string) int {
 		return 1
 	}
 	if rootErr == nil && requested == "" {
-		if path := findGuideInDir(filepath.Join(root, "plugins", name)); path != "" {
+		if path := findGuideInDir(filepath.Join(root, "plugins", name), registryhttp.IsOffline(ctx)); path != "" {
 			return printGuideFile(name, path)
 		}
 	}
@@ -152,8 +159,8 @@ func printGuideForPlugin(name string, selection ...string) int {
 // findGuideInDir looks for a guide file in a plugin directory.
 // It checks the manifest first (for the declared guide path), then
 // falls back to conventional filenames.
-func findGuideInDir(dir string) string {
-	if cfg, err := config.LoadPluginManifest(dir); err == nil && cfg.Plugin != nil && cfg.Plugin.Guide != "" {
+func findGuideInDir(dir string, offline ...bool) string {
+	if cfg, err := config.LoadPluginManifest(dir, offline...); err == nil && cfg.Plugin != nil && cfg.Plugin.Guide != "" {
 		guidePath := filepath.Join(dir, cfg.Plugin.Guide)
 		if _, err := os.Stat(guidePath); err == nil {
 			return guidePath

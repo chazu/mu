@@ -16,15 +16,17 @@ import (
 // buildCacheStore constructs the CAS store from mu.cue cache config. When
 // no cache block is configured, falls back to a single local disk store
 // at ~/.mu/cache. Multiple backends compose into a cas.Tiered.
-func buildCacheStore(cacheCfg *config.CacheConfig, verbose bool) (cas.Store, error) {
+func buildCacheStore(cacheCfg *config.CacheConfig, verbose bool, offline ...bool) (cas.Store, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolving home directory: %w", err)
 	}
 	defaultDisk := filepath.Join(home, ".mu", "cache")
+	localOnly := len(offline) > 0 && offline[0]
 
 	spec := cas.BuildSpec{
 		DefaultDiskPath: defaultDisk,
+		Offline:         localOnly,
 		Observer:        cacheObserver(verbose),
 	}
 

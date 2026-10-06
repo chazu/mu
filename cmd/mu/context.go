@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"context"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 const (
@@ -30,6 +32,7 @@ type cliContext struct {
 	flagJSON    *bool
 	flagVerbose *bool
 	flagNoColor *bool
+	flagOffline *bool
 
 	// Resolved values (populated by Resolve).
 	ProjectRoot string
@@ -40,6 +43,7 @@ type cliContext struct {
 	JSON    bool
 	Verbose bool
 	NoColor bool
+	Offline bool
 
 	stderr io.Writer // injectable for tests
 }
@@ -65,6 +69,7 @@ func newCLIContext(name string, fs *flag.FlagSet) *cliContext {
 		flagJSON:    fs.Bool("json", false, "output as JSON"),
 		flagVerbose: fs.Bool("verbose", false, "verbose output"),
 		flagNoColor: fs.Bool("no-color", false, "disable ANSI color output"),
+		flagOffline: fs.Bool("offline", false, "use local dependencies; disable Mu-managed registry access and downloads"),
 		stderr:      os.Stderr,
 	}
 	return c
@@ -78,6 +83,7 @@ func (c *cliContext) Resolve(opts resolveOpts) (int, bool) {
 	c.JSON = *c.flagJSON
 	c.Verbose = *c.flagVerbose
 	c.NoColor = *c.flagNoColor
+	c.Offline = *c.flagOffline
 
 	if opts.NeedConfig {
 		opts.NeedProjectRoot = true
@@ -92,7 +98,7 @@ func (c *cliContext) Resolve(opts resolveOpts) (int, bool) {
 	}
 
 	if opts.NeedConfig {
-		cfg, err := config.Load(c.ProjectRoot)
+		cfg, err := config.LoadOffline(c.ProjectRoot, c.Offline)
 		if err != nil {
 			return c.fail(exitUsage, "%v", err), false
 		}
@@ -104,12 +110,12 @@ func (c *cliContext) Resolve(opts resolveOpts) (int, bool) {
 		c.Config = cfg
 	}
 
-	if opts.NeedStore && !opts.NoCache {
+	if opts.NeedStore {
 		var cacheCfg *config.CacheConfig
 		if c.Config != nil {
 			cacheCfg = c.Config.Cache
 		}
-		store, err := buildCacheStore(cacheCfg, c.Verbose)
+		store, err := buildCacheStore(cacheCfg, c.Verbose, c.Offline)
 		if err != nil {
 			return c.fail(exitUsage, "creating cache store: %v", err), false
 		}
@@ -157,4 +163,18 @@ func (c *cliContext) CachePath() string {
 		return ""
 	}
 	return filepath.Join(home, ".mu", "cache")
+}
+
+func (c *cliContext) networkContext(ctx context.Context) context.Context {
+	if *c.flagOffline {
+		return registryhttp.WithOffline(ctx)
+	}
+	return ctx
+}
+func (c *cliContext) requireRegistry() bool {
+	if *c.flagOffline {
+		c.fail(exitUsage, "this operation requires a registry and cannot run with --offline")
+		return false
+	}
+	return true
 }

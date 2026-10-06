@@ -21,6 +21,7 @@ import (
 	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 func sha256Hex(data []byte) string {
@@ -582,5 +583,29 @@ func TestExtractZip(t *testing.T) {
 	}
 	if string(content) != "zip content" {
 		t.Errorf("file1.txt = %q, want %q", content, "zip content")
+	}
+}
+
+func TestVerifiedLocalArchiveRebuildsMissingManifestWithoutDownload(t *testing.T) {
+	archive := makeTarGz(t, map[string]string{"bin/tool": "#!/bin/sh\nexit 0\n"})
+	hash := sha256.Sum256(archive)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "downloads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "downloads", "tool-1.0.tar.gz"), archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := oci.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	builder := &Builder{Store: store, Registry: coordinator.NewToolchainRegistry(store), CacheDir: dir}
+	cfg := &config.ProjectConfig{Toolchains: []config.Toolchain{{Name: "tool", From: "scratch", Config: config.ToolchainConfig{Version: "1.0", URL: "https://unavailable.invalid/tool.tar.gz", SHA256: hex.EncodeToString(hash[:])}}}}
+	if err := builder.Build(registryhttp.WithOffline(context.Background()), cfg); err != nil {
+		t.Fatalf("verified archive required remote source: %v", err)
+	}
+	if builder.Registry.Get("tool") == nil {
+		t.Fatal("did not rebuild manifest")
 	}
 }

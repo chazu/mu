@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/chazu/mu/internal/registryhttp"
 	"io"
 	"math/rand"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"time"
 )
 
+var dependencyHTTPClient = registryhttp.NewClient(registryhttp.Options{})
+
 // maxRetries is the number of retry attempts for transient network errors.
 const maxRetries = 3
 
@@ -22,6 +25,9 @@ const maxRetries = 3
 // expectedSHA256, and atomically places it at destPath. On transient network
 // errors it retries up to 3 times with exponential backoff and jitter.
 func ForgeFetch(ctx context.Context, rawURL string, expectedSHA256 string, destPath string) error {
+	if registryhttp.IsOffline(ctx) {
+		return fmt.Errorf("fetch dependency %s: %w", rawURL, registryhttp.ErrOffline)
+	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL %q: %w", rawURL, err)
@@ -89,7 +95,7 @@ func forgeFetchOnce(ctx context.Context, rawURL string, expectedSHA256 string, d
 		return fmt.Errorf("creating request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := dependencyHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("HTTP GET %s: %w", rawURL, err)
 	}

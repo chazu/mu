@@ -43,6 +43,23 @@ func RegisterBackend(typ string, f StoreFactory) {
 // wrapper) so the hot path is identical to today. Multiple backends
 // compose into a Tiered with ReadRepair/WriteThrough as configured.
 func BuildStore(spec BuildSpec) (Store, error) {
+	if spec.Offline {
+		var local []ResolvedBackend
+		for _, b := range spec.Backends {
+			if b.Type != "oci" {
+				local = append(local, b)
+			}
+		}
+		spec.Backends = local
+	}
+	// A configured registry is an optional cache. Mu still needs local CAS for
+	// source plugins, toolchains, and rebuilt actions even with OCI-only config.
+	if len(spec.Backends) > 0 && spec.Backends[0].Type != "disk" && spec.DefaultDiskPath != "" {
+		spec.Backends = append([]ResolvedBackend{{BackendSpec: BackendSpec{Type: "disk", Path: spec.DefaultDiskPath}, Read: true, Write: true}}, spec.Backends...)
+		spec.ReadRepair = true
+		spec.WriteThrough = true // preserve configured remote writes, now best-effort
+	}
+
 	if len(spec.Backends) == 0 {
 		if spec.DefaultDiskPath == "" {
 			return nil, fmt.Errorf("cas: no cache backends configured and no default disk path")
@@ -88,6 +105,7 @@ func BuildStore(spec BuildSpec) (Store, error) {
 // BuildSpec is the input to BuildStore. The embedded Backends carries
 // layer order (0 = nearest); Observer is forwarded to any Tiered store.
 type BuildSpec struct {
+	Offline         bool
 	Backends        []ResolvedBackend
 	ReadRepair      bool
 	WriteThrough    bool

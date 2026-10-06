@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/registryhttp"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
@@ -52,7 +53,7 @@ func buildOCIStore(spec cas.BackendSpec) (cas.Store, error) {
 	}
 	// Construct a per-repository Client so we don't mutate auth.DefaultClient
 	// (which is a shared package-level singleton).
-	client := &auth.Client{Cache: auth.NewCache()}
+	client := &auth.Client{Cache: auth.NewCache(), Client: registryhttp.NewClient(registryhttp.Options{})}
 	if credStore != nil {
 		client.Credential = credentials.Credential(credStore)
 	}

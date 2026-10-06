@@ -114,7 +114,7 @@ func (m *Manager) NewlyDiscovered() []string {
 	return out
 }
 
-// Register adds a plugin definition. Call before Start.
+// Register adds a plugin definition. A later Start starts only new definitions.
 func (m *Manager) Register(def PluginDef) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -140,6 +140,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	var toStart []resolved
 	for name, entry := range m.plugins {
+		if entry.process != nil {
+			continue
+		}
 		command, err := m.resolveCommand(entry.def)
 		if err != nil {
 			return fmt.Errorf("plugin %q: %w", name, err)

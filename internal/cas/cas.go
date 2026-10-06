@@ -11,6 +11,10 @@ import (
 	"strings"
 )
 
+// ErrUnavailable marks a remote backend outage, rather than a confirmed miss.
+// Optional result caches may fall back; missing required artifacts must report it.
+var ErrUnavailable = errors.New("remote cache unavailable")
+
 // Digest identifies a blob by its hash algorithm and hex-encoded hash value.
 type Digest struct {
 	Algorithm string // "sha256"

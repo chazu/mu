@@ -38,7 +38,7 @@ func runPluginSearch(args []string) int {
 		return exitUsage
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cli.networkContext(context.Background()), 30*time.Second)
 	defer cancel()
 	catalog, err := plugincatalog.Fetch(ctx, *catalogURL)
 	if err != nil {
@@ -92,7 +92,7 @@ func runPluginInstall(args []string) int {
 		return code
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(cli.networkContext(context.Background()), 10*time.Minute)
 	defer cancel()
 	catalog, err := plugincatalog.Fetch(ctx, *catalogURL)
 	if err != nil {
@@ -134,7 +134,7 @@ func runPluginUpdate(args []string) int {
 		return cli.fail(exitFail, "no plugins are locked; run mu plugin install first")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(cli.networkContext(context.Background()), 10*time.Minute)
 	defer cancel()
 	catalog, err := plugincatalog.Fetch(ctx, *catalogURL)
 	if err != nil {
@@ -244,14 +244,9 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 	var resolved coordinator.ResolvedPlugin
 	if previous, ok := lock.Find(selected.Name); ok && previous.Version == selected.Version &&
 		previous.AssetSHA256 == selected.SHA256 && previous.BundleDigest != "" {
-		bundleDigest, parseErr := cas.ParseDigest(previous.BundleDigest)
-		if parseErr == nil {
-			if present, hasErr := cli.Store.Has(ctx, bundleDigest); hasErr == nil && present {
-				cached, resolveErr := resolver.Resolve(ctx, []config.PluginDef{{Name: selected.Name, Digest: previous.BundleDigest}})
-				if resolveErr == nil && len(cached) == 1 {
-					resolved = cached[0]
-				}
-			}
+		cached, resolveErr := resolver.Resolve(ctx, []config.PluginDef{{Name: selected.Name, Digest: previous.BundleDigest}})
+		if resolveErr == nil && len(cached) == 1 {
+			resolved = cached[0]
 		}
 	}
 

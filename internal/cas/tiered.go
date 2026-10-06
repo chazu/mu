@@ -75,12 +75,16 @@ func (t *Tiered) policy(i int) LayerPolicy {
 
 // Has returns true if any read-permitted layer has the blob.
 func (t *Tiered) Has(ctx context.Context, dgst Digest) (bool, error) {
+	var firstErr error
 	for i, l := range t.Layers {
 		if !t.policy(i).Read {
 			continue
 		}
 		ok, err := l.Has(ctx, dgst)
 		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			t.emit(TieredEvent{Op: "has", Layer: i, LayerName: t.layerName(i), Outcome: "error", Digest: dgst, Err: err})
 			continue
 		}
@@ -90,13 +94,16 @@ func (t *Tiered) Has(ctx context.Context, dgst Digest) (bool, error) {
 		}
 	}
 	t.emit(TieredEvent{Op: "has", Outcome: "miss", Digest: dgst})
-	return false, nil
+	return false, firstErr
 }
 
 // Get walks layers for a blob. Read repair uses a private temporary file to
 // bound memory independently of blob size. The returned reader owns that file;
 // callers must Close it, including when abandoning a partial read.
 func (t *Tiered) Get(ctx context.Context, dgst Digest) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var hitLayer = -1
 	var hitReader io.ReadCloser
 	var firstErr error
@@ -272,6 +279,9 @@ func (t *Tiered) Delete(ctx context.Context, dgst Digest) error {
 // referenced output blobs are eagerly repaired in the same pass so that
 // a subsequent Get hits the local tier too.
 func (t *Tiered) GetActionResult(ctx context.Context, key ActionKey) (*ActionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var hit *ActionResult
 	var hitLayer = -1
 	var firstErr error

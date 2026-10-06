@@ -40,6 +40,10 @@ func runPluginPush(args []string) int {
 		return c.fail(exitUsage, "%v", err)
 	}
 
+	if !c.requireRegistry() {
+		return exitUsage
+	}
+
 	if code, ok := c.Resolve(resolveOpts{NeedConfig: true, ValidateConfig: true}); !ok {
 		return code
 	}
@@ -68,7 +72,7 @@ func runPluginPush(args []string) int {
 		return c.fail(exitFail, "no target %q or %q found in config", candidates[0], candidates[1])
 	}
 
-	result, err := buildTargets(c.ProjectRoot, c.Config, []string{targetName})
+	result, err := buildTargets(c.ProjectRoot, c.Config, []string{targetName}, c.networkContext(context.Background()))
 	if err != nil {
 		return c.fail(exitFail, "build %s: %v", targetName, err)
 	}
@@ -82,7 +86,7 @@ func runPluginPush(args []string) int {
 		// output; current plugin mu.cue layouts have no-op build targets that
 		// produce nothing. Fall back to resolving the plugin the same way
 		// `mu plugin info` does (project resolver, then ~/.mu/plugins cache).
-		if _, _, dgst, err = resolveInfoTarget(c.ProjectRoot, c.Config, name); err != nil {
+		if _, _, dgst, err = resolveInfoTarget(c.networkContext(context.Background()), c.ProjectRoot, c.Config, name); err != nil {
 			return c.fail(exitFail, "no plugin output from build, and plugin resolve failed: %v", err)
 		}
 		if dgst.Hash == "" {
@@ -155,7 +159,7 @@ func runPluginPush(args []string) int {
 		return c.fail(exitFail, "%v", err)
 	}
 
-	ctx := context.Background()
+	ctx := c.networkContext(context.Background())
 	subject, err := pushPluginToRegistry(ctx, pluginRepo, indexRepo, cfg, files)
 	if err != nil {
 		return c.fail(exitFail, "push plugin: %v", err)

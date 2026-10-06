@@ -22,6 +22,7 @@ import (
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
 	"github.com/chazu/mu/internal/plugin"
+	"github.com/chazu/mu/internal/registryhttp"
 	"github.com/chazu/mu/internal/scratch"
 )
 
@@ -103,7 +104,7 @@ func runPluginAdd(args []string) int {
 	}
 
 	// Build the plugin target.
-	result, err := buildTargets(projectRoot, cfg, []string{targetName})
+	result, err := buildTargets(projectRoot, cfg, []string{targetName}, cli.networkContext(context.Background()))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin add: %v\n", err)
 		return 1
@@ -141,6 +142,8 @@ func runPluginList(args []string) int {
 		return exitUsage
 	}
 
+	cli.JSON = *cli.flagJSON
+
 	// --remote --cached: show remote plugins annotated with local cache status.
 	// Must be checked before the individual --cached and --remote branches.
 	if *remote && *cached && !*discover {
@@ -170,7 +173,7 @@ func runPluginList(args []string) int {
 	jsonOut := &cli.JSON
 
 	if *cached && *discover {
-		return pluginListCachedDiscover(cfg, projectRoot, *jsonOut)
+		return pluginListCachedDiscover(cfg, projectRoot, *jsonOut, cli.networkContext(context.Background()))
 	}
 
 	if len(cfg.Plugins) == 0 {
@@ -249,7 +252,7 @@ func pluginListCached(_ *config.ProjectConfig, _ string, jsonOut bool) int {
 
 // pluginListCachedDiscover builds all //plugins/* targets, extracts them from
 // CAS, starts each as a plugin process, runs discover, and shows combined info.
-func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
+func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut bool, ctx context.Context) int {
 	if err := config.Validate(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
 		return 2
@@ -269,7 +272,7 @@ func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jso
 	}
 
 	// Build to get digests.
-	result, err := buildTargets(projectRoot, cfg, targets)
+	result, err := buildTargets(projectRoot, cfg, targets, ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
 		return 1
@@ -320,7 +323,7 @@ func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jso
 		}
 
 		resolver := &coordinator.PluginResolver{Store: store, CacheDir: cacheDir, ProjectRoot: projectRoot}
-		destPath, extractErr := resolver.ExtractFile(context.Background(), name, dgst, "plugin"+ext)
+		destPath, extractErr := resolver.ExtractFile(ctx, name, dgst, "plugin"+ext)
 		if extractErr != nil {
 			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", extractErr)
 			return 1
@@ -362,7 +365,7 @@ func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jso
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if err := mgr.Start(ctx); err != nil {
@@ -588,14 +591,14 @@ func resolveBbPath() string {
 }
 
 // buildTargets sets up a Coordinator and builds the given targets.
-func buildTargets(projectRoot string, cfg *config.ProjectConfig, targets []string) (*coordinator.BuildResult, error) {
+func buildTargets(projectRoot string, cfg *config.ProjectConfig, targets []string, parent context.Context) (*coordinator.BuildResult, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolving home directory: %w", err)
 	}
 
 	cachePath := filepath.Join(home, ".mu", "cache")
-	store, err := oci.NewLocal(cachePath)
+	store, err := buildCacheStore(cfg.Cache, false, registryhttp.IsOffline(parent))
 	if err != nil {
 		return nil, fmt.Errorf("creating cache store: %w", err)
 	}
@@ -617,7 +620,7 @@ func buildTargets(projectRoot string, cfg *config.ProjectConfig, targets []strin
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt)
 	defer stop()
 
 	return c.Build(ctx, targets)

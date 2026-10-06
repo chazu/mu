@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chazu/mu/internal/cas/oci"
 )
@@ -45,8 +48,7 @@ func listFromBackend(ctx context.Context, backend string, indexRepo oci.Registry
 	for _, name := range idx.Plugins {
 		pluginRepo, err := openPluginRepo(name)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %s/%s: %v\n", backend, name, err)
-			continue
+			return rows, fmt.Errorf("plugin %s/%s: %w", backend, name, err)
 		}
 		err = pluginRepo.Tags(ctx, "", func(tags []string) error {
 			for _, t := range tags {
@@ -55,9 +57,10 @@ func listFromBackend(ctx context.Context, backend string, indexRepo oci.Registry
 				}
 				cfg, ferr := oci.FetchPluginConfig(ctx, pluginRepo, t)
 				if ferr != nil {
-					// Skip foreign artifacts silently — index promised a plugin,
-					// but this tag may be unrelated. Log only at verbose.
-					continue
+					if errors.Is(ferr, oci.ErrNotPlugin) {
+						continue
+					}
+					return fmt.Errorf("plugin %s/%s tag %s: %w", backend, name, t, ferr)
 				}
 				rows = append(rows, remotePlugin{
 					Name:     cfg.Name,
@@ -69,8 +72,11 @@ func listFromBackend(ctx context.Context, backend string, indexRepo oci.Registry
 			return nil
 		})
 		if err != nil {
-			// Tag listing unsupported (some registries lack /v2/<n>/tags/list).
-			// The index told us this plugin exists; emit an unversioned row.
+			var response *errcode.ErrorResponse
+			if !errors.As(err, &response) || (response.StatusCode != 404 && response.StatusCode != 405) {
+				return rows, fmt.Errorf("list plugin %s/%s: %w", backend, name, err)
+			}
+			// Only an explicitly unsupported tag endpoint yields an unversioned row.
 			rows = append(rows, remotePlugin{
 				Name:     name,
 				Version:  "?",
@@ -84,21 +90,22 @@ func listFromBackend(ctx context.Context, backend string, indexRepo oci.Registry
 // gatherRemotePlugins iterates configured backends and returns all discovered
 // plugins. Errors against individual backends are written to stderr and the
 // scan continues.
-func gatherRemotePlugins(ctx context.Context, c *cliContext) []remotePlugin {
+func gatherRemotePlugins(ctx context.Context, c *cliContext) ([]remotePlugin, error) {
 	refs := resolveRemoteBackendRefs(c)
 	if len(refs) == 0 {
 		fmt.Fprintln(os.Stderr,
 			`no remote backends configured. Either:
   - run from a project with cache.backends (oci type) configured, or
   - set MU_CACHE_BACKENDS="<registry>/<repository>[,<registry>/<repository>...]"`)
-		return nil
+		return nil, fmt.Errorf("no remote backends configured")
 	}
+	var failures []error
 	var all []remotePlugin
 	for _, ref := range refs {
 		indexRepoRef := ref + "/" + oci.PluginIndexRef
 		indexRepo, err := newPushRepository(indexRepoRef)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "backend %s: %v\n", ref, err)
+			failures = append(failures, fmt.Errorf("backend %s: %w", ref, err))
 			continue
 		}
 		opener := func(name string) (oci.Registry, error) {
@@ -106,19 +113,28 @@ func gatherRemotePlugins(ctx context.Context, c *cliContext) []remotePlugin {
 		}
 		rows, err := listFromBackend(ctx, ref, indexRepo, opener)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
+			failures = append(failures, err)
 			continue
 		}
 		all = append(all, rows...)
 	}
-	return all
+	return all, errors.Join(failures...)
 }
 
 // runPluginListRemote is the CLI entry point for `mu plugin list --remote`.
 // Prints rows for plugins discovered across all configured remote backends.
 func runPluginListRemote(c *cliContext, jsonOut bool) int {
-	ctx := context.Background()
-	all := gatherRemotePlugins(ctx, c)
+	if !c.requireRegistry() {
+		return exitUsage
+	}
+	ctx, cancel := context.WithTimeout(c.networkContext(context.Background()), 30*time.Second)
+	defer cancel()
+	all, scanErr := gatherRemotePlugins(ctx, c)
+	code := exitOK
+	if scanErr != nil {
+		c.fail(exitFail, "%v", scanErr)
+		code = exitFail
+	}
 
 	if jsonOut {
 		enc := json.NewEncoder(os.Stdout)
@@ -127,13 +143,13 @@ func runPluginListRemote(c *cliContext, jsonOut bool) int {
 			fmt.Fprintf(os.Stderr, "encode JSON: %v\n", err)
 			return exitFail
 		}
-		return exitOK
+		return code
 	}
 
 	if len(all) == 0 {
 		// Either backends weren't configured (gatherRemotePlugins printed) or
 		// no plugins were found. Print a benign message in the latter case.
-		return exitOK
+		return code
 	}
 
 	fmt.Printf("%-20s %-25s %-40s %s\n", "PLUGIN", "VERSION", "LOCATION", "DIGEST")
@@ -144,7 +160,7 @@ func runPluginListRemote(c *cliContext, jsonOut bool) int {
 		}
 		fmt.Printf("%-20s %-25s %-40s %s\n", r.Name, r.Version, r.Location, dig)
 	}
-	return exitOK
+	return code
 }
 
 // runPluginListRemoteCached prints remote plugins annotated with whether each
@@ -152,8 +168,17 @@ func runPluginListRemote(c *cliContext, jsonOut bool) int {
 // and `--cached` (cached column), focused on the remote view since local-only
 // plugins are already discoverable via `--cached` alone.
 func runPluginListRemoteCached(c *cliContext, jsonOut bool) int {
-	ctx := context.Background()
-	remote := gatherRemotePlugins(ctx, c)
+	if !c.requireRegistry() {
+		return exitUsage
+	}
+	ctx, cancel := context.WithTimeout(c.networkContext(context.Background()), 30*time.Second)
+	defer cancel()
+	remote, scanErr := gatherRemotePlugins(ctx, c)
+	code := exitOK
+	if scanErr != nil {
+		c.fail(exitFail, "%v", scanErr)
+		code = exitFail
+	}
 	local := localPluginNames()
 	rows := mergeLocalRemote(remote, local)
 
@@ -164,11 +189,11 @@ func runPluginListRemoteCached(c *cliContext, jsonOut bool) int {
 			fmt.Fprintf(os.Stderr, "encode JSON: %v\n", err)
 			return exitFail
 		}
-		return exitOK
+		return code
 	}
 
 	if len(rows) == 0 {
-		return exitOK
+		return code
 	}
 
 	fmt.Printf("%-20s %-25s %-40s %-7s %s\n", "PLUGIN", "VERSION", "LOCATION", "CACHED", "DIGEST")
@@ -183,7 +208,7 @@ func runPluginListRemoteCached(c *cliContext, jsonOut bool) int {
 		}
 		fmt.Printf("%-20s %-25s %-40s %-7s %s\n", r.Name, r.Version, r.Location, cached, dig)
 	}
-	return exitOK
+	return code
 }
 
 // localPluginNames returns the names of plugins extracted under

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chazu/mu/internal/registryhttp"
 	"golang.org/x/term"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -34,6 +35,10 @@ func runCacheLogin(args []string) int {
 		return exitUsage
 	}
 
+	if !c.requireRegistry() {
+		return exitUsage
+	}
+
 	if code, ok := c.Resolve(resolveOpts{NeedConfig: true}); !ok {
 		return code
 	}
@@ -54,7 +59,7 @@ func runCacheLogin(args []string) int {
 		return code
 	}
 
-	ctx := context.Background()
+	ctx := c.networkContext(context.Background())
 
 	reg, err := remote.NewRegistry(registry)
 	if err != nil {
@@ -63,6 +68,8 @@ func runCacheLogin(args []string) int {
 	if isLocalRegistryHost(registry) {
 		reg.PlainHTTP = true
 	}
+
+	reg.Client = &auth.Client{Client: registryhttp.NewClient(registryhttp.Options{}), Cache: auth.NewCache()}
 
 	store, err := openCredentialStore()
 	if err != nil {

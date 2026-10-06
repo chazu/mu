@@ -20,10 +20,13 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
+	"time"
 
 	"net/http"
 
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/registryhttp"
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -61,20 +64,36 @@ type Registry interface {
 	Resolve(ctx context.Context, reference string) (ocispec.Descriptor, error)
 	// Tags enumerates tag names in lexical order, calling fn for each page.
 	// last is the tag to start after (empty = from the beginning). Backends
-	// without /v2/<name>/tags/list support may return an error; callers
-	// should treat that as "no plugins discoverable here," not as a fatal
-	// failure of the whole list operation.
+	// without /v2/<name>/tags/list support may return 404/405. Transport
+	// failures must be distinguished from unsupported discovery.
 	Tags(ctx context.Context, last string, fn func(tags []string) error) error
 }
 
 // OCIStore is a CAS backend that stores blobs and action results in an OCI registry.
 type OCIStore struct {
-	repo Registry
+	repo          Registry
+	mu            sync.Mutex
+	outage        error
+	lookupTimeout time.Duration
+	probeGate     chan struct{}
+	reachable     bool
 }
 
 // New creates an OCIStore backed by the given registry.
 func New(repo Registry) *OCIStore {
-	return &OCIStore{repo: repo}
+	s := &OCIStore{repo: repo}
+	if remoteRepo, ok := repo.(*remote.Repository); ok {
+		if remoteRepo.Client == nil || remoteRepo.Client == auth.DefaultClient {
+			client := *auth.DefaultClient
+			client.Client = registryhttp.NewClient(registryhttp.Options{})
+			client.Cache = auth.NewCache()
+			remoteRepo.Client = &client
+		}
+		s.lookupTimeout = registryhttp.LookupTimeout
+		s.probeGate = make(chan struct{}, 1)
+		s.probeGate <- struct{}{}
+	}
+	return s
 }
 
 // NewLocal creates an OCIStore backed by a local OCI layout directory.
@@ -102,13 +121,28 @@ func fromOCIDigest(d godigest.Digest) cas.Digest {
 
 // Has reports whether the blob identified by dgst exists in the registry.
 func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
+	if err := s.available(ctx); err != nil {
+		return false, err
+	}
+	done, err := s.beginLookup(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer done()
+
+	parentCtx := ctx
+	if s.lookupTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.lookupTimeout)
+		defer cancel()
+	}
 	desc := ocispec.Descriptor{
 		MediaType: MediaTypeMuBlob,
 		Digest:    toOCIDigest(dgst),
 	}
 	ok, err := s.repo.Exists(ctx, desc)
 	if err != nil {
-		return false, fmt.Errorf("oci: check blob %s: %w", dgst, err)
+		return false, s.failed(parentCtx, fmt.Errorf("oci: check blob %s: %w", dgst, err))
 	}
 	return ok, nil
 }
@@ -120,6 +154,9 @@ func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
 // (HEAD for remote; layout index for local) and populate the descriptor
 // before fetching.
 func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
+	if err := s.available(ctx); err != nil {
+		return nil, err
+	}
 	ocidgst := toOCIDigest(dgst)
 
 	// Remote repositories: bypass oras-go's blobStore.Fetch, which refuses
@@ -129,7 +166,11 @@ func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, err
 	// when GET works — so we can't reliably populate the size up front.
 	// Go straight to a GET through the authed client.
 	if rr, ok := s.repo.(*remote.Repository); ok {
-		return remoteBlobGet(ctx, rr, ocidgst)
+		rc, err := remoteBlobGet(ctx, rr, ocidgst)
+		if err != nil {
+			return nil, s.failed(ctx, err)
+		}
+		return &outageReader{ReadCloser: rc, store: s, ctx: ctx}, nil
 	}
 
 	desc := ocispec.Descriptor{
@@ -190,6 +231,9 @@ func remoteBlobGet(ctx context.Context, rr *remote.Repository, dgst godigest.Dig
 // to the registry. OCI requires a content-length, so the data is buffered to
 // a temporary file first.
 func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
+	if err := s.available(ctx); err != nil {
+		return cas.Digest{}, err
+	}
 	// Buffer to temp file to get size (OCI requires content-length).
 	tmp, err := os.CreateTemp("", "mu-oci-blob-*")
 	if err != nil {
@@ -226,7 +270,7 @@ func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
 	if err := s.repo.Push(ctx, desc, f); err != nil {
 		// Already-exists is fine for content-addressed dedup.
 		if !isAlreadyExists(err) {
-			return cas.Digest{}, fmt.Errorf("oci: push blob: %w", err)
+			return cas.Digest{}, s.failed(ctx, fmt.Errorf("oci: push blob: %w", err))
 		}
 	}
 
@@ -235,6 +279,9 @@ func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
 
 // Delete removes the blob identified by dgst from the registry.
 func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
+	if err := s.available(ctx); err != nil {
+		return err
+	}
 	desc := ocispec.Descriptor{
 		MediaType: MediaTypeMuBlob,
 		Digest:    toOCIDigest(dgst),
@@ -249,6 +296,9 @@ func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
 // action key hash. Each output artifact becomes a layer descriptor, and the
 // result metadata is stored as the config blob.
 func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, result *cas.ActionResult) error {
+	if err := s.available(ctx); err != nil {
+		return err
+	}
 	// Serialise the action result as the config blob.
 	configBytes, err := json.Marshal(result)
 	if err != nil {
@@ -265,7 +315,7 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 	// Push config blob.
 	if err := s.repo.Push(ctx, configDesc, bytes.NewReader(configBytes)); err != nil {
 		if !isAlreadyExists(err) {
-			return fmt.Errorf("oci: push action config: %w", err)
+			return s.failed(ctx, fmt.Errorf("oci: push action config: %w", err))
 		}
 	}
 
@@ -336,7 +386,7 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 	// Tag the manifest with the action key for lookup.
 	tag := actionKeyToTag(key)
 	if err := s.repo.Tag(ctx, manifestDesc, tag); err != nil {
-		return fmt.Errorf("oci: tag action manifest: %w", err)
+		return s.failed(ctx, fmt.Errorf("oci: tag action manifest: %w", err))
 	}
 
 	return nil
@@ -345,6 +395,21 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 // GetActionResult retrieves an action result by resolving the tag derived from
 // the action key. Returns (nil, nil) on a cache miss.
 func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
+	if err := s.available(ctx); err != nil {
+		return nil, err
+	}
+	done, err := s.beginLookup(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+
+	parentCtx := ctx
+	if s.lookupTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.lookupTimeout)
+		defer cancel()
+	}
 	tag := actionKeyToTag(key)
 
 	// Resolve the tag to get the manifest descriptor.
@@ -353,16 +418,16 @@ func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas
 		if isNotFound(err) {
 			return nil, nil // cache miss
 		}
-		return nil, fmt.Errorf("oci: resolve action tag %s: %w", tag, err)
+		return nil, s.failed(parentCtx, fmt.Errorf("oci: resolve action tag %s: %w", tag, err))
 	}
 
 	var manifest ocispec.Manifest
 	if err := fetchMetadata(ctx, s.repo, manifestDesc, "action manifest", MaxManifestBytes, &manifest); err != nil {
-		return nil, err
+		return nil, s.failed(parentCtx, err)
 	}
 	var result cas.ActionResult
 	if err := fetchMetadata(ctx, s.repo, manifest.Config, "action result", MaxActionConfigBytes, &result); err != nil {
-		return nil, err
+		return nil, s.failed(parentCtx, err)
 	}
 
 	return &result, nil
@@ -379,4 +444,87 @@ func isAlreadyExists(err error) bool {
 
 func isNotFound(err error) bool {
 	return errors.Is(err, errdef.ErrNotFound)
+}
+
+// An OCIStore created for a CLI invocation remembers an unhealthy registry.
+// Fresh commands construct a fresh store and retry; concurrent in-flight reads
+// may still finish, but later actions never pay another outage probe.
+func (s *OCIStore) available(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outage
+}
+func (s *OCIStore) failed(ctx context.Context, err error) error {
+	if _, remoteBackend := s.repo.(*remote.Repository); !remoteBackend || isNotFound(err) {
+		return err
+	}
+	// Caller cancellation must not poison a healthy registry. The lookup's own
+	// timeout is still an outage; distinguish it by the already established probe.
+	if ctx.Err() != nil {
+		return err
+	}
+	wrapped := fmt.Errorf("%w: %w", cas.ErrUnavailable, err)
+	s.mu.Lock()
+	if s.outage == nil {
+		s.outage = wrapped
+	}
+	s.mu.Unlock()
+	return wrapped
+}
+
+type outageReader struct {
+	io.ReadCloser
+	store *OCIStore
+	ctx   context.Context
+}
+
+func (r *outageReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = r.store.failed(r.ctx, err)
+	}
+	return n, err
+}
+
+// Serialize only the first reachability probe. Concurrent cold actions share
+// one outage penalty, while a healthy registry immediately regains parallelism.
+func (s *OCIStore) beginLookup(ctx context.Context) (func(), error) {
+	noop := func() {}
+	if s.probeGate == nil {
+		return noop, nil
+	}
+	s.mu.Lock()
+	known := s.reachable
+	s.mu.Unlock()
+	if known {
+		return noop, s.available(ctx)
+	}
+	select {
+	case <-ctx.Done():
+		return noop, ctx.Err()
+	case <-s.probeGate:
+	}
+	release := func() { s.probeGate <- struct{}{} }
+	if err := s.available(ctx); err != nil {
+		release()
+		return noop, err
+	}
+	s.mu.Lock()
+	known = s.reachable
+	s.mu.Unlock()
+	if known {
+		release()
+		return noop, nil
+	}
+	return func() {
+		s.mu.Lock()
+		if s.outage == nil && ctx.Err() == nil {
+			s.reachable = true
+		}
+		s.mu.Unlock()
+		release()
+	}, nil
 }

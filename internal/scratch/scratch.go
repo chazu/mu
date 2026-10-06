@@ -47,9 +47,12 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 
 	// Check CAS for existing manifest (cache hit -> skip).
 	existing, err := b.Registry.Lookup(ctx, name, version)
-	if err != nil {
-		return fmt.Errorf("lookup: %w", err)
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
+	if err != nil {
+		existing = nil
+	} // receipt caches are optional; verified archives can rebuild them
 	if existing != nil {
 		return nil
 	}
@@ -60,8 +63,21 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 		return fmt.Errorf("create download dir: %w", err)
 	}
 
-	if err := builtin.ForgeFetch(ctx, tc.Config.URL, tc.Config.SHA256, archivePath); err != nil {
-		return fmt.Errorf("fetch: %w", err)
+	// An extracted tree alone cannot prove the configured archive identity.
+	// Reuse only a local archive whose bytes match the declared SHA-256.
+	cached := func() bool {
+		f, err := os.Open(archivePath)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		actual, err := cas.ComputeDigest(cas.ContextReader(ctx, f))
+		return err == nil && actual.Hash == tc.Config.SHA256
+	}()
+	if !cached {
+		if err := builtin.ForgeFetch(ctx, tc.Config.URL, tc.Config.SHA256, archivePath); err != nil {
+			return fmt.Errorf("required toolchain archive unavailable locally: %w", err)
+		}
 	}
 
 	// Extract the archive.

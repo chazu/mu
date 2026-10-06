@@ -30,6 +30,7 @@ type ToolchainBuilder interface {
 
 // Coordinator orchestrates the full mu build flow.
 type Coordinator struct {
+	NoCache           bool
 	ProjectRoot       string
 	Config            *config.ProjectConfig
 	Store             cas.Store
@@ -112,16 +113,25 @@ type PluginIdentity struct {
 // Plugins are shut down before returning. The resulting Graph is ready for
 // execution or inspection (--plan mode).
 func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResult, error) {
-	// 1. Build toolchains from scratch (must happen before plugins, since plugins
-	//    may need a scratch-built runtime like bb).
+	targets, err := c.resolveTargets(targetNames)
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
+	needed := make(map[string]bool)
+	for _, target := range targets {
+		if len(target.Plan) == 0 {
+			needed[target.Toolchain] = true
+		}
+	}
+	var planningPlugins []config.PluginDef
+	for _, definition := range c.Config.Plugins {
+		if needed[definition.Name] {
+			planningPlugins = append(planningPlugins, definition)
+		}
+	}
 	registry := c.ToolchainRegistry
 	if registry == nil {
 		registry = NewToolchainRegistry(c.Store)
-	}
-	if len(c.Config.Toolchains) > 0 && c.Builder != nil {
-		if err := c.Builder.Build(ctx, c.Config); err != nil {
-			return nil, fmt.Errorf("coordinator: scratch build: %w", err)
-		}
 	}
 
 	// 2. Resolve plugins → CAS (hash local scripts or fetch remote ones).
@@ -131,9 +141,29 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		ProjectRoot: c.ProjectRoot,
 		CacheDir:    filepath.Join(home, ".mu", "plugins"),
 	}
-	resolvedPlugins, err := resolver.Resolve(ctx, c.Config.Plugins)
+	resolvedPlugins, err := resolver.Resolve(ctx, planningPlugins)
 	if err != nil {
 		return nil, fmt.Errorf("coordinator: %w", err)
+	}
+
+	if c.Builder != nil {
+		for _, rp := range resolvedPlugins {
+			if rp.Def.Toolchain != "" {
+				needed[rp.Def.Toolchain] = true
+			}
+		}
+		subset := *c.Config
+		subset.Toolchains = nil
+		for _, tc := range c.Config.Toolchains {
+			if needed[tc.Name] {
+				subset.Toolchains = append(subset.Toolchains, tc)
+			}
+		}
+		if len(subset.Toolchains) > 0 {
+			if err := c.Builder.Build(ctx, &subset); err != nil {
+				return nil, fmt.Errorf("coordinator: scratch build required toolchains: %w", err)
+			}
+		}
 	}
 
 	// 3. Start plugins.
@@ -148,7 +178,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	}
 
 	// If any plugin uses "script", resolve the bb binary from the toolchain registry.
-	if needsScriptRuntime(c.Config.Plugins, c.ProjectRoot) {
+	if resolvedNeedsRuntime(resolvedPlugins) {
 		bbPath, err := c.resolveScriptRuntime(ctx, registry)
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: %w", err)
@@ -209,10 +239,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	}
 
 	// 4. Resolve target graph (topological order, leaves first).
-	targets, err := c.resolveTargets(targetNames)
-	if err != nil {
-		return nil, fmt.Errorf("coordinator: %w", err)
-	}
+	// The target set was resolved before any dependency bootstrap.
 
 	// 5. Validate target configs against plugin schemas.
 	for _, t := range targets {
@@ -402,6 +429,52 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 				producerForPath[outPath] = a.ID
 			}
 		}
+	}
+
+	// Action-level sealed claims can introduce providers unknown until planning.
+	// Resolve only those providers now and retain these exact artifacts for Execute.
+	known := make(map[string]bool)
+	for _, rp := range resolvedPlugins {
+		known[rp.Def.Name] = true
+	}
+	requiredProviders := make(map[string]bool)
+	for _, action := range graph.Actions() {
+		for _, refs := range []map[string]string{action.SealedInputs, action.SealedOutputs} {
+			for _, ref := range refs {
+				scheme, _, ok := parseSecretRef(ref)
+				if ok && scheme != "env" && !known[scheme] {
+					requiredProviders[scheme] = true
+				}
+			}
+		}
+	}
+	var providerDefinitions []config.PluginDef
+	for _, definition := range c.Config.Plugins {
+		if requiredProviders[definition.Name] {
+			providerDefinitions = append(providerDefinitions, definition)
+		}
+	}
+	if len(providerDefinitions) > 0 {
+		providers, err := resolver.Resolve(ctx, providerDefinitions)
+		if err != nil {
+			return nil, err
+		}
+		if resolvedNeedsRuntime(providers) {
+			bb, err := c.resolveScriptRuntime(ctx, registry)
+			if err != nil {
+				return nil, err
+			}
+			mgr.SetScriptRuntime(bb)
+		}
+		for _, rp := range providers {
+			if err := mgr.Register(rp.Def); err != nil {
+				return nil, err
+			}
+		}
+		if err := mgr.Start(ctx); err != nil {
+			return nil, err
+		}
+		resolvedPlugins = append(resolvedPlugins, providers...)
 	}
 
 	// 7. Identify provider plugins needed at execute time for any
@@ -671,6 +744,7 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	}
 
 	executor := &dag.Executor{
+		NoCache:             c.NoCache,
 		Store:               c.Store,
 		Workers:             workers,
 		SealedInputResolver: resolver,
@@ -779,7 +853,7 @@ func (c *Coordinator) runAfterBuildAdvice(ctx context.Context, result *BuildResu
 	}
 
 	mgr := plugin.NewManager(c.ProjectRoot)
-	if needsScriptRuntime(toResolve, c.ProjectRoot) {
+	if resolvedNeedsRuntime(resolved) {
 		registry := c.ToolchainRegistry
 		if registry == nil {
 			registry = NewToolchainRegistry(c.Store)
@@ -917,11 +991,6 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 	if registry == nil {
 		registry = NewToolchainRegistry(c.Store)
 	}
-	if len(c.Config.Toolchains) > 0 && c.Builder != nil {
-		if err := c.Builder.Build(ctx, c.Config); err != nil {
-			return nil, fmt.Errorf("coordinator: scratch build: %w", err)
-		}
-	}
 
 	// 2. Resolve targets.
 	targets, err := c.resolveTargets(targetNames)
@@ -947,13 +1016,6 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 	mgr := plugin.NewManager(c.ProjectRoot)
 
 	if len(neededPlugins) > 0 {
-		if needsScriptRuntime(c.Config.Plugins, c.ProjectRoot) {
-			bbPath, err := c.resolveScriptRuntime(ctx, registry)
-			if err != nil {
-				return nil, fmt.Errorf("coordinator: %w", err)
-			}
-			mgr.SetScriptRuntime(bbPath)
-		}
 
 		home, _ := os.UserHomeDir()
 		resolver := &PluginResolver{
@@ -961,9 +1023,44 @@ func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]Obse
 			ProjectRoot: c.ProjectRoot,
 			CacheDir:    filepath.Join(home, ".mu", "plugins"),
 		}
-		resolvedPlugins, err := resolver.Resolve(ctx, c.Config.Plugins)
+		resolvedPlugins, err := resolver.Resolve(ctx, func() []config.PluginDef {
+			var selected []config.PluginDef
+			for _, p := range c.Config.Plugins {
+				if neededPlugins[p.Name] {
+					selected = append(selected, p)
+				}
+			}
+			return selected
+		}())
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: %w", err)
+		}
+
+		if c.Builder != nil {
+			for _, rp := range resolvedPlugins {
+				if rp.Def.Toolchain != "" {
+					neededPlugins[rp.Def.Toolchain] = true
+				}
+			}
+			subset := *c.Config
+			subset.Toolchains = nil
+			for _, tc := range c.Config.Toolchains {
+				if neededPlugins[tc.Name] {
+					subset.Toolchains = append(subset.Toolchains, tc)
+				}
+			}
+			if len(subset.Toolchains) > 0 {
+				if err := c.Builder.Build(ctx, &subset); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if resolvedNeedsRuntime(resolvedPlugins) {
+			bb, err := c.resolveScriptRuntime(ctx, registry)
+			if err != nil {
+				return nil, err
+			}
+			mgr.SetScriptRuntime(bb)
 		}
 
 		for _, rp := range resolvedPlugins {
@@ -1424,6 +1521,21 @@ func needsScriptRuntime(plugins []config.PluginDef, projectRoot string) bool {
 // and returns its filesystem path. The bb toolchain must be built from scratch first.
 func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *ToolchainRegistry) (string, error) {
 	m := registry.Get("bb")
+	if m == nil && c.Builder != nil {
+		subset := *c.Config
+		subset.Toolchains = nil
+		for _, tc := range c.Config.Toolchains {
+			if tc.Name == "bb" {
+				subset.Toolchains = append(subset.Toolchains, tc)
+			}
+		}
+		if len(subset.Toolchains) > 0 {
+			if err := c.Builder.Build(ctx, &subset); err != nil {
+				return "", fmt.Errorf("required bb runtime: %w", err)
+			}
+		}
+		m = registry.Get("bb")
+	}
 	if m == nil {
 		return "", fmt.Errorf("plugin uses \"script\" but no \"bb\" toolchain is defined; add a bb toolchain to your config")
 	}
@@ -1444,4 +1556,13 @@ func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *Toolch
 	baseDir := filepath.Join(home, ".mu", "toolchains")
 
 	return registry.ExtractBinary(ctx, "bb", artifact, baseDir)
+}
+
+func resolvedNeedsRuntime(plugins []ResolvedPlugin) bool {
+	for _, p := range plugins {
+		if p.Def.Toolchain == "bb" {
+			return true
+		}
+	}
+	return false
 }

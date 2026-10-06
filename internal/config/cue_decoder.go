@@ -10,6 +10,8 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
 	"cuelang.org/go/cue/load"
+	"cuelang.org/go/mod/modconfig"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 // schemaCUE embeds internal/config/schema.cue so the CUE decoder can
@@ -37,12 +39,12 @@ var schemaCUE []byte
 // that inspect schema-free maps such as Target.Config MUST handle both
 // shapes. The ToFloat64 / ToInt64 helpers in numconv.go (mcm-07) do
 // exactly this and should be used at every such inspection site.
-type cueDecoder struct{}
+type cueDecoder struct{ offline bool }
 
 // Decode loads mu.cue from projectRoot and unifies it with #ProjectConfig
 // before decoding into ProjectConfig.
-func (cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
-	val, err := loadCUEFile(projectRoot, "mu.cue")
+func (d cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
+	val, err := loadCUEFile(projectRoot, "mu.cue", d.offline)
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +69,8 @@ func (cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
 
 // DecodePlugin loads mu.cue from pluginDir and unifies it with
 // #PluginConfig before decoding into PluginConfig.
-func (cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
-	val, err := loadCUEFile(pluginDir, "mu.cue")
+func (d cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
+	val, err := loadCUEFile(pluginDir, "mu.cue", d.offline)
 	if err != nil {
 		return nil, err
 	}
@@ -137,12 +139,20 @@ func compileSchemaDefs(ctx *cue.Context) (schema, projectDef, pluginDef cue.Valu
 // loadCUEFile loads a single .cue file from dir via cuelang.org/go/cue/load
 // and returns the built cue.Value. Missing-file errors are returned with
 // the full path for clarity.
-func loadCUEFile(dir, file string) (cue.Value, error) {
+func loadCUEFile(dir, file string, offline ...bool) (cue.Value, error) {
 	path := filepath.Join(dir, file)
 	if _, err := os.Stat(path); err != nil {
 		return cue.Value{}, fmt.Errorf("reading %s: %w", path, err)
 	}
-	cfg := &load.Config{Dir: dir}
+	registryCfg := &modconfig.Config{Transport: registryhttp.NewClient(registryhttp.Options{}).Transport}
+	if len(offline) > 0 && offline[0] {
+		registryCfg.CUERegistry = "none"
+	}
+	registry, err := modconfig.NewRegistry(registryCfg)
+	if err != nil {
+		return cue.Value{}, fmt.Errorf("configure CUE registry: %w", err)
+	}
+	cfg := &load.Config{Dir: dir, Registry: registry}
 	insts := load.Instances([]string{file}, cfg)
 	if len(insts) == 0 {
 		return cue.Value{}, fmt.Errorf("no CUE instances loaded from %s", path)

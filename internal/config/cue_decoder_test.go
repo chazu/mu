@@ -1,9 +1,12 @@
 package config
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -201,5 +204,41 @@ func TestCueDecoder_MissingFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mu.cue") {
 		t.Errorf("error %q does not mention mu.cue", err.Error())
+	}
+}
+
+func TestOfflineConfigurationDoesNotContactCUERegistry(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(404) }))
+	defer server.Close()
+	t.Setenv("CUE_REGISTRY", strings.TrimPrefix(server.URL, "http://")+"+insecure")
+	t.Setenv("CUE_CACHE_DIR", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "cue.mod"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	module := `module: "offline.example/test@v0"
+language: version: "v0.13.0"
+deps: "missing.example/pkg@v0": v: "v0.0.1"
+`
+	if err := os.WriteFile(filepath.Join(root, "cue.mod", "module.cue"), []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package mu
+import "missing.example/pkg"
+targets: pkg.targets
+`
+	if err := os.WriteFile(filepath.Join(root, "mu.cue"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadOffline(root, true)
+	if err == nil {
+		t.Fatal("expected missing pinned CUE dependency")
+	}
+	if !strings.Contains(err.Error(), "missing.example") {
+		t.Fatalf("not a module failure: %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatal("offline config contacted CUE registry")
 	}
 }

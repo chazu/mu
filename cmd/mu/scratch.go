@@ -35,7 +35,7 @@ func runScratch(args []string) int {
 		return exitOK
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(cli.networkContext(context.Background()), os.Interrupt)
 	defer stop()
 
 	fmt.Fprintf(os.Stderr, "mu scratch: %d toolchain(s)\n", len(cli.Config.Toolchains))

@@ -36,7 +36,7 @@ func runObserve(args []string) int {
 		return code
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(cli.networkContext(context.Background()), os.Interrupt)
 	defer stop()
 
 	registry := coordinator.NewToolchainRegistry(cli.Store)

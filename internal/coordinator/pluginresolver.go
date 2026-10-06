@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/plugin"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 // ResolvedPlugin holds a plugin definition with its CAS digest and resolved
@@ -79,9 +81,13 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 		return nil, fmt.Errorf("parse digest %q: %w", p.Digest, err)
 	}
 
+	if cached, err := r.cachedDigest(ctx, p.Name, dgst, ""); err != nil || cached != nil {
+		return cached, err
+	}
+
 	has, err := r.Store.Has(ctx, dgst)
 	if err != nil {
-		return nil, fmt.Errorf("check CAS for digest %s: %w", dgst, err)
+		return nil, fmt.Errorf("required plugin %s unavailable locally: %w", dgst, err)
 	}
 	if !has {
 		return nil, fmt.Errorf("plugin digest %s not found in CAS", dgst)
@@ -91,7 +97,7 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 	// CAS. Prefer the directory extraction path; if the digest belongs to a
 	// legacy single-file plugin, fall back to the single-file extractor below.
 	if bundleDir, bundleErr := r.extractDirFromCAS(ctx, p.Name, dgst); bundleErr == nil {
-		entry, toolchain, entryErr := resolveInstalledBundleEntry(bundleDir)
+		entry, toolchain, entryErr := resolveInstalledBundleEntry(bundleDir, registryhttp.IsOffline(ctx))
 		if entryErr != nil {
 			return nil, fmt.Errorf("resolve plugin bundle %s: %w", dgst, entryErr)
 		}
@@ -130,7 +136,7 @@ type installedBundleMetadata struct {
 // resolveInstalledBundleEntry resolves a directory plugin after its source
 // tree has been reduced to a digest. The generated metadata keeps the
 // catalog's entrypoint available even when the source mu.cue is not bundled.
-func resolveInstalledBundleEntry(bundleDir string) (string, string, error) {
+func resolveInstalledBundleEntry(bundleDir string, offline ...bool) (string, string, error) {
 	metadataPath := filepath.Join(bundleDir, "mu-plugin.json")
 	if data, err := os.ReadFile(metadataPath); err == nil {
 		var metadata installedBundleMetadata
@@ -232,7 +238,7 @@ func (r *PluginResolver) resolveLocalFile(ctx context.Context, p config.PluginDe
 // plugin with the entrypoint and WorkDir set.
 func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef, dirPath string) (*ResolvedPlugin, error) {
 	// 1. Load plugin manifest.
-	manifest, err := config.LoadPluginManifest(dirPath)
+	manifest, err := config.LoadPluginManifest(dirPath, registryhttp.IsOffline(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -507,9 +513,17 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 
 // resolveRemote fetches a remote plugin by URL, verifies sha256, stores in CAS.
 func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
+	expected := cas.NewSHA256(p.SHA256)
+	if cached, err := r.cachedDigest(ctx, p.Name, expected, p.URL); err != nil || cached != nil {
+		return cached, err
+	}
+
 	// Check if we already have it in CAS by the declared sha256.
 	expectedDigest := cas.NewSHA256(p.SHA256)
 	has, err := r.Store.Has(ctx, expectedDigest)
+	if errors.Is(err, cas.ErrUnavailable) && ctx.Err() == nil {
+		err = nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("check CAS: %w", err)
 	}
@@ -582,7 +596,21 @@ func (r *PluginResolver) ExtractFile(ctx context.Context, name string, dgst cas.
 		if !info.Mode().IsRegular() {
 			return "", fmt.Errorf("cached plugin %s is not a regular file", dest)
 		}
-		return dest, nil
+		f, openErr := os.Open(dest)
+		if openErr != nil {
+			return "", openErr
+		}
+		actual, readErr := cas.ComputeDigest(f)
+		closeErr := f.Close()
+		if readErr != nil {
+			return "", readErr
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		if actual == dgst {
+			return dest, nil
+		}
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
@@ -672,4 +700,71 @@ func walkSchemaDir(pluginDir, schemaPath string) ([]string, error) {
 	}
 	sort.Strings(rels)
 	return rels, nil
+}
+
+// Consult complete full-digest publications before CAS probes. Directory
+// publication is atomic; standalone files additionally verify their content.
+// Never substitute a different digest or pick a suffix by directory ordering.
+func (r *PluginResolver) cachedDigest(ctx context.Context, name string, dgst cas.Digest, hint string) (*ResolvedPlugin, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return nil, fmt.Errorf("invalid plugin cache name %q", name)
+	}
+	if dgst.Algorithm != "sha256" || len(dgst.Hash) != 64 {
+		return nil, nil
+	}
+	if _, err := hex.DecodeString(dgst.Hash); err != nil {
+		return nil, nil
+	}
+	dir := filepath.Join(r.CacheDir, name)
+	bundle := filepath.Join(dir, "bundle-"+dgst.Hash)
+	if info, err := os.Lstat(bundle); err == nil && info.IsDir() {
+		entry, runtime, err := resolveInstalledBundleEntry(bundle, registryhttp.IsOffline(ctx))
+		if err != nil {
+			return nil, err
+		}
+		return &ResolvedPlugin{Digest: dgst, Def: plugin.PluginDef{Name: name, Script: entry, Toolchain: runtime, WorkDir: bundle}}, nil
+	}
+	var candidates []string
+	if hint != "" {
+		if parsed, err := url.Parse(hint); err == nil && parsed.Scheme != "" {
+			hint = parsed.Path
+		}
+		candidates = []string{filepath.Join(dir, "plugin-"+dgst.Hash+filepath.Ext(hint))}
+	} else {
+		candidates, _ = filepath.Glob(filepath.Join(dir, "plugin-"+dgst.Hash+"*"))
+	}
+	var matches []string
+	for _, path := range candidates {
+		suffix := strings.TrimPrefix(filepath.Base(path), "plugin-"+dgst.Hash)
+		if suffix != "" && !strings.HasPrefix(suffix, ".") {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		actual, readErr := cas.ComputeDigest(f)
+		closeErr := f.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		if actual == dgst {
+			matches = append(matches, path)
+		}
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("plugin %s has ambiguous cached runtimes; use a bundle with declared entrypoint", dgst)
+	}
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	path := matches[0]
+	return &ResolvedPlugin{Digest: dgst, Def: plugin.PluginDef{Name: name, Script: path, Toolchain: inferPluginToolchain(path)}}, nil
 }

@@ -49,14 +49,14 @@ func runPluginInfo(args []string) int {
 	if root, err := os.Getwd(); err == nil {
 		if pr, perr := config.FindProjectRoot(root); perr == nil {
 			cli.ProjectRoot = pr
-			if cfg, cerr := config.Load(pr); cerr == nil {
+			if cfg, cerr := config.LoadOffline(pr, *cli.flagOffline); cerr == nil {
 				cli.Config = cfg
 			}
 		}
 	}
 	cli.JSON = isJSONFlag(fs)
 
-	source, def, dgst, err := resolveInfoTarget(cli.ProjectRoot, cli.Config, name, *digest)
+	source, def, dgst, err := resolveInfoTarget(cli.networkContext(context.Background()), cli.ProjectRoot, cli.Config, name, *digest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin info: %v\n", err)
 		return 1
@@ -142,7 +142,7 @@ type pluginInfoOutput struct {
 // resolveInfoTarget locates the plugin by name. Returns the source label
 // ("project" or "cache"), a ready-to-Register PluginDef, and the CAS digest
 // when known.
-func resolveInfoTarget(projectRoot string, cfg *config.ProjectConfig, name string, selection ...string) (string, plugin.PluginDef, cas.Digest, error) {
+func resolveInfoTarget(ctx context.Context, projectRoot string, cfg *config.ProjectConfig, name string, selection ...string) (string, plugin.PluginDef, cas.Digest, error) {
 	requested := ""
 	if len(selection) > 0 {
 		requested = selection[0]
@@ -152,7 +152,7 @@ func resolveInfoTarget(projectRoot string, cfg *config.ProjectConfig, name strin
 			if p.Name != name {
 				continue
 			}
-			def, dgst, err := resolveProjectPlugin(projectRoot, p)
+			def, dgst, err := resolveProjectPlugin(ctx, projectRoot, p)
 			if err != nil {
 				return "", plugin.PluginDef{}, cas.Digest{}, err
 			}
@@ -170,7 +170,7 @@ func resolveInfoTarget(projectRoot string, cfg *config.ProjectConfig, name strin
 // resolveProjectPlugin runs the same resolver the coordinator uses, so a
 // configured plugin (digest, url, local path, or command) is materialized
 // to disk and ready to spawn.
-func resolveProjectPlugin(projectRoot string, p config.PluginDef) (plugin.PluginDef, cas.Digest, error) {
+func resolveProjectPlugin(ctx context.Context, projectRoot string, p config.PluginDef) (plugin.PluginDef, cas.Digest, error) {
 	if len(p.Command) > 0 && p.Script == "" && p.Digest == "" && p.URL == "" {
 		return plugin.PluginDef{Name: p.Name, Command: p.Command}, cas.Digest{}, nil
 	}
@@ -188,7 +188,7 @@ func resolveProjectPlugin(projectRoot string, p config.PluginDef) (plugin.Plugin
 		ProjectRoot: projectRoot,
 		CacheDir:    filepath.Join(home, ".mu", "plugins"),
 	}
-	resolved, err := resolver.Resolve(context.Background(), []config.PluginDef{p})
+	resolved, err := resolver.Resolve(ctx, []config.PluginDef{p})
 	if err != nil {
 		return plugin.PluginDef{}, cas.Digest{}, err
 	}

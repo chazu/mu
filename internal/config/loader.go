@@ -47,15 +47,18 @@ func FindProjectRoot(startDir string) (string, error) {
 // Load reads the project configuration rooted at projectRoot. It loads
 // mu.cue at the root, then walks subdirectories merging any per-package
 // mu.cue files it finds (or the preprocessor extension when configured).
-func Load(projectRoot string) (*ProjectConfig, error) {
+func Load(projectRoot string) (*ProjectConfig, error) { return LoadOffline(projectRoot, false) }
+
+// LoadOffline uses cached/local CUE modules without contacting a registry.
+func LoadOffline(projectRoot string, offline bool) (*ProjectConfig, error) {
 	if !hasMuCue(projectRoot) {
 		return nil, fmt.Errorf("no mu.cue in %s", projectRoot)
 	}
-	cfg, err := cueDecoder{}.Decode(projectRoot)
+	cfg, err := cueDecoder{offline: offline}.Decode(projectRoot)
 	if err != nil {
 		return nil, err
 	}
-	if err := mergeSubdirConfigs(cfg, projectRoot); err != nil {
+	if err := mergeSubdirConfigs(cfg, projectRoot, offline); err != nil {
 		return nil, err
 	}
 	if err := expandSourceGlobs(cfg, projectRoot); err != nil {
@@ -80,7 +83,7 @@ func Load(projectRoot string) (*ProjectConfig, error) {
 //
 // Symlinked mu.cue files inside otherwise-real subdirectories are
 // filtered out via Lstat + Mode().IsRegular().
-func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string) error {
+func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool) error {
 	usePP := cfg.Preprocessor != nil && cfg.Preprocessor.Extension != "" && len(cfg.Preprocessor.Command) > 0
 	var ppFileName string
 	if usePP {
@@ -127,7 +130,7 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string) error {
 		case "pp":
 			partial, err = Preprocess(cfg.Preprocessor, subFile)
 		case configFileCUE:
-			partial, err = cueDecoder{}.Decode(path)
+			partial, err = cueDecoder{offline: len(offline) > 0 && offline[0]}.Decode(path)
 		}
 		if err != nil {
 			return fmt.Errorf("loading %s: %w", subFile, err)

@@ -62,6 +62,10 @@ func runBuild(args []string) int {
 		}
 	}
 
+	if *publish && !cli.requireRegistry() {
+		return exitUsage
+	}
+
 	targets := fs.Args()
 	if len(targets) == 0 {
 		return cli.fail(exitUsage, "no targets specified")
@@ -76,13 +80,14 @@ func runBuild(args []string) int {
 		return code
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(cli.networkContext(context.Background()), os.Interrupt)
 	defer stop()
 
 	registry := coordinator.NewToolchainRegistry(cli.Store)
 	home, _ := os.UserHomeDir()
 
 	c := &coordinator.Coordinator{
+		NoCache:           *noCache,
 		ProjectRoot:       cli.ProjectRoot,
 		Config:            cli.Config,
 		Store:             cli.Store,
