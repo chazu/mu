@@ -218,7 +218,9 @@ func (p *Process) send(ctx context.Context, req Request, resp any) error {
 			return result.err
 		}
 		if err := json.Unmarshal(result.line, resp); err != nil {
-			return fmt.Errorf("plugin %q: unmarshal response: %w (raw: %s)", p.name, err, result.line)
+			// Provider responses may contain plaintext sealed values even when
+			// malformed. Report the decoder error without copying wire bytes.
+			return fmt.Errorf("plugin %q: unmarshal %s response: %w", p.name, req.Method, err)
 		}
 		return nil
 	}

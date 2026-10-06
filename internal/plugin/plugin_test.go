@@ -15,6 +15,24 @@ func testdataPath(name string) string {
 	return filepath.Join("testdata", name)
 }
 
+func TestMalformedProviderResponseDoesNotExposeWireValues(t *testing.T) {
+	p, err := plugin.StartProcess("provider", []string{"sh", "-c", `read request; printf '%s\n' '{"value":"sentinel-private-value",BROKEN}'`}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	_, err = p.ResolveSecret(context.Background(), "fake/ref")
+	if err == nil {
+		t.Fatal("malformed response accepted")
+	}
+	if strings.Contains(err.Error(), "sentinel-private-value") || strings.Contains(err.Error(), "BROKEN") {
+		t.Fatalf("response bytes leaked: %v", err)
+	}
+	if !strings.Contains(err.Error(), "provider") || !strings.Contains(err.Error(), "resolve_secret") {
+		t.Fatalf("missing diagnostic context: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Protocol tests
 // ---------------------------------------------------------------------------
