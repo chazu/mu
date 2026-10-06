@@ -4,10 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -105,7 +107,7 @@ func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) 
 	}
 
 	// No source hint available for a single-file digest-only plugin.
-	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst, "")
+	cachedPath, err := r.ExtractFile(ctx, p.Name, dgst, "")
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +212,7 @@ func (r *PluginResolver) resolveLocalFile(ctx context.Context, p config.PluginDe
 	}
 
 	// Extract to a stable path for execution, preserving the original extension.
-	cachedPath, err := r.extractFromCAS(ctx, p.Name, dgst, p.Script)
+	cachedPath, err := r.ExtractFile(ctx, p.Name, dgst, p.Script)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +542,7 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 		}
 	}
 
-	cachedPath, err := r.extractFromCAS(ctx, p.Name, expectedDigest, p.URL)
+	cachedPath, err := r.ExtractFile(ctx, p.Name, expectedDigest, p.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -555,58 +557,70 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 	}, nil
 }
 
-// extractFromCAS writes a single-file plugin from CAS to a stable filesystem path.
-// srcHint is the original file path or URL, used to preserve the file extension.
-// If empty, the file is extracted with no extension (bare executable).
-// Files are always extracted with executable permissions (0o755).
-func (r *PluginResolver) extractFromCAS(ctx context.Context, name string, dgst cas.Digest, srcHint string) (string, error) {
+// ExtractFile publishes one verified executable at its full digest, using a
+// unique sibling temporary file. Old versions remain available to live users.
+func (r *PluginResolver) ExtractFile(ctx context.Context, name string, dgst cas.Digest, srcHint string) (string, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return "", fmt.Errorf("invalid plugin cache name %q", name)
+	}
+	if dgst.Algorithm != "sha256" || len(dgst.Hash) != 64 {
+		return "", fmt.Errorf("plugin extraction requires a full SHA-256 digest")
+	}
+	if _, err := hex.DecodeString(dgst.Hash); err != nil {
+		return "", fmt.Errorf("invalid plugin digest: %w", err)
+	}
 	dir := filepath.Join(r.CacheDir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-
-	// Preserve the original file extension from the source hint.
+	if parsed, err := url.Parse(srcHint); err == nil && parsed.Scheme != "" {
+		srcHint = parsed.Path
+	}
 	ext := filepath.Ext(srcHint)
-
-	// Use the digest hash as filename to auto-invalidate on content change.
-	short := dgst.Hash
-	if len(short) > 12 {
-		short = short[:12]
-	}
-	destPath := filepath.Join(dir, "plugin-"+short+ext)
-
-	// Skip if already extracted.
-	if _, err := os.Stat(destPath); err == nil {
-		return destPath, nil
-	}
-
-	// Clean old versions.
-	entries, _ := filepath.Glob(filepath.Join(dir, "plugin-*"))
-	for _, old := range entries {
-		if old != destPath {
-			os.Remove(old)
+	dest := filepath.Join(dir, "plugin-"+dgst.Hash+ext)
+	if info, err := os.Lstat(dest); err == nil {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("cached plugin %s is not a regular file", dest)
 		}
+		return dest, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
 	}
-
 	rc, err := r.Store.Get(ctx, dgst)
 	if err != nil {
-		return "", fmt.Errorf("get plugin from CAS: %w", err)
+		return "", fmt.Errorf("get plugin: %w", err)
 	}
-	defer rc.Close()
-
-	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	tmp, err := os.CreateTemp(dir, ".plugin-*")
 	if err != nil {
+		rc.Close()
 		return "", err
 	}
-	if _, err := io.Copy(f, rc); err != nil {
-		f.Close()
+	defer os.Remove(tmp.Name())
+	actual, copyErr := cas.ComputeDigest(io.TeeReader(cas.ContextReader(ctx, rc), tmp))
+	readCloseErr := rc.Close()
+	if copyErr == nil {
+		copyErr = readCloseErr
+	}
+	if copyErr == nil && actual != dgst {
+		copyErr = fmt.Errorf("plugin content digest %s does not match %s", actual, dgst)
+	}
+	if copyErr == nil {
+		copyErr = tmp.Chmod(0o755)
+	}
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if err := f.Close(); err != nil {
-		return "", err
+	if err := os.Rename(tmp.Name(), dest); err != nil {
+		return "", fmt.Errorf("publish plugin: %w", err)
 	}
-
-	return destPath, nil
+	return dest, nil
 }
 
 // inferPluginToolchain infers the runtime toolchain from a plugin's file

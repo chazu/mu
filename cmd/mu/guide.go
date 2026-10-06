@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,11 +54,17 @@ func runGuide(args []string) int {
 	case "sdk":
 		printGuideSDK()
 	case "plugin":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: mu guide plugin <name>")
-			return 2
+		fs := flag.NewFlagSet("guide plugin", flag.ContinueOnError)
+		fs.SetOutput(os.Stderr)
+		digest := fs.String("digest", "", "select a cached guide by full SHA-256 digest")
+		if err := fs.Parse(args[1:]); err != nil {
+			return exitUsage
 		}
-		return printGuideForPlugin(args[1])
+		if fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: mu guide plugin [--digest sha256:...] <name>")
+			return exitUsage
+		}
+		return printGuideForPlugin(fs.Arg(0), *digest)
 	default:
 		fmt.Fprintf(os.Stderr, "mu guide: unknown topic %q\n", args[0])
 		fmt.Fprintln(os.Stderr, "Run 'mu guide' for a list of topics.")
@@ -100,23 +108,35 @@ func printGuideSDK()             { printTopic("sdk") }
 // It searches in order:
 //  1. Extracted CAS bundles in ~/.mu/plugins/<name>/bundle-*/
 //  2. Local plugin directory in the current project (plugins/<name>/)
-func printGuideForPlugin(name string) int {
-	// 1. Check extracted bundles in ~/.mu/plugins/<name>/bundle-*/.
-	home, err := os.UserHomeDir()
-	if err == nil {
-		bundleDirs, _ := filepath.Glob(filepath.Join(home, ".mu", "plugins", name, "bundle-*"))
-		for _, dir := range bundleDirs {
-			if path := findGuideInDir(dir); path != "" {
-				return printGuideFile(name, path)
-			}
-		}
+func printGuideForPlugin(name string, selection ...string) int {
+	requested := ""
+	if len(selection) > 0 {
+		requested = selection[0]
 	}
-
-	// 2. Check local plugin directory in the current project.
-	projectRoot, err := findGuideProjectRoot()
+	root, rootErr := findGuideProjectRoot()
+	var cfg *config.ProjectConfig
+	if rootErr == nil {
+		cfg, _ = config.Load(root)
+	}
+	source, def, _, err := resolveInfoTarget(root, cfg, name, requested)
 	if err == nil {
-		localDir := filepath.Join(projectRoot, "plugins", name)
-		if path := findGuideInDir(localDir); path != "" {
+		dir := def.WorkDir
+		if dir == "" {
+			dir = filepath.Dir(def.Script)
+		}
+		if path := findGuideInDir(dir); path != "" {
+			return printGuideFile(name, path)
+		}
+		// Once an identity is selected, never take another version's guide.
+		fmt.Fprintf(os.Stderr, "mu guide plugin %s: selected %s plugin has no guide\n", name, source)
+		return 1
+	}
+	if !errors.Is(err, errCachedPluginMissing) {
+		fmt.Fprintf(os.Stderr, "mu guide plugin: %v\n", err)
+		return 1
+	}
+	if rootErr == nil && requested == "" {
+		if path := findGuideInDir(filepath.Join(root, "plugins", name)); path != "" {
 			return printGuideFile(name, path)
 		}
 	}

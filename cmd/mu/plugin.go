@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -215,21 +215,16 @@ func pluginListCached(_ *config.ProjectConfig, _ string, jsonOut bool) int {
 			continue
 		}
 		name := e.Name()
-		dir := filepath.Join(pluginsDir, name)
-		digest := ""
-		if bundles, err := filepath.Glob(filepath.Join(dir, "bundle-*")); err == nil && len(bundles) > 0 {
-			base := filepath.Base(bundles[0])
-			digest = "sha256:" + strings.TrimPrefix(base, "bundle-")
-		} else if singles, err := filepath.Glob(filepath.Join(dir, "plugin-*")); err == nil && len(singles) > 0 {
-			base := filepath.Base(singles[0])
-			base = strings.TrimPrefix(base, "plugin-")
-			if idx := strings.IndexByte(base, '.'); idx >= 0 {
-				base = base[:idx]
-			}
-			digest = "sha256:" + base
+		versions, err := cachedPluginVersions(name)
+		if errors.Is(err, errCachedPluginMissing) {
+			continue
 		}
-		if digest != "" {
-			items = append(items, cachedInfo{Name: name, Digest: digest})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
+			return 1
+		}
+		for _, v := range versions {
+			items = append(items, cachedInfo{Name: name, Digest: v.digest.String()})
 		}
 	}
 
@@ -324,28 +319,11 @@ func pluginListCachedDiscover(cfg *config.ProjectConfig, projectRoot string, jso
 			}
 		}
 
-		// Extract from CAS.
-		dir := filepath.Join(cacheDir, name)
-		os.MkdirAll(dir, 0o755)
-		short := dgst.Hash
-		if len(short) > 12 {
-			short = short[:12]
-		}
-		destPath := filepath.Join(dir, "plugin-"+short+ext)
-
-		if _, statErr := os.Stat(destPath); statErr != nil {
-			rc, getErr := store.Get(context.Background(), dgst)
-			if getErr != nil {
-				continue
-			}
-			f, createErr := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-			if createErr != nil {
-				rc.Close()
-				continue
-			}
-			io.Copy(f, rc)
-			f.Close()
-			rc.Close()
+		resolver := &coordinator.PluginResolver{Store: store, CacheDir: cacheDir, ProjectRoot: projectRoot}
+		destPath, extractErr := resolver.ExtractFile(context.Background(), name, dgst, "plugin"+ext)
+		if extractErr != nil {
+			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", extractErr)
+			return 1
 		}
 
 		if strings.HasSuffix(destPath, ".bb") {

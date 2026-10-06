@@ -35,6 +35,7 @@ func runPluginInfo(args []string) int {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin info", fs)
+	digest := fs.String("digest", "", "select a cached plugin by full SHA-256 digest")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -55,7 +56,7 @@ func runPluginInfo(args []string) int {
 	}
 	cli.JSON = isJSONFlag(fs)
 
-	source, def, dgst, err := resolveInfoTarget(cli.ProjectRoot, cli.Config, name)
+	source, def, dgst, err := resolveInfoTarget(cli.ProjectRoot, cli.Config, name, *digest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin info: %v\n", err)
 		return 1
@@ -141,8 +142,12 @@ type pluginInfoOutput struct {
 // resolveInfoTarget locates the plugin by name. Returns the source label
 // ("project" or "cache"), a ready-to-Register PluginDef, and the CAS digest
 // when known.
-func resolveInfoTarget(projectRoot string, cfg *config.ProjectConfig, name string) (string, plugin.PluginDef, cas.Digest, error) {
-	if cfg != nil {
+func resolveInfoTarget(projectRoot string, cfg *config.ProjectConfig, name string, selection ...string) (string, plugin.PluginDef, cas.Digest, error) {
+	requested := ""
+	if len(selection) > 0 {
+		requested = selection[0]
+	}
+	if cfg != nil && requested == "" {
 		for _, p := range cfg.Plugins {
 			if p.Name != name {
 				continue
@@ -155,7 +160,7 @@ func resolveInfoTarget(projectRoot string, cfg *config.ProjectConfig, name strin
 		}
 	}
 
-	def, dgst, err := resolveCachedPlugin(name)
+	def, dgst, err := resolveCachedPlugin(name, requested)
 	if err != nil {
 		return "", plugin.PluginDef{}, cas.Digest{}, err
 	}
@@ -191,58 +196,6 @@ func resolveProjectPlugin(projectRoot string, p config.PluginDef) (plugin.Plugin
 		return plugin.PluginDef{}, cas.Digest{}, fmt.Errorf("plugin %q: resolver returned no entries", p.Name)
 	}
 	return resolved[0].Def, resolved[0].Digest, nil
-}
-
-// resolveCachedPlugin inspects ~/.mu/plugins/<name>/ for an extracted
-// bundle directory or a single-file plugin and builds a PluginDef from it.
-// This works without a project mu.cue.
-func resolveCachedPlugin(name string) (plugin.PluginDef, cas.Digest, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return plugin.PluginDef{}, cas.Digest{}, err
-	}
-	dir := filepath.Join(home, ".mu", "plugins", name)
-	if _, err := os.Stat(dir); err != nil {
-		return plugin.PluginDef{}, cas.Digest{}, fmt.Errorf("plugin %q not found in project config or %s", name, dir)
-	}
-
-	// Prefer bundle-* (directory plugin with manifest).
-	bundles, _ := filepath.Glob(filepath.Join(dir, "bundle-*"))
-	sort.Strings(bundles)
-	if len(bundles) > 0 {
-		bundleDir := bundles[len(bundles)-1] // newest by lexicographic short hash
-		entry, toolchain, err := resolveBundleEntry(bundleDir)
-		if err != nil {
-			return plugin.PluginDef{}, cas.Digest{}, err
-		}
-		dgst := cas.NewSHA256(strings.TrimPrefix(filepath.Base(bundleDir), "bundle-"))
-		return plugin.PluginDef{
-			Name:      name,
-			Script:    entry,
-			Toolchain: toolchain,
-			WorkDir:   bundleDir,
-		}, dgst, nil
-	}
-
-	// Fallback: single-file plugin-<short>.<ext>.
-	singles, _ := filepath.Glob(filepath.Join(dir, "plugin-*"))
-	sort.Strings(singles)
-	if len(singles) > 0 {
-		path := singles[len(singles)-1]
-		base := strings.TrimPrefix(filepath.Base(path), "plugin-")
-		hash := base
-		if idx := strings.IndexByte(base, '.'); idx >= 0 {
-			hash = base[:idx]
-		}
-		dgst := cas.NewSHA256(hash)
-		return plugin.PluginDef{
-			Name:      name,
-			Script:    path,
-			Toolchain: inferPluginToolchain(path),
-		}, dgst, nil
-	}
-
-	return plugin.PluginDef{}, cas.Digest{}, fmt.Errorf("no cached plugin files in %s", dir)
 }
 
 // resolveBundleEntry picks an entrypoint in a bundle-* directory. If a

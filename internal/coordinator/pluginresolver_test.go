@@ -4,12 +4,15 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 )
 
@@ -386,5 +389,97 @@ func TestExtractDirFromCAS_Idempotent(t *testing.T) {
 
 	if dir1 != dir2 {
 		t.Errorf("extract paths differ: %s != %s", dir1, dir2)
+	}
+}
+
+func TestSingleFilePublicationUsesFullDigestAndRetainsOldVersions(t *testing.T) {
+	store := newTestStore(t)
+	resolver := &PluginResolver{Store: store, CacheDir: t.TempDir()}
+	first, err := store.Put(context.Background(), strings.NewReader("#!/bin/sh\nprintf first\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := resolver.ExtractFile(context.Background(), "one", first, "https://example.invalid/plugin.sh?revision=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "plugin-"+first.Hash+".sh" {
+		t.Fatalf("not full digest: %s", path)
+	}
+	second, err := store.Put(context.Background(), strings.NewReader("#!/bin/sh\nprintf second\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.ExtractFile(context.Background(), "one", second, "plugin.sh"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("removed an in-use old version", err)
+	}
+	var wg sync.WaitGroup
+	failures := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Go(func() {
+			_, err := resolver.ExtractFile(context.Background(), "concurrent", first, "plugin.sh")
+			failures <- err
+		})
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(resolver.CacheDir, "concurrent"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("incomplete publication: %v, %v", entries, err)
+	}
+}
+
+type failedExtractionStore struct {
+	cas.Store
+	closeError bool
+}
+
+func (s failedExtractionStore) Get(context.Context, cas.Digest) (io.ReadCloser, error) {
+	return failedExtractionReader{Reader: strings.NewReader("partial"), closeError: s.closeError}, nil
+}
+
+type failedExtractionReader struct {
+	io.Reader
+	closeError bool
+}
+
+func (r failedExtractionReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF && !r.closeError {
+		return n, fmt.Errorf("interrupted transfer")
+	}
+	return n, err
+}
+func (r failedExtractionReader) Close() error {
+	if r.closeError {
+		return fmt.Errorf("close failure")
+	}
+	return nil
+}
+
+func TestSingleFilePublicationDoesNotAdvertiseFailedTransfers(t *testing.T) {
+	for _, closeError := range []bool{false, true} {
+		resolver := &PluginResolver{Store: failedExtractionStore{closeError: closeError}, CacheDir: t.TempDir()}
+		digest, err := cas.ComputeDigest(strings.NewReader("partial"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ {
+			if _, err := resolver.ExtractFile(context.Background(), "failed", digest, "plugin.sh"); err == nil {
+				t.Fatal("accepted failed extraction")
+			}
+			entries, err := os.ReadDir(filepath.Join(resolver.CacheDir, "failed"))
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("left partial cache entries: %v, %v", entries, err)
+			}
+		}
 	}
 }
