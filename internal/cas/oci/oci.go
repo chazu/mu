@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 
 	"net/http"
@@ -274,7 +275,13 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 	// back to chunked transfer encoding, and strict registries (e.g. Zot)
 	// reject the monolithic-upload PUT with 400.
 	layers := make([]ocispec.Descriptor, 0, len(result.Outputs))
-	for name, dgst := range result.Outputs {
+	names := make([]string, 0, len(result.Outputs))
+	for name := range result.Outputs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		dgst := result.Outputs[name]
 		layer := ocispec.Descriptor{
 			MediaType: MediaTypeMuBlob,
 			Digest:    toOCIDigest(dgst),

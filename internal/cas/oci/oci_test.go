@@ -322,3 +322,33 @@ func TestRegistryInterfaceHasTags(t *testing.T) {
 	// Ensure the interface-based call compiles.
 	_ = callTagsViaInterface
 }
+
+func TestActionManifestPublicationIsDeterministic(t *testing.T) {
+	s, registry := newTestStore(t)
+	ctx := context.Background()
+	key := cas.ActionKey{Digest: cas.NewSHA256(strings.Repeat("a", 64))}
+	result := &cas.ActionResult{Outputs: map[string]cas.Digest{}}
+	for _, name := range []string{"z", "a", "m", "b", "x", "c", "y", "d"} {
+		digest, err := s.Put(ctx, strings.NewReader(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Outputs[name] = digest
+	}
+	var first godigest.Digest
+	for i := 0; i < 100; i++ {
+		if err := s.PutActionResult(ctx, key, result); err != nil {
+			t.Fatal(err)
+		}
+		desc, err := registry.Resolve(ctx, "action-sha256-"+key.Digest.Hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = desc.Digest
+		}
+		if desc.Digest != first {
+			t.Fatalf("identical result moved tag from %s to %s", first, desc.Digest)
+		}
+	}
+}

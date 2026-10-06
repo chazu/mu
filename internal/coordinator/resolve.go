@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/chazu/mu/internal/cas"
@@ -174,7 +175,12 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 				seen[d] = struct{}{}
 				merged = append(merged, d)
 			}
+			implicit := make([]string, 0, len(extraDeps))
 			for d := range extraDeps {
+				implicit = append(implicit, d)
+			}
+			sort.Strings(implicit)
+			for _, d := range implicit {
 				if _, ok := seen[d]; ok {
 					continue
 				}

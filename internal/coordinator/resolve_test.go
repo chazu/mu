@@ -563,3 +563,23 @@ func TestResolveEweSourceErrors(t *testing.T) {
 		t.Errorf("expected escape rejection, got %v", err)
 	}
 }
+
+func TestResolveImplicitDependenciesAreStable(t *testing.T) {
+	spec := plugin.ActionSpec{
+		ID: "consumer", DependsOn: []string{"z", "explicit", "explicit"},
+		Inputs: map[string]string{"a": "out-a", "b": "out-b", "c": "out-c", "d": "out-d"},
+	}
+	producers := map[string]string{"out-a": "b", "out-b": "a", "out-c": "z", "out-d": "b"}
+	for i := 0; i < 100; i++ {
+		actions, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, t.TempDir(), nil, producers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(actions[0].DependsOn, ","); got != "z,explicit,a,b" {
+			t.Fatalf("dependency order = %q, want explicit order followed by sorted unique implicit edges", got)
+		}
+	}
+	if strings.Join(spec.DependsOn, ",") != "z,explicit,explicit" {
+		t.Fatal("mutated plugin declaration")
+	}
+}
