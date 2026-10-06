@@ -199,7 +199,7 @@ func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
 	defer os.Remove(tmpName)
 
 	h := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, h), r)
+	size, err := io.Copy(io.MultiWriter(tmp, h), cas.ContextReader(ctx, r))
 	if err != nil {
 		tmp.Close()
 		return cas.Digest{}, fmt.Errorf("oci: buffer blob: %w", err)

@@ -1,7 +1,6 @@
 package cas
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -94,14 +93,9 @@ func (t *Tiered) Has(ctx context.Context, dgst Digest) (bool, error) {
 	return false, nil
 }
 
-// Get walks layers for a blob. On a hit at layer H > 0 with ReadRepair,
-// the bytes are buffered in memory and written to every writable layer in
-// [0, H) before being returned to the caller.
-//
-// The in-memory buffering is simple and bounded by the blob size. Action
-// outputs are typically small-to-moderate (compiled binaries ≤ 100s of
-// MB); callers streaming multi-gigabyte blobs should not use this store
-// tier with ReadRepair enabled.
+// Get walks layers for a blob. Read repair uses a private temporary file to
+// bound memory independently of blob size. The returned reader owns that file;
+// callers must Close it, including when abandoning a partial read.
 func (t *Tiered) Get(ctx context.Context, dgst Digest) (io.ReadCloser, error) {
 	var hitLayer = -1
 	var hitReader io.ReadCloser
@@ -143,23 +137,52 @@ func (t *Tiered) Get(ctx context.Context, dgst Digest) (io.ReadCloser, error) {
 		return hitReader, nil
 	}
 
-	// Buffer the hit stream and back-fill lower writable layers.
-	defer hitReader.Close()
-	buf, err := io.ReadAll(hitReader)
+	// Spool once, verify the source, then replay to writable lower layers.
+	replay, actual, err := spool(ctx, hitReader)
+	closeErr := hitReader.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil && actual != dgst {
+		err = fmt.Errorf("cas/tiered: fetched digest %s does not match %s", actual, dgst)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("cas/tiered: reading hit from layer %d: %w", hitLayer, err)
+		if replay != nil {
+			replay.Close()
+		}
+		return nil, err
 	}
 	for i := 0; i < hitLayer; i++ {
 		if !t.policy(i).Write {
 			continue
 		}
-		if _, perr := t.Layers[i].Put(ctx, bytes.NewReader(buf)); perr != nil {
+		if err := ctx.Err(); err != nil {
+			replay.Close()
+			return nil, err
+		}
+		if _, err := replay.Seek(0, io.SeekStart); err != nil {
+			replay.Close()
+			return nil, err
+		}
+		actual, perr := t.Layers[i].Put(ctx, ContextReader(ctx, replay))
+		if perr == nil && actual != dgst {
+			perr = fmt.Errorf("cas/tiered: repaired digest %s does not match %s", actual, dgst)
+		}
+		if perr != nil {
 			t.emit(TieredEvent{Op: "put", Layer: i, LayerName: t.layerName(i), Outcome: "error", Digest: dgst, Err: perr})
 			continue
 		}
 		t.emit(TieredEvent{Op: "put", Layer: i, LayerName: t.layerName(i), Outcome: "repair", Digest: dgst})
 	}
-	return io.NopCloser(bytes.NewReader(buf)), nil
+	if err := ctx.Err(); err != nil {
+		replay.Close()
+		return nil, err
+	}
+	if _, err := replay.Seek(0, io.SeekStart); err != nil {
+		replay.Close()
+		return nil, err
+	}
+	return replay, nil
 }
 
 // Put writes to layer 0 unconditionally. If WriteThrough is true, the
@@ -170,16 +193,20 @@ func (t *Tiered) Put(ctx context.Context, r io.Reader) (Digest, error) {
 		return Digest{}, fmt.Errorf("cas/tiered: no layers configured")
 	}
 
-	// Only fan-out needs a replayable payload. Local-only writes can stream
-	// directly, avoiding an artifact-sized allocation on the default path.
-	var buf []byte
+	// Only fan-out needs replay; the default local-only path still streams.
+	var replay *replayFile
+	var expected Digest
 	if t.WriteThrough {
 		var err error
-		buf, err = io.ReadAll(r)
+		replay, expected, err = spool(ctx, r)
 		if err != nil {
-			return Digest{}, fmt.Errorf("cas/tiered: buffering put payload: %w", err)
+			return Digest{}, err
 		}
-		r = bytes.NewReader(buf)
+		defer replay.Close()
+		r = replay
+	}
+	if t.WriteThrough {
+		r = ContextReader(ctx, r)
 	}
 
 	// Authoritative write: layer 0.
@@ -187,6 +214,9 @@ func (t *Tiered) Put(ctx context.Context, r io.Reader) (Digest, error) {
 	if err != nil {
 		t.emit(TieredEvent{Op: "put", Layer: 0, LayerName: t.layerName(0), Outcome: "error", Err: err})
 		return Digest{}, err
+	}
+	if t.WriteThrough && dgst != expected {
+		return Digest{}, fmt.Errorf("cas/tiered: authoritative digest %s does not match %s", dgst, expected)
 	}
 	t.emit(TieredEvent{Op: "put", Layer: 0, LayerName: t.layerName(0), Outcome: "hit", Digest: dgst})
 
@@ -199,11 +229,24 @@ func (t *Tiered) Put(ctx context.Context, r io.Reader) (Digest, error) {
 		if !t.policy(i).Write {
 			continue
 		}
-		if _, perr := t.Layers[i].Put(ctx, bytes.NewReader(buf)); perr != nil {
+		if err := ctx.Err(); err != nil {
+			return Digest{}, err
+		}
+		if _, err := replay.Seek(0, io.SeekStart); err != nil {
+			return Digest{}, err
+		}
+		actual, perr := t.Layers[i].Put(ctx, ContextReader(ctx, replay))
+		if perr == nil && actual != dgst {
+			perr = fmt.Errorf("cas/tiered: fan-out digest %s does not match %s", actual, dgst)
+		}
+		if perr != nil {
 			t.emit(TieredEvent{Op: "put", Layer: i, LayerName: t.layerName(i), Outcome: "error", Digest: dgst, Err: perr})
 			continue
 		}
 		t.emit(TieredEvent{Op: "put", Layer: i, LayerName: t.layerName(i), Outcome: "hit", Digest: dgst})
+	}
+	if err := ctx.Err(); err != nil {
+		return Digest{}, err
 	}
 	return dgst, nil
 }
