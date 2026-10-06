@@ -70,7 +70,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			inputs[name] = dgst
 		}
 
-		// Copy Env map (nil-safe).
+		// Pure actions use a fixed clean default; only impure actions may inherit.
 		var env map[string]string
 		if spec.Env != nil {
 			env = make(map[string]string, len(spec.Env))
@@ -78,6 +78,8 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 				env[k] = v
 			}
 		}
+
+		env = dag.ActionEnvironment(env, spec.Impure || len(spec.SealedOutputs) > 0)
 
 		workDir := projectRoot
 		if spec.WorkDir != "" {
@@ -88,6 +90,12 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 				return nil, fmt.Errorf("work_dir %q escapes project root", spec.WorkDir)
 			}
 		}
+
+		workRoot, err := dag.OpenWorkDir(projectRoot, workDir)
+		if err != nil {
+			return nil, fmt.Errorf("action %q work_dir: %w", spec.ID, err)
+		}
+		workRoot.Close()
 
 		// Copy SealedInputs map (nil-safe).
 		var sealedInputs map[string]string
@@ -205,6 +213,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			SealedOutputModes: sealedOutputModes,
 			Network:           spec.Network,
 			WorkDir:           workDir,
+			ProjectRoot:       projectRoot,
 			Impure:            impure,
 			TimeoutS:          spec.TimeoutS,
 			Retries:           spec.Retries,

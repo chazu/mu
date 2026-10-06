@@ -20,11 +20,11 @@ func baseAction() *dag.Action {
 	}
 }
 
-func TestActionKey_InheritedAndEmptyEnvironmentDiffer(t *testing.T) {
+func TestActionKey_PureDefaultEqualsExplicitCleanEnvironment(t *testing.T) {
 	a, b := baseAction(), baseAction()
 	a.Env, b.Env = nil, map[string]string{}
-	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
-		t.Fatal("inherited and empty environments have the same key")
+	if dag.ComputeActionKey(a) != dag.ComputeActionKey(b) {
+		t.Fatal("pure default and explicitly empty environments should have the same identity")
 	}
 }
 

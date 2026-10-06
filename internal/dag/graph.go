@@ -17,14 +17,15 @@ type Action struct {
 	// hashed into CAS at plan time). When set, the action runs that program
 	// through the ewe processor instead of a command or pith body. The program
 	// reaches execute time as inert content-addressed text, never inlined CUE.
-	EweRef    cas.Digest
-	Inputs    map[string]cas.Digest // name -> content hash (resolved by coordinator)
-	Outputs   []string              // declared output file paths
-	DependsOn []string              // action IDs this depends on
-	Env       map[string]string
-	Network   bool   // allow network access (honor system in v1)
-	WorkDir   string // execution working directory
-	Impure    bool   // skip CAS cache when true
+	EweRef      cas.Digest
+	Inputs      map[string]cas.Digest // name -> content hash (resolved by coordinator)
+	Outputs     []string              // declared output file paths
+	DependsOn   []string              // action IDs this depends on
+	Env         map[string]string
+	Network     bool   // allow network access (honor system in v1)
+	WorkDir     string // execution working directory
+	ProjectRoot string // coordinator scope; empty for intentionally unrestricted direct library actions
+	Impure      bool   // skip CAS cache when true
 
 	// Per-attempt wall-clock timeout in seconds. 0 = no timeout.
 	TimeoutS int

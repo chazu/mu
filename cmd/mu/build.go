@@ -205,6 +205,7 @@ type planAction struct {
 	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"`
 	Network           bool              `json:"network,omitempty"`
 	WorkDir           string            `json:"work_dir,omitempty"`
+	ProjectRoot       string            `json:"project_root,omitempty"`
 	Impure            bool              `json:"impure,omitempty"`
 	TimeoutS          int               `json:"timeout_s,omitempty"`
 	Retries           int               `json:"retries,omitempty"`
@@ -252,7 +253,7 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env,
 			SealedInputs: a.SealedInputs, SealedInputModes: a.SealedInputModes,
 			SealedOutputs: a.SealedOutputs, SealedOutputModes: a.SealedOutputModes,
-			Network: a.Network, WorkDir: a.WorkDir, Impure: a.Impure,
+			Network: a.Network, WorkDir: a.WorkDir, ProjectRoot: a.ProjectRoot, Impure: a.Impure,
 			TimeoutS: a.TimeoutS, Retries: a.Retries, RetryBackoffMs: a.RetryBackoffMs,
 			Toolchain: toolchain, Sources: a.Sources,
 		})

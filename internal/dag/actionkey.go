@@ -30,7 +30,7 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 			_, _ = h.Write([]byte(part))
 		}
 	}
-	field("mu.action-key/v2")
+	field("mu.action-key/v3")
 	for _, arg := range a.Command {
 		field("cmd", arg)
 	}
@@ -42,12 +42,12 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	if !a.EweRef.IsZero() {
 		field("ewe", a.EweRef.String())
 	}
-	for _, name := range sortedKeys(a.Env) {
-		field("env", name, a.Env[name])
+	env := ActionEnvironment(a.Env, a.Impure)
+	for _, name := range sortedKeys(env) {
+		field("env", name, env[name])
 	}
-	// A nil environment inherits the parent; an explicitly empty map does
-	// not. Preserve that execution distinction even though both have no keys.
-	field("env_inherit", strconv.FormatBool(a.Env == nil))
+	// Only impure actions may inherit. Pure defaults are explicitly hashed.
+	field("env_inherit", strconv.FormatBool(env == nil))
 	for _, name := range sortedKeys(a.Inputs) {
 		field("input", name, a.Inputs[name].String())
 	}
@@ -64,6 +64,7 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	field("network", strconv.FormatBool(a.Network))
 	field("impure", strconv.FormatBool(a.Impure))
 	field("work_dir", a.WorkDir)
+	field("project_root", a.ProjectRoot)
 	for _, name := range sortedKeys(a.SealedInputs) {
 		mode := a.SealedInputModes[name]
 		if mode == "" {

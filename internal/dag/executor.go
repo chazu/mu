@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/ewesink"
 	"github.com/chazu/mu/internal/pithvm"
+	"github.com/chazu/mu/internal/rootexec"
 	"github.com/chazu/mu/internal/sandbox"
 	"github.com/chazu/pith"
 )
@@ -232,6 +232,16 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 // executeAction runs a single action: check cache, execute if miss, store results.
 // Impure actions skip cache lookup and storage entirely.
 func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
+	var workDir *os.File
+	if a.ProjectRoot != "" {
+		var err error
+		workDir, err = OpenWorkDir(a.ProjectRoot, a.WorkDir)
+		if err != nil {
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q work_dir: %w", a.ID, err)}
+		}
+		defer workDir.Close()
+	}
+
 	// Cache check — only for pure actions.
 	if !a.Impure {
 		key := ComputeActionKey(a)
@@ -255,13 +265,23 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// Merge resolved secrets into a copy of the env. We must not mutate a.Env
 	// because ComputeActionKey is called again after execution for cache storage,
 	// and secrets must never be part of the cache key.
-	execEnv := a.Env
-	if a.Env != nil {
-		execEnv = make(map[string]string, len(a.Env)+1)
-		for name, value := range a.Env {
+	declared := ActionEnvironment(a.Env, a.Impure)
+	execEnv := make(map[string]string, len(declared)+1)
+	if declared == nil && a.Toolchain == nil && a.EweRef.IsZero() && len(a.Body) == 0 {
+		// Inheritance is permitted only for impure actions. Runtime-only values
+		// never mutate the plan or enter identity/manifest fields.
+		for _, entry := range os.Environ() {
+			name, value, ok := strings.Cut(entry, "=")
+			if ok {
+				execEnv[name] = value
+			}
+		}
+	} else {
+		for name, value := range declared {
 			execEnv[name] = value
 		}
 	}
+
 	secrets := e.ResolvedSecrets[a.ID]
 	if e.SealedInputResolver != nil && len(a.SealedInputs) > 0 {
 		resolved, err := e.SealedInputResolver(ctx, a)
@@ -332,13 +352,6 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		if err := os.Chmod(sealedOutDir, 0o700); err != nil {
 			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: chmod sealed-out dir: %w", a.ID, err)}
 		}
-		// Ensure execEnv is a fresh copy before we add MU_SEALED_OUT_DIR.
-		if execEnv == nil || len(secrets) == 0 {
-			execEnv = make(map[string]string, len(a.Env)+1)
-			for k, v := range a.Env {
-				execEnv[k] = v
-			}
-		}
 		execEnv["MU_SEALED_OUT_DIR"] = sealedOutDir
 	}
 
@@ -362,7 +375,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		execEnv["MU_OUT"] = muOutDir
 	}
 
-	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv)
+	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv, workDir)
 
 	if execErr != nil {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
@@ -452,7 +465,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 // Returns (exitCode, attempts, err). attempts is 1 on success without
 // retry. err is non-nil iff the final attempt failed OR the parent
 // context was cancelled.
-func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env map[string]string) (int, int, error) {
+func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env map[string]string, workDir *os.File) (int, int, error) {
 	maxRetries := 0
 	if a.Network && a.Retries > 0 {
 		maxRetries = a.Retries
@@ -483,7 +496,7 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 		} else if len(a.Body) > 0 {
 			exitCode, err = e.executePithVM(attemptCtx, a, env)
 		} else {
-			exitCode, err = e.executeBare(attemptCtx, a, env)
+			exitCode, err = e.executeBare(attemptCtx, a, env, workDir)
 		}
 
 		if cancel != nil {
@@ -518,14 +531,28 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 // executeBare runs a command directly on the host (no sandbox).
 // Used for actions without a toolchain, preserving backward compatibility.
 // The env parameter may include resolved secrets merged with the action's declared env.
-func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]string) (int, error) {
-	cmd := exec.CommandContext(ctx, a.Command[0], a.Command[1:]...)
-	cmd.Dir = a.WorkDir
-	cmd.Env = buildEnv(env)
+func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]string, workDir *os.File) (int, error) {
+	if workDir == nil {
+		path := a.WorkDir
+		if path == "" {
+			path = "."
+		}
+		var err error
+		workDir, err = os.Open(path)
+		if err != nil {
+			return -1, err
+		}
+		defer workDir.Close()
+	}
+	cmd, err := rootexec.Command(ctx, a.Command, buildEnv(env), workDir)
+	if err != nil {
+		return -1, err
+	}
+
 	cmd.Stdout = e.subprocessStdout()
 	cmd.Stderr = os.Stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := -1
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
@@ -677,7 +704,29 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[stri
 
 	// Copy sources into sandbox work directory.
 	if len(a.Sources) > 0 && a.WorkDir != "" {
-		if err := sb.CopySources(a.WorkDir, a.Sources); err != nil {
+		var err error
+		if a.ProjectRoot != "" {
+			err = func() error {
+				project, err := os.OpenRoot(a.ProjectRoot)
+				if err != nil {
+					return err
+				}
+				defer project.Close()
+				rel, err := filepath.Rel(a.ProjectRoot, a.WorkDir)
+				if err != nil {
+					return err
+				}
+				root, err := project.OpenRoot(rel)
+				if err != nil {
+					return err
+				}
+				defer root.Close()
+				return sb.CopySourcesRoot(root, a.Sources)
+			}()
+		} else {
+			err = sb.CopySources(a.WorkDir, a.Sources)
+		}
+		if err != nil {
 			return -1, fmt.Errorf("copy sources: %w", err)
 		}
 	}
