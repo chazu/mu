@@ -139,12 +139,19 @@ func (c *Cache) flushLocked() error {
 		return fmt.Errorf("discovercache: marshal: %w", err)
 	}
 
-	tmp := c.path + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(c.path), ".discover-cache-*.tmp")
+	if err != nil {
+		return fmt.Errorf("discovercache: create tmp: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(buf); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("discovercache: write tmp: %w", err)
 	}
-	if err := os.Rename(tmp, c.path); err != nil {
-		_ = os.Remove(tmp)
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("discovercache: close tmp: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), c.path); err != nil {
 		return fmt.Errorf("discovercache: rename: %w", err)
 	}
 	return nil

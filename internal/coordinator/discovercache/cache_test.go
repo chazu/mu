@@ -1,6 +1,7 @@
 package discovercache_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,46 @@ import (
 	"github.com/chazu/mu/internal/coordinator/discovercache"
 	"github.com/chazu/mu/internal/plugin"
 )
+
+func TestIndependentWritersPublishCompleteSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cache.json")
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range 32 {
+		// Independent cache instances model independent mu processes: their
+		// mutexes do not serialize writes to this shared path.
+		c := discovercache.Open(path)
+		wg.Go(func() {
+			<-start
+			if err := c.Put(cas.NewSHA256(fmt.Sprintf("writer-%d", i)), sampleResp()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot struct {
+		Entries map[string]json.RawMessage `json:"entries"`
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		t.Fatalf("corrupt snapshot: %v", err)
+	}
+	if len(snapshot.Entries) != 1 {
+		t.Fatalf("expected one complete winning snapshot, got %d entries", len(snapshot.Entries))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "cache.json" {
+		t.Fatalf("temporary files leaked: %v", entries)
+	}
+}
 
 func sampleResp() *plugin.DiscoverResponse {
 	return &plugin.DiscoverResponse{
