@@ -169,3 +169,39 @@ REMOTE METADATA BUDGETS
   inaccurate sizes cannot bypass the limit. Errors identify the metadata kind
   and byte budget; split oversized output sets or plugin indexes into smaller
   artifacts. Native code rejects trailing JSON and closes streams on failure.
+
+REGISTRY OUTAGES AND LOCAL OPERATION
+
+  OCI caches are optional. Every CLI build retains an authoritative local CAS;
+  if cache.backends begins with OCI, Mu inserts ~/.mu/cache before it and
+  repairs remote hits locally. Configured remote writes remain best-effort.
+
+  Remote existence/action-result probes have a two-second budget covering auth
+  and metadata reads. Concurrent cold actions share the initial reachability
+  probe. A failing registry is skipped for the rest of that store/command;
+  the next invocation retries it. Warm local receipts need no registry request.
+  Parent cancellation does not mark a healthy registry unavailable.
+
+  Registry and Mu-managed download clients bound connect/TLS setup to three
+  seconds, response-header waits to five seconds, and read/write inactivity
+  to thirty seconds. Large uploads/downloads can continue while making progress;
+  there is no short whole-transfer timeout. HTTP/1.1 keeps progress deadlines
+  attributable to each transfer. Explicit push/publish/login/discovery reports
+  failed or incomplete remote work rather than claiming success.
+
+  To bypass registry probes and dependency downloads immediately:
+
+    mu build --offline //target
+    mu observe --offline //target
+    mu scratch --offline
+
+  --offline uses local/cached CUE modules and source/toolchain artifacts. Missing
+  required data fails with its requested identity; another plugin/toolchain
+  version is never substituted. Network performed by configured preprocessors,
+  plugins, external MU_SCRATCH commands, and actions remains their own contract.
+  --offline is rejected for registry publication, login, and remote discovery.
+  Local inspection and cache-push dry-run remain available.
+
+  --no-cache forces action execution while retaining CAS storage needed by
+  plugins and toolchains. It is not an offline switch; combine with --offline
+  to rebuild without registry access.

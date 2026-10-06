@@ -13,7 +13,8 @@ FLAGS
   --expect-plan-sha256 HEX
                     Plan once, compare exact plan-v2 identity, and execute that
                     same in-memory graph only on a match.
-  --no-cache        Skip cache reads — rebuild everything.
+  --no-cache        Skip action-result reads; retain dependency CAS storage.
+  --offline         Use local dependencies; disable Mu-owned remote access.
   --no-discover-cache
                     Force live plugin discovery instead of its digest cache.
   --jobs N          Max parallel actions (default: NumCPU).

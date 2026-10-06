@@ -385,3 +385,25 @@ CACHED VERSION SELECTION
   Standalone plugin files publish through verified atomic replacement at
   plugin-<full digest>.<extension>. Failed copy/close/digest checks leave no
   advertised file. Older versions are retained for running processes.
+
+LOCAL DEPENDENCIES DURING REGISTRY OUTAGES
+
+  Planning resolves only plugins and toolchains needed by the selected closed
+  target graph. An unused remote plugin does not block a local target. Provider
+  plugins introduced by action-level sealed claims are resolved during planning,
+  retained by exact identity, and started for execution without refetching.
+
+  Full-digest extracted bundles and verified standalone files are checked before
+  CAS/network probes. A cached native digest-only plugin no longer implies a
+  Babashka download. Extracted toolchain binaries use verified full-digest paths,
+  so a cached file of another version cannot be selected by name alone.
+
+  mu plugin info --offline <name>
+  mu guide plugin --offline <name>
+  mu plugin list --cached --json
+
+  Catalog search/install/update supports --offline with a local file:// catalog
+  and already-resolved artifacts. It fails rather than downloading missing
+  package data. Remote discovery returns failure if its results are incomplete
+  because a registry cannot be reached; 404/405 tag-list endpoints alone retain
+  the existing unversioned-row fallback.

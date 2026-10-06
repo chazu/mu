@@ -107,3 +107,15 @@ COMMANDS
   mu scratch --no-cache   Force re-download and rebuild.
   mu cache ls --toolchains   List cached toolchains.
   mu cache inspect <name>    Inspect a cached toolchain.
+
+LOCAL RECOVERY
+
+  A toolchain result-cache miss or outage can be rebuilt from a downloaded
+  archive whose SHA-256 still matches the configuration. The archive is checked
+  before contacting its URL. An extracted tree alone is not sufficient evidence
+  of that archive identity. --offline fails immediately if no verified archive
+  or usable cached manifest/artifacts exist.
+
+  Extracted runtime binaries are verified and published atomically under their
+  full artifact digest. Matching legacy name-only binaries can be migrated to
+  this path without a registry fetch; mismatched versions are rejected.
