@@ -76,9 +76,19 @@ func TestTieredRepairFileLivesUntilCallerClose(t *testing.T) {
 	assertNoReplayFiles(t, dir)
 }
 
-type cancellingReader struct{ cancel context.CancelFunc }
+type cancellingReader struct {
+	cancel context.CancelFunc
+	done   bool
+}
 
-func (r cancellingReader) Read(p []byte) (int, error) { r.cancel(); return copy(p, "partial"), nil }
+func (r *cancellingReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	r.cancel()
+	return copy(p, "partial"), nil
+}
 
 func TestTieredCancelledSpoolCleansUp(t *testing.T) {
 	dir := t.TempDir()
@@ -87,7 +97,7 @@ func TestTieredCancelledSpoolCleansUp(t *testing.T) {
 	defer cancel()
 	local := newFake()
 	tier := &cas.Tiered{Layers: []cas.Store{local, newFake()}, WriteThrough: true}
-	_, err := tier.Put(ctx, cancellingReader{cancel: cancel})
+	_, err := tier.Put(ctx, &cancellingReader{cancel: cancel})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled put: %v", err)
 	}

@@ -508,7 +508,7 @@ func (p *Process) Close() error {
 		select {
 		case <-p.stderrDone:
 		case <-timer.C:
-			p.stderr.Close()
+			p.abort()
 			<-p.stderrDone
 		}
 		p.stdout.Close()
