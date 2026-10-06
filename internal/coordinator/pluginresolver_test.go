@@ -1,13 +1,121 @@
 package coordinator
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/chazu/mu/internal/config"
 )
+
+func TestExtractDirFromCAS_RejectsIncompleteAndUnsupportedBundles(t *testing.T) {
+	for _, kind := range []string{"truncated", "symlink", "duplicate", "traversal"} {
+		t.Run(kind, func(t *testing.T) {
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			if err := tw.WriteHeader(&tar.Header{Name: "ok.sh", Size: 2, Mode: 0o755}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tw.Write([]byte("ok")); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "truncated":
+				if err := tw.WriteHeader(&tar.Header{Name: "partial", Size: 100}); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				if err := tw.WriteHeader(&tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "outside"}); err != nil {
+					t.Fatal(err)
+				}
+			case "duplicate":
+				if err := tw.WriteHeader(&tar.Header{Name: "./ok.sh"}); err != nil {
+					t.Fatal(err)
+				}
+			case "traversal":
+				if err := tw.WriteHeader(&tar.Header{Name: "../escape"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if kind != "truncated" {
+				if err := tw.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := newTestStore(t)
+			digest, err := store.Put(context.Background(), bytes.NewReader(buf.Bytes()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := &PluginResolver{Store: store, CacheDir: t.TempDir()}
+			for range 2 {
+				if _, err := r.extractDirFromCAS(context.Background(), "test", digest); err == nil {
+					t.Fatal("invalid bundle accepted")
+				}
+			}
+			entries, err := os.ReadDir(filepath.Join(r.CacheDir, "test"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("failed extraction left cache entries: %v", entries)
+			}
+		})
+	}
+}
+
+func TestExtractDirFromCAS_ConcurrentPublicationPreservesOldBundles(t *testing.T) {
+	store := newTestStore(t)
+	r := &PluginResolver{Store: store, CacheDir: t.TempDir()}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "name..sh", Size: 2, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := store.Put(context.Background(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(r.CacheDir, "test", "bundle-old", "in-use")
+	if err := os.MkdirAll(filepath.Dir(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			dir, err := r.extractDirFromCAS(context.Background(), "test", digest)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if !strings.HasSuffix(dir, digest.Hash) {
+				t.Error("cache path does not use full digest")
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "name..sh"))
+			if err != nil || string(data) != "ok" {
+				t.Errorf("incomplete published bundle: %q, %v", data, err)
+			}
+		})
+	}
+	wg.Wait()
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("removed in-use bundle: %v", err)
+	}
+}
 
 func TestResolveLocalFile(t *testing.T) {
 	store := newTestStore(t)

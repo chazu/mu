@@ -304,7 +304,7 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 	if err := updateMuCuePlugin(cli.ProjectRoot, selected.Name, resolved.Digest.String()); err != nil {
 		return plugincatalog.LockedPlugin{}, fmt.Errorf("update mu.cue: %w", err)
 	}
-	if err := writeInstalledPluginMetadata(home, selected, resolved.Digest); err != nil {
+	if err := writeInstalledPluginMetadata(resolved.Def.WorkDir, selected, resolved.Digest); err != nil {
 		return plugincatalog.LockedPlugin{}, err
 	}
 	lock.Catalog = plugincatalog.LockedCatalog{
@@ -346,12 +346,7 @@ type installedPluginMetadata struct {
 	PUDLMappings []plugincatalog.PUDLMapping `json:"pudl_mappings,omitempty"`
 }
 
-func writeInstalledPluginMetadata(home string, selected plugincatalog.Plugin, digest cas.Digest) error {
-	short := digest.Hash
-	if len(short) > 12 {
-		short = short[:12]
-	}
-	bundleDir := filepath.Join(home, ".mu", "plugins", selected.Name, "bundle-"+short)
+func writeInstalledPluginMetadata(bundleDir string, selected plugincatalog.Plugin, digest cas.Digest) error {
 	if info, err := os.Stat(bundleDir); err != nil {
 		return fmt.Errorf("locate installed plugin %q: %w", selected.Name, err)
 	} else if !info.IsDir() {

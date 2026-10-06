@@ -403,39 +403,47 @@ func (r *PluginResolver) bundleDir(ctx context.Context, dirPath string, files []
 	return dgst, nil
 }
 
-// extractDirFromCAS extracts a plugin tar bundle from CAS to a stable
-// directory: ~/.mu/plugins/<name>/bundle-<hash>/.
+// extractDirFromCAS publishes a complete plugin bundle by atomic rename. The
+// full-digest namespace ignores partial short-hash directories left by the old
+// extractor and avoids collisions between bundles sharing a hash prefix. Older
+// bundles remain available to processes that may still be using them.
 func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgst cas.Digest) (string, error) {
-	dir := filepath.Join(r.CacheDir, name)
-	short := dgst.Hash
-	if len(short) > 12 {
-		short = short[:12]
+	if !filepath.IsLocal(name) || filepath.Base(name) != name || name == "." {
+		return "", fmt.Errorf("invalid plugin cache name %q", name)
 	}
-	extractDir := filepath.Join(dir, "bundle-"+short)
-
-	// Skip if already extracted.
-	if _, err := os.Stat(extractDir); err == nil {
+	dir := filepath.Join(r.CacheDir, name)
+	extractDir := filepath.Join(dir, "bundle-"+dgst.Hash)
+	complete := func() bool {
+		info, err := os.Lstat(extractDir)
+		return err == nil && info.IsDir()
+	}
+	if complete() {
 		return extractDir, nil
 	}
-
-	// Clean old bundle versions.
-	entries, _ := filepath.Glob(filepath.Join(dir, "bundle-*"))
-	for _, old := range entries {
-		if old != extractDir {
-			os.RemoveAll(old)
-		}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
 	}
-
-	// Get tar from CAS.
+	staging, err := os.MkdirTemp(dir, ".bundle-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(staging)
+	root, err := os.OpenRoot(staging)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
 	rc, err := r.Store.Get(ctx, dgst)
 	if err != nil {
 		return "", fmt.Errorf("get plugin bundle from CAS: %w", err)
 	}
 	defer rc.Close()
-
-	// Extract tar entries.
 	tr := tar.NewReader(rc)
+	seen := make(map[string]bool)
 	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
@@ -443,35 +451,55 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 		if err != nil {
 			return "", fmt.Errorf("read tar entry: %w", err)
 		}
-
-		// Validate: no absolute paths, no path traversal.
-		if filepath.IsAbs(hdr.Name) || strings.Contains(hdr.Name, "..") {
+		if !filepath.IsLocal(hdr.Name) || filepath.Clean(hdr.Name) == "." {
 			return "", fmt.Errorf("tar entry %q: path traversal not allowed", hdr.Name)
 		}
-
-		destPath := filepath.Join(extractDir, hdr.Name)
-
-		// Ensure parent directory exists.
-		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-			return "", err
+		entry := filepath.Clean(hdr.Name)
+		if seen[entry] {
+			return "", fmt.Errorf("duplicate tar entry %q", hdr.Name)
 		}
-
-		mode := fs.FileMode(hdr.Mode)
-		if mode == 0 {
-			mode = 0o644
+		seen[entry] = true
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := root.MkdirAll(entry, 0o755); err != nil {
+				return "", err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := root.MkdirAll(filepath.Dir(entry), 0o755); err != nil {
+				return "", err
+			}
+			mode := fs.FileMode(hdr.Mode) & fs.ModePerm
+			if mode == 0 {
+				mode = 0o644
+			}
+			f, err := root.OpenFile(entry, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode)
+			if err != nil {
+				return "", fmt.Errorf("create %s: %w", hdr.Name, err)
+			}
+			_, copyErr := io.Copy(f, tr)
+			closeErr := f.Close()
+			if copyErr != nil {
+				return "", fmt.Errorf("extract %s: %w", hdr.Name, copyErr)
+			}
+			if closeErr != nil {
+				return "", fmt.Errorf("close %s: %w", hdr.Name, closeErr)
+			}
+		default:
+			return "", fmt.Errorf("tar entry %q: unsupported type %d", hdr.Name, hdr.Typeflag)
 		}
-
-		f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-		if err != nil {
-			return "", fmt.Errorf("create %s: %w", hdr.Name, err)
-		}
-		if _, err := io.Copy(f, tr); err != nil {
-			f.Close()
-			return "", fmt.Errorf("extract %s: %w", hdr.Name, err)
-		}
-		f.Close()
 	}
-
+	if len(seen) == 0 {
+		return "", fmt.Errorf("empty plugin bundle")
+	}
+	if err := root.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(staging, extractDir); err != nil {
+		// A concurrent resolver may have published this exact bundle first.
+		if !complete() {
+			return "", fmt.Errorf("publish plugin bundle: %w", err)
+		}
+	}
 	return extractDir, nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/schemacache"
@@ -93,7 +94,7 @@ func runPluginPush(args []string) int {
 		}
 	}
 
-	files, isBundle, err := collectPluginFiles(name, entrypoint)
+	files, isBundle, err := collectPluginFiles(name, entrypoint, dgst)
 	if err != nil {
 		return c.fail(exitFail, "%v", err)
 	}
@@ -202,7 +203,7 @@ func pushPluginToRegistry(ctx context.Context, pluginRepo, indexRepo oci.Registr
 // For single-file plugins, entrypoint is used as the destination key when
 // provided. If entrypoint is empty, the key falls back to <name><ext> derived
 // from the cache filename.
-func collectPluginFiles(name, entrypoint string) (map[string][]byte, bool, error) {
+func collectPluginFiles(name, entrypoint string, selected cas.Digest) (map[string][]byte, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, err
@@ -215,9 +216,39 @@ func collectPluginFiles(name, entrypoint string) (map[string][]byte, bool, error
 
 	out := map[string][]byte{}
 	isBundle := false
+	selectedName := ""
+	for _, e := range entries {
+		if e.IsDir() && e.Name() == "bundle-"+selected.Hash {
+			selectedName = e.Name()
+			break
+		}
+	}
+	if selectedName == "" {
+		for _, e := range entries {
+			hash := ""
+			if e.IsDir() && strings.HasPrefix(e.Name(), "bundle-") {
+				hash = strings.TrimPrefix(e.Name(), "bundle-")
+			} else if !e.IsDir() && strings.HasPrefix(e.Name(), "plugin-") {
+				hash = strings.TrimPrefix(e.Name(), "plugin-")
+				hash = strings.TrimSuffix(hash, filepath.Ext(hash))
+			}
+			if hash != "" && strings.HasPrefix(selected.Hash, hash) {
+				if selectedName != "" {
+					return nil, false, fmt.Errorf("ambiguous cached plugin files for %s", selected)
+				}
+				selectedName = e.Name()
+			}
+		}
+	}
 
 	for _, e := range entries {
 		full := filepath.Join(dir, e.Name())
+		// Older bundles may still be serving another running mu process.
+		// Publish only the digest resolved for this build, never a merged tree
+		// assembled from several cached versions. Support legacy short hashes.
+		if e.Name() != selectedName {
+			continue
+		}
 		if e.IsDir() && strings.HasPrefix(e.Name(), "bundle-") {
 			isBundle = true
 			err := filepath.Walk(full, func(p string, info os.FileInfo, err error) error {

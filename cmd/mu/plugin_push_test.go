@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/cas/oci"
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -253,7 +254,7 @@ func TestCollectPluginFilesUsesEntrypointForSingleFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, isBundle, err := collectPluginFiles("fmt", "format.bb")
+	files, isBundle, err := collectPluginFiles("fmt", "format.bb", cas.NewSHA256("deadbeef"))
 	if err != nil {
 		t.Fatalf("collectPluginFiles: %v", err)
 	}
@@ -265,6 +266,32 @@ func TestCollectPluginFilesUsesEntrypointForSingleFile(t *testing.T) {
 	}
 	if _, ok := files["fmt.bb"]; ok {
 		t.Fatal("did not expect mangled key fmt.bb")
+	}
+}
+
+func TestCollectPluginFilesSelectsOneCompleteBundle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hash := repeatByte('a', 64)
+	dir := filepath.Join(home, ".mu", "plugins", "demo")
+	for _, version := range []string{hash[:12], hash, repeatByte('b', 64)} {
+		bundle := filepath.Join(dir, "bundle-"+version)
+		if err := os.MkdirAll(bundle, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bundle, version+".txt"), []byte(version), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, isBundle, err := collectPluginFiles("demo", "", cas.NewSHA256(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isBundle || len(files) != 1 || string(files[hash+".txt"]) != hash {
+		t.Fatalf("merged cached versions: %v", keysOf(files))
+	}
+	if _, _, err := collectPluginFiles("demo", "", cas.NewSHA256(repeatByte('c', 64))); err == nil {
+		t.Fatal("unresolved digest accepted")
 	}
 }
 

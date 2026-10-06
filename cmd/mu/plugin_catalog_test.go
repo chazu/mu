@@ -85,7 +85,7 @@ func TestInstallCatalogPluginUpdatesProjectAndLock(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".mu", "plugins", "demo")); err != nil {
 		t.Fatalf("plugin was not extracted into cache: %v", err)
 	}
-	metadata, err := os.ReadFile(filepath.Join(home, ".mu", "plugins", "demo", "bundle-"+strings.TrimPrefix(entry.BundleDigest, "sha256:")[:12], "mu-plugin.json"))
+	metadata, err := os.ReadFile(filepath.Join(home, ".mu", "plugins", "demo", "bundle-"+strings.TrimPrefix(entry.BundleDigest, "sha256:"), "mu-plugin.json"))
 	if err != nil {
 		t.Fatalf("installed plugin metadata missing: %v", err)
 	}
