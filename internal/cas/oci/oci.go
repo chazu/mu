@@ -287,7 +287,7 @@ func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
 		Digest:    toOCIDigest(dgst),
 	}
 	if err := s.repo.Delete(ctx, desc); err != nil {
-		return fmt.Errorf("oci: delete blob %s: %w", dgst, err)
+		return s.failed(ctx, fmt.Errorf("oci: delete blob %s: %w", dgst, err))
 	}
 	return nil
 }
@@ -379,7 +379,7 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 	// Push the manifest blob.
 	if err := s.repo.Push(ctx, manifestDesc, bytes.NewReader(manifestBytes)); err != nil {
 		if !isAlreadyExists(err) {
-			return fmt.Errorf("oci: push action manifest: %w", err)
+			return s.failed(ctx, fmt.Errorf("oci: push action manifest: %w", err))
 		}
 	}
 

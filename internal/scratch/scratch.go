@@ -24,6 +24,7 @@ import (
 
 // Builder fetches, extracts, verifies, and registers toolchains.
 type Builder struct {
+	NoCache  bool // rebuild toolchain results; verified archives remain inputs
 	Store    cas.Store
 	Registry *coordinator.ToolchainRegistry
 	CacheDir string // directory for downloaded archives and extracted trees
@@ -46,7 +47,11 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	version := tc.Config.Version
 
 	// Check CAS for existing manifest (cache hit -> skip).
-	existing, err := b.Registry.Lookup(ctx, name, version)
+	var existing *coordinator.ToolchainManifest
+	var err error
+	if !b.NoCache {
+		existing, err = b.Registry.Lookup(ctx, name, version)
+	}
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}

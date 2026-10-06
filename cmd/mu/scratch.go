@@ -51,6 +51,7 @@ func runScratch(args []string) int {
 		registry := coordinator.NewToolchainRegistry(cli.Store)
 		home, _ := os.UserHomeDir()
 		b := &scratch.Builder{
+			NoCache:  *noCache,
 			Store:    cli.Store,
 			Registry: registry,
 			CacheDir: filepath.Join(home, ".mu", "cache"),
