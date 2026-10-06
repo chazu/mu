@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -166,4 +168,68 @@ func captureBuildCode(t *testing.T, run func() int) int {
 	_ = reader.Close()
 	os.Stdout = original
 	return code
+}
+
+func TestPlanOrderHelper(t *testing.T) {
+	if config := os.Getenv("MU_PLAN_ORDER_CONFIG"); config != "" {
+		os.Exit(runBuild([]string{"--config", config, "--plan", "--json", "//consumer"}))
+	}
+}
+
+func TestImplicitPlanDigestStableAcrossProcesses(t *testing.T) {
+	root := t.TempDir()
+	script := `#!/bin/sh
+while IFS= read -r line; do
+ case "$line" in
+ *'"method":"discover"'*) echo '{"name":"order","version":"1","protocol_version":1,"capabilities":["discover","plan"]}' ;;
+ *'"name":"//p/a"'*) echo '{"actions":[{"id":"run","command":["true"],"outputs":["a"]}],"declared_outputs":{"file":"a"}}' ;;
+ *'"name":"//p/b"'*) echo '{"actions":[{"id":"run","command":["true"],"outputs":["b"]}],"declared_outputs":{"file":"b"}}' ;;
+ *'"name":"//p/c"'*) echo '{"actions":[{"id":"run","command":["true"],"outputs":["c"]}],"declared_outputs":{"file":"c"}}' ;;
+ *'"name":"//p/d"'*) echo '{"actions":[{"id":"run","command":["true"],"outputs":["d"]}],"declared_outputs":{"file":"d"}}' ;;
+ *) echo '{"actions":[{"id":"run","command":["true"],"inputs":{"a":"a","b":"b","c":"c","d":"d"}}],"declared_outputs":{}}' ;;
+ esac
+done
+`
+	pluginPath := filepath.Join(root, "plugin.sh")
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := fmt.Sprintf(`package mu
+plugins: [{name:"order",script:%q}]
+targets: [
+ {target:"//p/a",toolchain:"order"},
+ {target:"//p/b",toolchain:"order"},
+ {target:"//p/c",toolchain:"order"},
+ {target:"//p/d",toolchain:"order"},
+ {target:"//consumer",toolchain:"order",deps:["//p/a","//p/b","//p/c","//p/d"]},
+]
+`, pluginPath)
+	configPath := filepath.Join(root, "mu.cue")
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var first string
+	for i := 0; i < 12; i++ {
+		child := exec.Command(os.Args[0], "-test.run=^TestPlanOrderHelper$")
+		child.Env = append(os.Environ(), "MU_PLAN_ORDER_CONFIG="+configPath)
+		payload, err := child.Output()
+		if err != nil {
+			t.Fatalf("child plan: %v, %s", err, payload)
+		}
+		var doc struct {
+			Digest string `json:"plan_sha256"`
+		}
+		if err := json.Unmarshal(payload, &doc); err != nil {
+			t.Fatalf("decode plan: %v, %s", err, payload)
+		}
+		if len(strings.TrimSpace(doc.Digest)) != 64 {
+			t.Fatalf("invalid plan digest: %q", doc.Digest)
+		}
+		if i == 0 {
+			first = doc.Digest
+		}
+		if doc.Digest != first {
+			t.Fatalf("implicit-edge plan changed across processes: %s != %s", doc.Digest, first)
+		}
+	}
 }
