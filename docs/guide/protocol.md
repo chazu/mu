@@ -16,6 +16,15 @@ LIFECYCLE
   3. mu sends plan/observe/resolve_secret/store_secret/advise requests as needed.
   4. mu closes stdin when done — plugin exits.
 
+  Request deadlines cover waiting for another request, writing stdin, and
+  reading stdout. Cancelling an active exchange terminates the plugin rather
+  than risking pairing its late response with another request. Cancelling a
+  queued request leaves the active request alone. On Unix, ordinary plugin
+  descendants share a dedicated process group and are killed on cancellation.
+  Close waits one second for an idle plugin to exit on EOF, then kills it and
+  joins owned I/O. Descendants that deliberately leave the group are outside
+  that cancellation guarantee; custom verbose writers must not block forever.
+
 METHODS
 
   discover (required)

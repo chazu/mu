@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -29,6 +30,8 @@ type Process struct {
 	name    string
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	stderr  io.ReadCloser
 	scanner *bufio.Scanner
 	logs    *logBuffer
 
@@ -40,7 +43,14 @@ type Process struct {
 
 	stderrDone chan struct{} // closed when the stderr pump exits
 
-	mu sync.Mutex // serializes request/response pairs on stdout
+	gate      chan struct{} // serializes complete exchanges; acquisition is cancellable
+	closed    chan struct{}
+	stopOnce  sync.Once
+	abortOnce sync.Once
+	closeOnce sync.Once
+	closeErr  error
+	waitDone  chan struct{}
+	waitErr   error // published by closing waitDone
 }
 
 // ProcessOptions configures optional behaviour for a spawned plugin.
@@ -71,6 +81,7 @@ func StartProcessWithOptions(name string, command []string, projectRoot string, 
 	}
 
 	cmd := exec.Command(command[0], command[1:]...)
+	isolateProcess(cmd)
 	if workDir != "" {
 		cmd.Dir = workDir
 	} else {
@@ -82,22 +93,31 @@ func StartProcessWithOptions(name string, command []string, projectRoot string, 
 		return nil, fmt.Errorf("plugin %q: stdin pipe: %w", name, err)
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		stdin.Close()
 		return nil, fmt.Errorf("plugin %q: stdout pipe: %w", name, err)
 	}
 
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		stdin.Close()
+		stdout.Close()
+		stdoutWriter.Close()
 		return nil, fmt.Errorf("plugin %q: stderr pipe: %w", name, err)
 	}
 
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 	p := &Process{
 		name:       name,
 		cmd:        cmd,
 		stdin:      stdin,
+		stdout:     stdout,
+		stderr:     stderr,
+		gate:       make(chan struct{}, 1),
+		closed:     make(chan struct{}),
+		waitDone:   make(chan struct{}),
 		scanner:    bufio.NewScanner(stdout),
 		logs:       newLogBuffer(opts.LogCapacity),
 		liveSink:   opts.LiveSink,
@@ -109,9 +129,23 @@ func StartProcessWithOptions(name string, command []string, projectRoot string, 
 	p.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		stdoutWriter.Close()
+		stderr.Close()
+		stderrWriter.Close()
 		return nil, fmt.Errorf("plugin %q: start: %w", name, err)
 	}
 
+	// Own the read ends independently of exec.Cmd.Wait so final stderr is
+	// drained rather than lost when Wait closes internally managed pipes.
+	stdoutWriter.Close()
+	stderrWriter.Close()
+	p.gate <- struct{}{}
+	go func() {
+		p.waitErr = cmd.Wait()
+		close(p.waitDone)
+	}()
 	go p.pumpStderr(stderr)
 
 	return p, nil
@@ -164,66 +198,87 @@ func (p *Process) logsSnapshot() string {
 // oldest first). Safe to call before or after Close.
 func (p *Process) Logs() []string { return p.logs.Snapshot() }
 
-// send writes a JSON request line and reads a JSON response line.
-// It holds the mutex to ensure request/response pairs aren't interleaved.
+// send serializes each write/read exchange, including its cancellation and
+// cleanup. A cancelled exchange terminates the process: a half-sent request or
+// late response cannot safely be paired with a later request.
 func (p *Process) send(ctx context.Context, req Request, resp any) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Check if process is still alive before sending.
-	if p.cmd.ProcessState != nil {
-		return fmt.Errorf("plugin %q: process exited (code %d): %s",
-			p.name, p.cmd.ProcessState.ExitCode(), p.logsSnapshot())
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("plugin %q: %w", p.name, ctx.Err())
+	case <-p.closed:
+		return fmt.Errorf("plugin %q: process closed", p.name)
+	case <-p.gate:
 	}
-
-	// Encode request as a single JSON line.
+	defer func() { p.gate <- struct{}{} }()
+	// Recheck after acquisition; the ready gate may win against cancellation.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("plugin %q: %w", p.name, err)
+	}
+	select {
+	case <-p.closed:
+		return fmt.Errorf("plugin %q: process closed", p.name)
+	case <-p.waitDone:
+		return fmt.Errorf("plugin %q: process exited: %s", p.name, p.logsSnapshot())
+	default:
+	}
 	line, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("plugin %q: marshal request: %w", p.name, err)
 	}
 	line = append(line, '\n')
-
-	if _, err := p.stdin.Write(line); err != nil {
-		return fmt.Errorf("plugin %q: write request: %w", p.name, err)
-	}
-
-	// Read response line with timeout via context.
-	type scanResult struct {
+	type exchangeResult struct {
 		line []byte
 		err  error
 	}
-	ch := make(chan scanResult, 1)
+	done := make(chan exchangeResult, 1)
 	go func() {
+		if _, err := p.stdin.Write(line); err != nil {
+			done <- exchangeResult{err: fmt.Errorf("plugin %q: write request: %w", p.name, err)}
+			return
+		}
 		if p.scanner.Scan() {
-			// Copy the bytes since scanner reuses the buffer.
-			b := make([]byte, len(p.scanner.Bytes()))
-			copy(b, p.scanner.Bytes())
-			ch <- scanResult{line: b}
+			done <- exchangeResult{line: append([]byte(nil), p.scanner.Bytes()...)}
 		} else {
-			ch <- scanResult{err: p.scanError()}
+			done <- exchangeResult{err: p.scanError()}
 		}
 	}()
-
 	select {
 	case <-ctx.Done():
-		// Close stdin first so the child process sees EOF and can exit
-		// cleanly, then kill the process to ensure it doesn't linger.
-		p.stdin.Close()
-		if p.cmd.Process != nil {
-			p.cmd.Process.Kill()
-		}
+		p.abort()
+		<-done       // pipes are closed; join before another caller can own the scanner
+		<-p.waitDone // reap the direct child before returning cancellation
 		return fmt.Errorf("plugin %q: %w", p.name, ctx.Err())
-	case result := <-ch:
+	case <-p.closed:
+		p.abort()
+		<-done
+		return fmt.Errorf("plugin %q: process closed", p.name)
+	case result := <-done:
 		if result.err != nil {
+			p.abort()
 			return result.err
 		}
 		if err := json.Unmarshal(result.line, resp); err != nil {
-			// Provider responses may contain plaintext sealed values even when
-			// malformed. Report the decoder error without copying wire bytes.
+			// Never include wire bytes: provider responses can contain sealed values.
 			return fmt.Errorf("plugin %q: unmarshal %s response: %w", p.name, req.Method, err)
 		}
 		return nil
 	}
+}
+
+func (p *Process) stop() {
+	p.stopOnce.Do(func() { close(p.closed); p.stdin.Close() })
+}
+
+// abort closes our pipe ends as well as killing the child. Descendants may
+// inherit pipe descriptors; killing only the direct child would leave reads
+// blocked until those descendants also exit.
+func (p *Process) abort() {
+	p.stop()
+	p.abortOnce.Do(func() {
+		p.stdout.Close()
+		p.stderr.Close()
+		killProcess(p.cmd)
+	})
 }
 
 // scanError returns a descriptive error when the scanner fails.
@@ -432,22 +487,39 @@ func (p *Process) Advise(ctx context.Context, phase string, manifest any, advCtx
 	return &resp, nil
 }
 
-// Close gracefully shuts down the plugin process.
-// Closes stdin and waits for the process and the stderr pump to exit.
+// Close shuts down once and joins all owned I/O and the direct child. Idle
+// plugins get one second to exit on stdin EOF; unresponsive plugins are killed.
+// Concurrent callers receive the same result. Custom LiveSink writers must not
+// block indefinitely, since their Write calls cannot be interrupted here.
 func (p *Process) Close() error {
-	p.stdin.Close()
-	err := p.cmd.Wait()
-	// Drain the stderr pump — cmd.Wait() signals process exit but the
-	// pump may still be flushing buffered lines before EOF is observed.
-	<-p.stderrDone
-	if err != nil {
-		// Exit code != 0 after stdin close is expected for some plugins.
-		// Only return error if there's useful stderr.
-		if stderr := p.logsSnapshot(); stderr != "" {
-			return fmt.Errorf("plugin %q: exit: %w: %s", p.name, err, stderr)
+	p.closeOnce.Do(func() {
+		p.stop()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-p.waitDone:
+		case <-timer.C:
+			p.abort()
+			<-p.waitDone
 		}
-	}
-	return nil
+		<-p.gate // any exchange has joined its worker; no new sends can enter
+		defer func() { p.gate <- struct{}{} }()
+		timer.Reset(time.Second)
+		select {
+		case <-p.stderrDone:
+		case <-timer.C:
+			p.stderr.Close()
+			<-p.stderrDone
+		}
+		p.stdout.Close()
+		p.stderr.Close()
+		if p.waitErr != nil {
+			if stderr := p.logsSnapshot(); stderr != "" {
+				p.closeErr = fmt.Errorf("plugin %q: exit: %w: %s", p.name, p.waitErr, stderr)
+			}
+		}
+	})
+	return p.closeErr
 }
 
 // Name returns the plugin's name (from the config, not from discover).
