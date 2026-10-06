@@ -5,11 +5,65 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/plugin"
 )
+
+func TestResolveConfinesSymlinkReads(t *testing.T) {
+	for _, ewe := range []bool{false, true} {
+		for _, outside := range []bool{false, true} {
+			name := "input"
+			if ewe {
+				name = "ewe"
+			}
+			if outside {
+				name += " outside"
+			} else {
+				name += " inside"
+			}
+			t.Run(name, func(t *testing.T) {
+				root := t.TempDir()
+				target := filepath.Join(root, "actual")
+				if outside {
+					target = filepath.Join(t.TempDir(), "actual")
+				}
+				if err := os.WriteFile(target, []byte("program or input"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
+					t.Fatal(err)
+				}
+				// Root follows relative symlinks that stay inside the tree.
+				if !outside {
+					if err := os.Remove(filepath.Join(root, "link")); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink("actual", filepath.Join(root, "link")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				spec := plugin.ActionSpec{ID: "test", Inputs: map[string]string{"src": "link"}}
+				if ewe {
+					spec.Inputs = nil
+					spec.EweSource = "link"
+				}
+				_, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, root, newTestStore(t), nil)
+				if outside && err == nil {
+					t.Fatal("read escaped project through symlink")
+				}
+				if !outside && err != nil {
+					t.Fatalf("in-project link rejected: %v", err)
+				}
+				if err != nil && !strings.Contains(err.Error(), "test") {
+					t.Fatalf("missing action context: %v", err)
+				}
+			})
+		}
+	}
+}
 
 func TestResolveFileInputs(t *testing.T) {
 	dir := t.TempDir()

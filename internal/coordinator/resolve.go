@@ -55,20 +55,8 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 				continue
 			}
 
-			// Treat relative paths as project-root-relative. Absolute paths are
-			// accepted for callers that materialize inputs in a temporary
-			// workspace, but remain confined to the project root below.
-			path := value
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(projectRoot, path)
-			}
-			path = filepath.Clean(path)
-			cleanRoot := filepath.Clean(projectRoot) + string(filepath.Separator)
-			if path != filepath.Clean(projectRoot) && !strings.HasPrefix(path, cleanRoot) {
-				return nil, fmt.Errorf("resolve action %q input %q: path %q escapes project root", spec.ID, name, value)
-			}
 			dgst, err := func() (cas.Digest, error) {
-				f, err := os.Open(path)
+				f, err := openProjectFile(projectRoot, value)
 				if err != nil {
 					return cas.Digest{}, err
 				}
@@ -151,16 +139,11 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 		// execute time as inert content-addressed text.
 		var eweRef cas.Digest
 		if spec.EweSource != "" {
-			path := filepath.Clean(filepath.Join(projectRoot, spec.EweSource))
-			cleanRoot := filepath.Clean(projectRoot) + string(filepath.Separator)
-			if path != filepath.Clean(projectRoot) && !strings.HasPrefix(path, cleanRoot) {
-				return nil, fmt.Errorf("resolve action %q: ewe_source %q escapes project root", spec.ID, spec.EweSource)
-			}
 			if store == nil {
 				return nil, fmt.Errorf("resolve action %q: ewe_source set but no CAS store provided", spec.ID)
 			}
 			dgst, err := func() (cas.Digest, error) {
-				f, err := os.Open(path)
+				f, err := openProjectFile(projectRoot, spec.EweSource)
 				if err != nil {
 					return cas.Digest{}, err
 				}
@@ -224,4 +207,23 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 	}
 
 	return actions, nil
+}
+
+// openProjectFile allows project-relative paths and absolute paths lexically
+// inside the project, then confines symlink resolution through os.Root. A
+// check followed by os.Open would let a swapped symlink escape the root.
+func openProjectFile(projectRoot, name string) (*os.File, error) {
+	root, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	path := name
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, fmt.Errorf("path %q escapes project root", name)
+	}
+	return os.OpenInRoot(root, rel)
 }
