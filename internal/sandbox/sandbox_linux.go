@@ -16,6 +16,13 @@ import (
 
 const sandboxInitArg = "__sandbox_init__"
 
+// Re-exec works in both the CLI and Go test binaries importing this package.
+func init() {
+	if IsSandboxInit() {
+		RunInit()
+	}
+}
+
 func detectIsolation() IsolationLevel {
 	if userNamespacesAvailable() {
 		return IsolationNamespace
@@ -41,7 +48,7 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 		RootDir: s.rootDir,
 		WorkDir: s.workDir,
 		Command: command,
-		Env:     s.buildEnv(env),
+		Env:     s.namespaceEnv(env),
 		Network: network,
 	}
 
@@ -81,6 +88,17 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 		return exitCode, err, true
 	}
 	return exitCode, nil, true
+}
+
+func (s *Sandbox) namespaceEnv(env map[string]string) []string {
+	result := s.buildEnv(env)
+	for i, entry := range result {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == "PATH" || name == "TMPDIR" {
+			result[i] = strings.ReplaceAll(entry, s.rootDir+"/", "/")
+		}
+	}
+	return result
 }
 
 // initConfig is passed from parent to the re-exec'd child via stdin.
@@ -144,8 +162,17 @@ func RunInit() {
 		fatal("mount /proc: %v", err)
 	}
 
+	// Separate writable mounts before making the root mount read-only.
+	for _, dir := range []string{"/work", "/out", "/tmp"} {
+		if err := syscall.Mount(dir, dir, "", syscall.MS_BIND, ""); err != nil {
+			fatal("bind writable %s: %v", dir, err)
+		}
+	}
 	// 8. Make most of the filesystem read-only
 	makeReadOnly([]string{"/work", "/out", "/tmp", "/dev"})
+	if err := os.Chdir("/work"); err != nil {
+		fatal("enter work dir: %v", err)
+	}
 
 	// 9. Set hostname
 	syscall.Sethostname([]byte("mu-sandbox"))

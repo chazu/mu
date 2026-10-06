@@ -97,6 +97,9 @@ func (s *Sandbox) generateSBPL(network bool) string {
   (subpath "/usr/bin")
   (subpath "/usr/lib"))
 
+;; Path lookup may inspect metadata, but data reads stay within declared
+;; files and platform/toolchain runtime trees. Never grant a whole temp tree.
+(allow file-read-metadata)
 ;; Read-only access (file-read* covers data, metadata, xattr, search)
 (allow file-read*
   (literal "/")
@@ -106,14 +109,9 @@ func (s *Sandbox) generateSBPL(network bool) string {
   (subpath "/bin")
   (subpath "/sbin")
   (subpath "/usr")
-  (subpath "/opt")
-  (subpath "/private")
   (subpath "/System")
-  (subpath "/Library")
   (subpath "/Applications/Xcode.app/Contents/Developer")
   (subpath "/dev")
-  (subpath "/var")
-  (subpath "/tmp")
   (subpath "/etc"))
 
 ;; Writable: output + tmp + work dir

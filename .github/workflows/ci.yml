@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Go and native isolation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.2'
+          cache: true
+      - name: Enable unprivileged namespaces on the isolated Linux runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Unit tests
+        run: go test -p 2 -timeout 10m ./...
+      - name: Race tests
+        run: go test -race -p 2 -timeout 10m ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build -o "$RUNNER_TEMP/mu" ./cmd/mu
+      - name: Build static native acceptance helper
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o "$RUNNER_TEMP/mu-native-helper" ./internal/sandbox/testdata/native-helper
+      - name: Native sandbox and execution acceptance
+        env:
+          MU_REQUIRE_NATIVE_SANDBOX: '1'
+        run: |
+          export MU_NATIVE_HELPER="$RUNNER_TEMP/mu-native-helper"
+          go test -count=1 -v ./internal/sandbox -run '^TestNativeSandboxAcceptance$'
+          go test -race -count=1 ./internal/rootexec ./internal/dag ./internal/coordinator

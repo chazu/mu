@@ -162,6 +162,9 @@ func TestExec(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	defer sb.Cleanup()
+	// This unit exercises host-shell execution; native enforcement has its own
+	// static-helper acceptance test and is never inferred from this copy level.
+	sb.isolation = IsolationCopy
 
 	outFile := "hello.txt"
 	code, err := sb.Exec(context.Background(),
@@ -196,6 +199,9 @@ func TestExecPathIncludesBin(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	defer sb.Cleanup()
+	// This unit exercises host-shell execution; native enforcement has its own
+	// static-helper acceptance test and is never inferred from this copy level.
+	sb.isolation = IsolationCopy
 
 	// Write a fake tool to the bin directory.
 	toolPath := filepath.Join(sb.RootDir(), "bin", "mytool")
@@ -280,6 +286,7 @@ func TestExecHermeticEnv(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	defer sb.Cleanup()
+	sb.isolation = IsolationCopy
 
 	// Run env and check that only sandbox-controlled vars are present.
 	outFile := "env.txt"

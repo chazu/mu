@@ -162,6 +162,50 @@ func (s *Sandbox) CopySources(srcRoot string, relPaths []string) error {
 	return nil
 }
 
+// CopySourcesRoot reads from a pinned, confined source directory. In-tree
+// symlinks work; symlinks leaving the source root cannot reach the sandbox.
+func (s *Sandbox) CopySourcesRoot(root *os.Root, relPaths []string) error {
+	for _, rel := range relPaths {
+		if !filepath.IsLocal(rel) {
+			return fmt.Errorf("sandbox source %q is not local", rel)
+		}
+		src, err := root.Open(rel)
+		if err != nil {
+			return fmt.Errorf("sandbox source %q: %w", rel, err)
+		}
+		info, err := src.Stat()
+		if err == nil && !info.Mode().IsRegular() {
+			err = fmt.Errorf("source %q is not a regular file", rel)
+		}
+		dest := filepath.Join(s.workDir, rel)
+		if err == nil {
+			err = os.MkdirAll(filepath.Dir(dest), 0o755)
+		}
+		if err != nil {
+			src.Close()
+			return err
+		}
+		f, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			src.Close()
+			return err
+		}
+		_, copyErr := io.Copy(f, src)
+		readCloseErr := src.Close()
+		writeCloseErr := f.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if readCloseErr != nil {
+			return readCloseErr
+		}
+		if writeCloseErr != nil {
+			return writeCloseErr
+		}
+	}
+	return nil
+}
+
 // Exec runs a command inside the sandbox with a hermetic environment.
 // The command runs in the work directory. PATH includes the sandbox's bin
 // directory (where toolchain binaries are unpacked) plus any additional
