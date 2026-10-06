@@ -20,6 +20,71 @@ func baseAction() *dag.Action {
 	}
 }
 
+func TestActionKey_InheritedAndEmptyEnvironmentDiffer(t *testing.T) {
+	a, b := baseAction(), baseAction()
+	a.Env, b.Env = nil, map[string]string{}
+	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
+		t.Fatal("inherited and empty environments have the same key")
+	}
+}
+
+func TestActionKey_BareAndEmptySandboxDiffer(t *testing.T) {
+	a, b := baseAction(), baseAction()
+	b.Toolchain = map[string]cas.Digest{}
+	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
+		t.Fatal("bare and sandbox execution have the same key")
+	}
+}
+
+func TestActionKey_DelimitersCannotAliasFields(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b *dag.Action
+	}{
+		{"argv", &dag.Action{Command: []string{"a\ncmd:b"}}, &dag.Action{Command: []string{"a", "b"}}},
+		{"env newline", &dag.Action{Env: map[string]string{"A": "x\nenv:B=y"}}, &dag.Action{Env: map[string]string{"A": "x", "B": "y"}}},
+		{"env equals", &dag.Action{Env: map[string]string{"A=B": "C"}}, &dag.Action{Env: map[string]string{"A": "B=C"}}},
+		{"sealed metadata", &dag.Action{SealedInputs: map[string]string{"A=B": "C"}}, &dag.Action{SealedInputs: map[string]string{"A": "B=C"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if dag.ComputeActionKey(tc.a) == dag.ComputeActionKey(tc.b) {
+				t.Fatal("distinct execution identities have the same key")
+			}
+		})
+	}
+}
+
+func TestActionKey_ExecutionDeclarationsAffectKey(t *testing.T) {
+	for name, change := range map[string]func(*dag.Action){
+		"outputs":   func(a *dag.Action) { a.Outputs = []string{"new.txt"} },
+		"toolchain": func(a *dag.Action) { a.Toolchain = map[string]cas.Digest{"bin/cc": cas.NewSHA256("cc")} },
+		"sources":   func(a *dag.Action) { a.Sources = []string{"extra.c"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, b := baseAction(), baseAction()
+			change(b)
+			if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
+				t.Fatal("changed declaration did not invalidate the key")
+			}
+		})
+	}
+}
+
+func TestActionKey_DeclarationOrderIndependent(t *testing.T) {
+	a, b := baseAction(), baseAction()
+	a.Outputs, b.Outputs = []string{"a", "b"}, []string{"b", "a"}
+	a.Sources, b.Sources = []string{"c", "d"}, []string{"d", "c"}
+	a.Toolchain = map[string]cas.Digest{"cc": cas.NewSHA256("a"), "ld": cas.NewSHA256("b")}
+	b.Toolchain = map[string]cas.Digest{"ld": cas.NewSHA256("b"), "cc": cas.NewSHA256("a")}
+	if dag.ComputeActionKey(a) != dag.ComputeActionKey(b) {
+		t.Fatal("declaration ordering changed identity")
+	}
+	if a.Outputs[0] != "a" || b.Outputs[0] != "b" {
+		t.Fatal("hashing mutated the action")
+	}
+}
+
 func TestActionKey_Deterministic(t *testing.T) {
 	k1 := dag.ComputeActionKey(baseAction())
 	k2 := dag.ComputeActionKey(baseAction())

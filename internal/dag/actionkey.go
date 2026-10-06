@@ -2,129 +2,96 @@ package dag
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/chazu/mu/internal/cas"
 )
 
-// ComputeActionKey computes a deterministic cache key for an Action.
-// The key is a SHA-256 hash of the canonical representation of:
-//   - command args (in original order)
-//   - sorted env vars (key=value)
-//   - sorted input digests (name -> hash)
-//   - network flag
-//   - impure flag
-//   - work_dir (if set)
+// ComputeActionKey hashes the resolved execution identity. Every string is
+// length-prefixed: commands, names and values may contain newlines or '='
+// without impersonating another field. The version separates this encoding
+// from legacy keys. Maps and declaration sets are sorted; argv order matters.
 //
-// The impure flag is included so that if a plugin version flips an action's
-// impurity without changing any other field, the cache key changes. Without
-// this, a pure run could in principle match a previously-impure entry under
-// future cache-policy changes.
-//
-// SealedInputs *values* are deliberately excluded: secrets must never appear
-// in cache keys, stored action results, or any persistent artifact. The
-// *refs* and *delivery modes* are non-secret metadata and are hashed —
-// changing the destination ref or the mode (env vs file) changes observable
-// behavior, so the cache must invalidate.
-//
-// SealedOutputs: only the *refs* (destinations) are included in the key —
-// never values, since at key-time there is no value yet. In practice
-// actions with non-empty SealedOutputs are forced impure by the resolver
-// (caching would skip the store_secret side-effect), but hashing the refs
-// keeps the key well-defined and means changing a destination ref
-// invalidates any cached result if impurity is ever relaxed.
-//
-// All maps are sorted by key before hashing to ensure determinism.
-// Command args preserve their original order since command order matters.
+// Sealed values never enter the key. Only refs and effective delivery/store
+// modes are hashed. Action IDs and dependency IDs are excluded: resolved input
+// digests identify upstream content. Timeout/retry policy does not identify a
+// successful build's artifacts.
 func ComputeActionKey(a *Action) cas.ActionKey {
 	h := sha256.New()
-
-	// Command args in original order.
-	for _, arg := range a.Command {
-		fmt.Fprintf(h, "cmd:%s\n", arg)
+	field := func(parts ...string) {
+		for _, part := range parts {
+			var size [8]byte
+			binary.BigEndian.PutUint64(size[:], uint64(len(part)))
+			_, _ = h.Write(size[:])
+			_, _ = h.Write([]byte(part))
+		}
 	}
-
-	// Body (pith VM program) — serialize as JSON for deterministic hashing.
+	field("mu.action-key/v2")
+	for _, arg := range a.Command {
+		field("cmd", arg)
+	}
 	if len(a.Body) > 0 {
 		if b, err := json.Marshal(a.Body); err == nil {
-			fmt.Fprintf(h, "body:%s\n", b)
+			field("body", string(b))
 		}
 	}
-
-	// Ewe populator program — hash the content DIGEST (already content-
-	// addressed). No source, no values, no live HTTP in the key.
-	if a.EweRef != (cas.Digest{}) {
-		fmt.Fprintf(h, "ewe:%s\n", a.EweRef.String())
+	if !a.EweRef.IsZero() {
+		field("ewe", a.EweRef.String())
 	}
-
-	// Env vars sorted by key.
-	envKeys := make([]string, 0, len(a.Env))
-	for k := range a.Env {
-		envKeys = append(envKeys, k)
+	for _, name := range sortedKeys(a.Env) {
+		field("env", name, a.Env[name])
 	}
-	sort.Strings(envKeys)
-	for _, k := range envKeys {
-		fmt.Fprintf(h, "env:%s=%s\n", k, a.Env[k])
+	// A nil environment inherits the parent; an explicitly empty map does
+	// not. Preserve that execution distinction even though both have no keys.
+	field("env_inherit", strconv.FormatBool(a.Env == nil))
+	for _, name := range sortedKeys(a.Inputs) {
+		field("input", name, a.Inputs[name].String())
 	}
-
-	// Input digests sorted by name.
-	inputNames := make([]string, 0, len(a.Inputs))
-	for name := range a.Inputs {
-		inputNames = append(inputNames, name)
+	for _, name := range sortedKeys(a.Toolchain) {
+		field("toolchain", name, a.Toolchain[name].String())
 	}
-	sort.Strings(inputNames)
-	for _, name := range inputNames {
-		fmt.Fprintf(h, "input:%s=%s\n", name, a.Inputs[name].String())
+	field("sandbox", strconv.FormatBool(a.Toolchain != nil))
+	for _, name := range sortedStrings(a.Outputs) {
+		field("output", name)
 	}
-
-	// Network flag.
-	fmt.Fprintf(h, "network:%t\n", a.Network)
-
-	// Impure flag.
-	fmt.Fprintf(h, "impure:%t\n", a.Impure)
-
-	// Include work_dir in the key.
-	if a.WorkDir != "" {
-		fmt.Fprintf(h, "work_dir:%s\n", a.WorkDir)
+	for _, name := range sortedStrings(a.Sources) {
+		field("source", name)
 	}
-
-	// Sealed-input refs and modes (refs and modes are non-secret;
-	// changing either alters what the action observes, so the key must
-	// invalidate). Values are NOT hashed — they are excluded by design.
-	if len(a.SealedInputs) > 0 {
-		inNames := make([]string, 0, len(a.SealedInputs))
-		for k := range a.SealedInputs {
-			inNames = append(inNames, k)
+	field("network", strconv.FormatBool(a.Network))
+	field("impure", strconv.FormatBool(a.Impure))
+	field("work_dir", a.WorkDir)
+	for _, name := range sortedKeys(a.SealedInputs) {
+		mode := a.SealedInputModes[name]
+		if mode == "" {
+			mode = "env"
 		}
-		sort.Strings(inNames)
-		for _, k := range inNames {
-			mode := a.SealedInputModes[k]
-			if mode == "" {
-				mode = "env"
-			}
-			fmt.Fprintf(h, "sealed_in:%s=%s mode=%s\n", k, a.SealedInputs[k], mode)
-		}
+		field("sealed_in", name, a.SealedInputs[name], mode)
 	}
-
-	// Sealed-output destination refs (names + refs only — values never exist
-	// at key time). Sorted by name for determinism.
-	if len(a.SealedOutputs) > 0 {
-		outNames := make([]string, 0, len(a.SealedOutputs))
-		for k := range a.SealedOutputs {
-			outNames = append(outNames, k)
+	for _, name := range sortedKeys(a.SealedOutputs) {
+		mode := a.SealedOutputModes[name]
+		if mode == "" {
+			mode = "overwrite"
 		}
-		sort.Strings(outNames)
-		for _, k := range outNames {
-			mode := a.SealedOutputModes[k]
-			if mode == "" {
-				mode = "overwrite"
-			}
-			_, _ = fmt.Fprintf(h, "sealed_out:%s=%s mode=%s\n", k, a.SealedOutputs[k], mode)
-		}
+		field("sealed_out", name, a.SealedOutputs[name], mode)
 	}
-
 	return cas.ActionKey{Digest: cas.NewSHA256(hex.EncodeToString(h.Sum(nil)))}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedStrings(values []string) []string {
+	copy := append([]string(nil), values...)
+	sort.Strings(copy)
+	return copy
 }

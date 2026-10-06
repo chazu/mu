@@ -256,6 +256,12 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// because ComputeActionKey is called again after execution for cache storage,
 	// and secrets must never be part of the cache key.
 	execEnv := a.Env
+	if a.Env != nil {
+		execEnv = make(map[string]string, len(a.Env)+1)
+		for name, value := range a.Env {
+			execEnv[name] = value
+		}
+	}
 	secrets := e.ResolvedSecrets[a.ID]
 	if e.SealedInputResolver != nil && len(a.SealedInputs) > 0 {
 		resolved, err := e.SealedInputResolver(ctx, a)

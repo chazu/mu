@@ -10,6 +10,30 @@ import (
 	"github.com/chazu/mu/internal/dag"
 )
 
+func TestOutputStagingDoesNotMutateActionIdentity(t *testing.T) {
+	store := newStore(t)
+	a := &dag.Action{
+		ID: "staging", Command: []string{"sh", "-c", "printf stable > out.txt"},
+		Outputs: []string{"out.txt"}, Env: map[string]string{}, WorkDir: t.TempDir(),
+	}
+	key := dag.ComputeActionKey(a)
+	g := dag.NewGraph()
+	if err := g.AddAction(a); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (&dag.Executor{Store: store, Workers: 1}).Execute(context.Background(), g)
+	if err != nil || len(result.Failed) != 0 {
+		t.Fatalf("execute: %+v, %v", result, err)
+	}
+	if len(a.Env) != 0 || dag.ComputeActionKey(a) != key {
+		t.Fatal("output staging changed the declared action environment/key")
+	}
+	cached, err := store.GetActionResult(context.Background(), key)
+	if err != nil || cached == nil {
+		t.Fatalf("result not stored under lookup identity: %+v, %v", cached, err)
+	}
+}
+
 func TestImpureActionSkipsCacheLookup(t *testing.T) {
 	workDir := t.TempDir()
 	outA := filepath.Join(workDir, "a.txt")
