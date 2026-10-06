@@ -109,6 +109,112 @@ func (s *fakeStore) count() int {
 
 // --- Tests ---
 
+type directReaderStore struct {
+	cas.Store
+	expected  io.Reader
+	sawDirect bool
+}
+
+func (s *directReaderStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
+	s.sawDirect = r == s.expected
+	return s.Store.Put(ctx, r)
+}
+
+func TestTiered_LocalOnlyPutStreamsOriginalReader(t *testing.T) {
+	reader := bytes.NewBufferString("stream me")
+	local := &directReaderStore{Store: newFake(), expected: reader}
+	tier := &cas.Tiered{Layers: []cas.Store{local, newFake()}}
+	digest, err := tier.Put(context.Background(), reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !local.sawDirect {
+		t.Fatal("local write buffered the original reader")
+	}
+	has, err := local.Has(context.Background(), digest)
+	if err != nil || !has {
+		t.Fatalf("missing streamed blob: %v", err)
+	}
+}
+
+type brokenBlobStore struct {
+	cas.Store
+	readErr, closeErr error
+	content           []byte
+}
+
+type brokenBlobReader struct {
+	*bytes.Reader
+	readErr, closeErr error
+}
+
+func (r *brokenBlobReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF && r.readErr != nil {
+		return n, r.readErr
+	}
+	return n, err
+}
+
+func (r *brokenBlobReader) Close() error { return r.closeErr }
+
+func (s *brokenBlobStore) Get(context.Context, cas.Digest) (io.ReadCloser, error) {
+	return &brokenBlobReader{bytes.NewReader(s.content), s.readErr, s.closeErr}, nil
+}
+
+func TestTiered_ActionRepairDoesNotPublishIncompleteResults(t *testing.T) {
+	for _, failure := range []string{"missing", "read", "close", "wrong digest", "put"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx := context.Background()
+			local, remote := newFake(), newFake()
+			digest, err := remote.Put(ctx, bytes.NewBufferString("whole blob"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := cas.ActionKey{Digest: cas.NewSHA256("action")}
+			want := &cas.ActionResult{Outputs: map[string]cas.Digest{"out": digest}}
+			if err := remote.PutActionResult(ctx, key, want); err != nil {
+				t.Fatal(err)
+			}
+			var source cas.Store = remote
+			switch failure {
+			case "missing":
+				remote.FailGet = errors.New("missing output")
+			case "read":
+				source = &brokenBlobStore{Store: remote, content: []byte("partial"), readErr: errors.New("broken stream")}
+			case "close":
+				source = &brokenBlobStore{Store: remote, content: []byte("whole blob"), closeErr: errors.New("broken close")}
+			case "wrong digest":
+				source = &brokenBlobStore{Store: remote, content: []byte("corrupt")}
+			case "put":
+				local.FailPut = errors.New("disk full")
+			}
+			var events []cas.TieredEvent
+			tier := &cas.Tiered{Layers: []cas.Store{local, source}, ReadRepair: true, Observer: func(e cas.TieredEvent) { events = append(events, e) }}
+			got, err := tier.GetActionResult(ctx, key)
+			if err != nil || got == nil || got.Outputs["out"] != digest {
+				t.Fatalf("original hit lost: %+v, %v", got, err)
+			}
+			cached, err := local.GetActionResult(ctx, key)
+			if err != nil || cached != nil {
+				t.Fatalf("published incomplete result: %+v, %v", cached, err)
+			}
+			foundError := false
+			for _, e := range events {
+				if e.Outcome == "error" {
+					foundError = true
+				}
+				if e.Op == "put_action" && e.Outcome == "repair" {
+					t.Fatal("reported a successful incomplete repair")
+				}
+			}
+			if !foundError {
+				t.Fatal("repair failure not reported")
+			}
+		})
+	}
+}
+
 func TestTiered_GetMissThenHitWithReadRepair(t *testing.T) {
 	l0, l1 := newFake(), newFake()
 	// Seed L1 only.

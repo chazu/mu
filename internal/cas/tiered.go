@@ -170,14 +170,20 @@ func (t *Tiered) Put(ctx context.Context, r io.Reader) (Digest, error) {
 		return Digest{}, fmt.Errorf("cas/tiered: no layers configured")
 	}
 
-	// Buffer the payload so we can hand it to multiple layers.
-	buf, err := io.ReadAll(r)
-	if err != nil {
-		return Digest{}, fmt.Errorf("cas/tiered: buffering put payload: %w", err)
+	// Only fan-out needs a replayable payload. Local-only writes can stream
+	// directly, avoiding an artifact-sized allocation on the default path.
+	var buf []byte
+	if t.WriteThrough {
+		var err error
+		buf, err = io.ReadAll(r)
+		if err != nil {
+			return Digest{}, fmt.Errorf("cas/tiered: buffering put payload: %w", err)
+		}
+		r = bytes.NewReader(buf)
 	}
 
 	// Authoritative write: layer 0.
-	dgst, err := t.Layers[0].Put(ctx, bytes.NewReader(buf))
+	dgst, err := t.Layers[0].Put(ctx, r)
 	if err != nil {
 		t.emit(TieredEvent{Op: "put", Layer: 0, LayerName: t.layerName(0), Outcome: "error", Err: err})
 		return Digest{}, err
@@ -267,17 +273,33 @@ func (t *Tiered) GetActionResult(ctx context.Context, key ActionKey) (*ActionRes
 		if !t.policy(i).Write {
 			continue
 		}
+		complete := true
 		for _, out := range hit.Outputs {
 			rc, err := t.Layers[hitLayer].Get(ctx, out)
 			if err != nil {
 				t.emit(TieredEvent{Op: "get", Layer: hitLayer, LayerName: t.layerName(hitLayer), Outcome: "error", Digest: out, Err: err})
-				continue
+				complete = false
+				break
 			}
-			bs, _ := io.ReadAll(rc)
-			rc.Close()
-			if _, perr := t.Layers[i].Put(ctx, bytes.NewReader(bs)); perr != nil {
-				t.emit(TieredEvent{Op: "put", Layer: i, LayerName: t.layerName(i), Outcome: "error", Digest: out, Err: perr})
+			actual, putErr := t.Layers[i].Put(ctx, rc)
+			closeErr := rc.Close()
+			if putErr == nil {
+				putErr = closeErr
 			}
+			if putErr == nil && actual != out {
+				putErr = fmt.Errorf("cas/tiered: repaired digest %s does not match %s", actual, out)
+			}
+			if putErr != nil {
+				t.emit(TieredEvent{Op: "put", Layer: i, LayerName: t.layerName(i), Outcome: "error", Digest: out, Err: putErr})
+				complete = false
+				break
+			}
+		}
+		// Publishing the result advertises that every referenced blob is ready.
+		// Leave any successfully repaired blobs in CAS, but never publish an
+		// incomplete result. The original higher-layer hit remains available.
+		if !complete {
+			continue
 		}
 		if perr := t.Layers[i].PutActionResult(ctx, key, hit); perr != nil {
 			t.emit(TieredEvent{Op: "put_action", Layer: i, LayerName: t.layerName(i), Outcome: "error", Digest: key.Digest, Err: perr})
