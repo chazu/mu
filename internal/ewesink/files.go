@@ -66,10 +66,19 @@ func WriteFileFunc(name string, d Deps) ewe.Function {
 					return nil, fmt.Errorf("%s: marshal content: %w", name, err)
 				}
 			}
-			if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			root, err := os.OpenRoot(d.MuOut)
+			if err != nil {
+				return nil, err
+			}
+			defer root.Close()
+			rel, err := filepath.Rel(filepath.Clean(d.MuOut), abs)
+			if err != nil {
+				return nil, err
+			}
+			if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			if err := os.WriteFile(abs, data, 0o600); err != nil {
+			if err := root.WriteFile(rel, data, 0o600); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
 			return path, nil
@@ -97,7 +106,19 @@ func ReadFileFunc(name string, d Deps) ewe.Function {
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			raw, err := os.ReadFile(abs)
+			root := d.WorkRoot
+			if root == nil {
+				root, err = os.OpenRoot(d.WorkDir)
+				if err != nil {
+					return nil, err
+				}
+				defer root.Close()
+			}
+			local, err := filepath.Rel(filepath.Clean(d.WorkDir), abs)
+			if err != nil {
+				return nil, err
+			}
+			raw, err := root.ReadFile(local)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}

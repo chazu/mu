@@ -18,7 +18,7 @@ import (
 func run(t *testing.T, env map[string]string, sealed map[string]bool, prog []any) (*pith.VM, error) {
 	t.Helper()
 	vm := pith.New(context.Background())
-	RegisterExecDrivers(vm, env, sealed, nil, nil)
+	RegisterExecDrivers(vm, env, sealed, nil, nil, nil)
 	return vm, vm.Run(prog)
 }
 
@@ -253,7 +253,7 @@ func TestTraceRedactsThroughExecDrivers(t *testing.T) {
 	var buf bytes.Buffer
 	vm := pith.NewWithTrace(context.Background(), &buf)
 	env := map[string]string{"TOKEN": "glpat-secret"}
-	RegisterExecDrivers(vm, env, map[string]bool{"TOKEN": true}, nil, nil)
+	RegisterExecDrivers(vm, env, map[string]bool{"TOKEN": true}, nil, nil, nil)
 	if err := vm.Run([]any{"'TOKEN", "secret/get"}); err != nil {
 		t.Fatal(err)
 	}
@@ -262,5 +262,40 @@ func TestTraceRedactsThroughExecDrivers(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), pith.RedactedMarker) {
 		t.Errorf("trace should show redaction marker, got: %s", buf.String())
+	}
+}
+
+func TestWorkDirectoryWordsUsePinnedRootAfterSwap(t *testing.T) {
+	inside, outside := t.TempDir(), t.TempDir()
+	link := filepath.Join(t.TempDir(), "work")
+	if err := os.Symlink(inside, link); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	vm := pith.New(context.Background())
+	RegisterExecDrivers(vm, map[string]string{"MU_WORK_DIR": link}, nil, nil, nil, root)
+	path := filepath.Join(link, "out")
+	if err := vm.Run([]any{"'" + path, "'pinned", "file/write", "'" + path, "file/read"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := vm.Result()
+	if err != nil || result != "pinned" {
+		t.Fatalf("pinned read: %v, %v", result, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(inside, "out")); err != nil || string(data) != "pinned" {
+		t.Fatalf("pinned write: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "out")); !os.IsNotExist(err) {
+		t.Fatalf("external write: %v", err)
 	}
 }

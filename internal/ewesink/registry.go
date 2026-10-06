@@ -2,6 +2,7 @@ package ewesink
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/chazu/ewe"
 )
@@ -10,11 +11,12 @@ import (
 // Deps + Registry is built per action execute (never global), so HTTP/file
 // confinement and secret reveal are scoped to that action.
 type Deps struct {
-	Client  *http.Client      // HTTP client (nil → http.DefaultClient)
-	Reveal  RevealFunc        // sealed-input resolver; nil → refs fail closed
-	WorkDir string            // #ReadFile root (declared inputs)
-	MuOut   string            // #WriteFile root ($MU_OUT)
-	Env     map[string]string // #Env exposure (must include MU_OUT)
+	Client   *http.Client      // HTTP client (nil → http.DefaultClient)
+	Reveal   RevealFunc        // sealed-input resolver; nil → refs fail closed
+	WorkRoot *os.Root          // optional pinned directory, owned by the executor
+	WorkDir  string            // #ReadFile root (declared inputs)
+	MuOut    string            // #WriteFile root ($MU_OUT)
+	Env      map[string]string // #Env exposure (must include MU_OUT)
 }
 
 // Standard ewe function names for the populate vocabulary.

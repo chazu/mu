@@ -501,9 +501,9 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 		if a.Toolchain != nil {
 			exitCode, err = e.executeInSandbox(attemptCtx, a, env, workRoot)
 		} else if a.EweRef != (cas.Digest{}) {
-			exitCode, err = e.executeEwe(attemptCtx, a, env)
+			exitCode, err = e.executeEwe(attemptCtx, a, env, workRoot)
 		} else if len(a.Body) > 0 {
-			exitCode, err = e.executePithVM(attemptCtx, a, env)
+			exitCode, err = e.executePithVM(attemptCtx, a, env, workRoot)
 		} else {
 			exitCode, err = e.executeBare(attemptCtx, a, env, workDir)
 		}
@@ -570,7 +570,7 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 }
 
 // executePithVM runs a pith VM program instead of a shell command.
-func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]string) (int, error) {
+func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
 	vm := pith.New(ctx)
 
 	getOutput := func(targetName string) (map[string]any, error) {
@@ -612,7 +612,7 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 	// Expose WorkDir as a sanctioned file/write root for pith bodies, alongside
 	// MU_SEALED_OUT_DIR / MU_OUT (added earlier in runAction). Copy first so we
 	// never mutate the caller's env map.
-	if a.WorkDir != "" && env["MU_WORK_DIR"] == "" {
+	if a.WorkDir != "" {
 		cp := make(map[string]string, len(env)+1)
 		for k, v := range env {
 			cp[k] = v
@@ -621,7 +621,7 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 		env = cp
 	}
 
-	pithvm.RegisterExecDrivers(vm, env, sealedNames, getOutput, e.Store)
+	pithvm.RegisterExecDrivers(vm, env, sealedNames, getOutput, e.Store, workRoot)
 	if err := vm.Run(a.Body); err != nil {
 		return 1, err
 	}
@@ -644,7 +644,7 @@ func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]
 // functions close over this action's reveal (sealed inputs), MU_OUT, and
 // WorkDir. Outputs land in $MU_OUT and are copied to WorkDir exactly as for a
 // bare action.
-func (e *Executor) executeEwe(ctx context.Context, a *Action, env map[string]string) (int, error) {
+func (e *Executor) executeEwe(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
 	rc, err := e.Store.Get(ctx, a.EweRef)
 	if err != nil {
 		return 1, fmt.Errorf("ewe: restore program %s: %w", a.EweRef.String(), err)
@@ -679,10 +679,11 @@ func (e *Executor) executeEwe(ctx context.Context, a *Action, env map[string]str
 	}
 
 	reg, err := ewesink.NewRegistry(ewesink.Deps{
-		Reveal:  reveal,
-		WorkDir: a.WorkDir,
-		MuOut:   env["MU_OUT"],
-		Env:     safeEnv,
+		WorkRoot: workRoot,
+		Reveal:   reveal,
+		WorkDir:  a.WorkDir,
+		MuOut:    env["MU_OUT"],
+		Env:      safeEnv,
 	})
 	if err != nil {
 		return 1, fmt.Errorf("ewe: build registry: %w", err)

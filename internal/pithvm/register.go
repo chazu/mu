@@ -92,7 +92,7 @@ func RegisterTransformDrivers(vm *pith.VM, targetConfig map[string]any, getOutpu
 // tainted pith.Secret), while env/get and env/get-default serve only non-sealed
 // names and refuse these. env carries the resolved values (sealed inputs in env
 // mode plus MU_SEALED_OUT_DIR / MU_OUT); it is never logged or cache-keyed here.
-func RegisterExecDrivers(vm *pith.VM, env map[string]string, sealedNames map[string]bool, getOutput func(string) (map[string]any, error), store cas.Store) {
+func RegisterExecDrivers(vm *pith.VM, env map[string]string, sealedNames map[string]bool, getOutput func(string) (map[string]any, error), store cas.Store, workRoot *os.Root) {
 	// secret driver: read a sealed input as a tainted value. Only names declared
 	// in the action's sealed_inputs are servable; the value is wrapped in a
 	// pith.Secret so it stays redacted in traces/errors and is revealed only at
@@ -392,8 +392,8 @@ func RegisterExecDrivers(vm *pith.VM, env map[string]string, sealedNames map[str
 	// confined to MU_SEALED_OUT_DIR / MU_OUT / WorkDir (path escape rejected),
 	// created 0600, and a Secret content is revealed only at the syscall.
 	vm.RegisterDriver("file", map[string]pith.Word{
-		"write": fileWriteWord(env),
-		"read":  fileReadWord,
+		"write": fileWriteWord(env, workRoot),
+		"read":  fileReadWord(env, workRoot),
 	})
 }
 
@@ -516,7 +516,7 @@ func wordHTTPRequest(vm *pith.VM) error {
 // fileWriteWord implements file/write ( path content -- ). The path must resolve
 // within a sanctioned root (MU_SEALED_OUT_DIR, MU_OUT, or WorkDir, in env). The
 // file is created 0600 and a Secret content is revealed only at the syscall.
-func fileWriteWord(env map[string]string) pith.Word {
+func fileWriteWord(env map[string]string, workRoot *os.Root) pith.Word {
 	return func(vm *pith.VM) error {
 		contentRaw, err := vm.Pop()
 		if err != nil {
@@ -552,10 +552,17 @@ func fileWriteWord(env map[string]string) pith.Word {
 			data = b
 		}
 
-		if err := os.MkdirAll(filepath.Dir(clean), 0o700); err != nil {
+		root, rel, owned, err := sinkRoot(env, clean, workRoot)
+		if err != nil {
+			return err
+		}
+		if owned {
+			defer root.Close()
+		}
+		if err := root.MkdirAll(filepath.Dir(rel), 0o700); err != nil {
 			return fmt.Errorf("file/write: mkdir for %s: %w", path, err)
 		}
-		if err := os.WriteFile(clean, data, 0o600); err != nil {
+		if err := root.WriteFile(rel, data, 0o600); err != nil {
 			return fmt.Errorf("file/write: write %s: %w", path, err)
 		}
 		return nil
@@ -564,24 +571,55 @@ func fileWriteWord(env map[string]string) pith.Word {
 
 // fileReadWord implements file/read ( path -- content ). Confined to the same
 // sanctioned roots as file/write. Returns the file content as a string.
-func fileReadWord(vm *pith.VM) error {
-	pathRaw, err := vm.Pop()
-	if err != nil {
-		return err
+func fileReadWord(env map[string]string, workRoot *os.Root) pith.Word {
+	return func(vm *pith.VM) error {
+		raw, err := vm.Pop()
+		if err != nil {
+			return err
+		}
+		path, ok := pith.Reveal(raw).(string)
+		if !ok {
+			return fmt.Errorf("file/read: path must be a string")
+		}
+		clean := filepath.Clean(path)
+		var data []byte
+		// Preserve direct host reads outside WorkDir, but reads belonging to the
+		// action's working directory must follow its pinned descriptor.
+		if workRoot != nil {
+			rel, relErr := filepath.Rel(env["MU_WORK_DIR"], clean)
+			if relErr == nil && filepath.IsLocal(rel) {
+				data, err = workRoot.ReadFile(rel)
+			} else {
+				data, err = os.ReadFile(clean)
+			}
+		} else {
+			data, err = os.ReadFile(clean)
+		}
+		if err != nil {
+			return fmt.Errorf("file/read: %s: %w", path, err)
+		}
+		vm.Push(string(data))
+		return nil
 	}
-	path, ok := pith.Reveal(pathRaw).(string)
-	if !ok {
-		return fmt.Errorf("file/read: path must be a string")
+}
+
+func sinkRoot(env map[string]string, clean string, workRoot *os.Root) (*os.Root, string, bool, error) {
+	for _, key := range []string{"MU_SEALED_OUT_DIR", "MU_OUT", "MU_WORK_DIR"} {
+		base := env[key]
+		if base == "" {
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Clean(base), clean)
+		if err != nil || !filepath.IsLocal(rel) {
+			continue
+		}
+		if key == "MU_WORK_DIR" && workRoot != nil {
+			return workRoot, rel, false, nil
+		}
+		root, err := os.OpenRoot(base)
+		return root, rel, true, err
 	}
-	// Reads use the same env-less confinement check via absolute cleaning only;
-	// callers pass paths built from $MU_* which file/write already validated.
-	clean := filepath.Clean(path)
-	data, err := os.ReadFile(clean)
-	if err != nil {
-		return fmt.Errorf("file/read: %s: %w", path, err)
-	}
-	vm.Push(string(data))
-	return nil
+	return nil, "", false, fmt.Errorf("file/write: path %q escapes the sanctioned roots", clean)
 }
 
 // confinedPath cleans path and verifies it lies within one of the sanctioned

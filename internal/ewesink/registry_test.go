@@ -110,3 +110,46 @@ write: op.#WriteFile & { args: ["\(_env.result.MU_OUT)/repos.json", _out] }
 		t.Error("output file leaked the revealed token")
 	}
 }
+
+func TestReadFileUsesPinnedWorkRootAfterSwap(t *testing.T) {
+	inside, outside := t.TempDir(), t.TempDir()
+	for _, dir := range []string{inside, outside} {
+		if err := os.WriteFile(filepath.Join(dir, "data"), []byte(dir), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(t.TempDir(), "work")
+	if err := os.Symlink(inside, link); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	sink := ReadFileFunc("#ReadFile", Deps{WorkDir: link, WorkRoot: root})
+	value, err := sink.Execute(context.Background(), []any{"data"})
+	if err != nil || value != inside {
+		t.Fatalf("read escaped pinned root: %v, %v", value, err)
+	}
+}
+
+func TestWriteFileRejectsExternalSymlink(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	sink := WriteFileFunc("#WriteFile", Deps{MuOut: root})
+	if _, err := sink.Execute(context.Background(), []any{"link/out", "private"}); err == nil {
+		t.Fatal("write escaped root")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "out")); !os.IsNotExist(err) {
+		t.Fatalf("external write: %v", err)
+	}
+}
