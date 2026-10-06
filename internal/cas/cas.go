@@ -52,8 +52,15 @@ type ActionKey struct {
 	Digest Digest // hash of the canonical key material
 }
 
-// ActionResult holds the outputs and exit code produced by an action.
+// ActionResultVersion identifies receipts containing permission metadata.
+const ActionResultVersion = 2
+
+// ActionResult holds the output digests, permission bits, and exit code.
+// Version zero denotes legacy receipts without permission metadata.
 type ActionResult struct {
+	Version     int               `json:"version,omitempty"`
+	OutputModes map[string]uint32 `json:"output_modes,omitempty"` // POSIX permission bits only
+
 	Outputs  map[string]Digest `json:"outputs"` // output name -> content digest
 	ExitCode int               `json:"exit_code"`
 }

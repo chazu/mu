@@ -395,7 +395,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 				src.Close()
 				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: create output dir for %s: %w", a.ID, outRel, err)}
 			}
-			if err := writeFile(dstPath, src); err != nil {
+			if err := writeFile(ctx, dstPath, src); err != nil {
 				src.Close()
 				return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q: copy output %s: %w", a.ID, outRel, err)}
 			}
@@ -414,21 +414,24 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 
 	// Hash declared outputs and store in CAS — only for pure actions.
 	actionResult := &cas.ActionResult{
-		Outputs:  make(map[string]cas.Digest),
-		ExitCode: exitCode,
+		Version:     cas.ActionResultVersion,
+		OutputModes: make(map[string]uint32),
+		Outputs:     make(map[string]cas.Digest),
+		ExitCode:    exitCode,
 	}
 
 	if e.Store != nil && !a.Impure {
 		for _, outPath := range a.Outputs {
 			absPath := outPath
-			if muOutDir != "" && !filepath.IsAbs(outPath) {
+			if !filepath.IsAbs(outPath) {
 				absPath = filepath.Join(a.WorkDir, outPath)
 			}
-			dgst, err := e.storeOutput(ctx, absPath)
+			dgst, mode, err := e.storeOutput(ctx, absPath)
 			if err != nil {
 				return ActionStatus{ID: a.ID, ExitCode: exitCode, Err: fmt.Errorf("action %q: storing output %q: %w", a.ID, outPath, err)}
 			}
 			actionResult.Outputs[outPath] = dgst
+			actionResult.OutputModes[outPath] = uint32(mode.Perm())
 		}
 
 		key := ComputeActionKey(a)
@@ -696,7 +699,7 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[stri
 		if err != nil {
 			return exitCode, fmt.Errorf("open sandbox output %s: %w", outRel, err)
 		}
-		if err := writeFile(hostOut, src); err != nil {
+		if err := writeFile(ctx, hostOut, src); err != nil {
 			src.Close()
 			return exitCode, fmt.Errorf("copy output %s: %w", outRel, err)
 		}
@@ -738,51 +741,143 @@ func (e *Executor) captureSealedOutputs(ctx context.Context, a *Action, sealedOu
 	return nil
 }
 
-// storeOutput hashes a file and stores it in the CAS.
-func (e *Executor) storeOutput(ctx context.Context, path string) (cas.Digest, error) {
+// storeOutput captures bytes and permission bits from the same open file.
+func (e *Executor) storeOutput(ctx context.Context, path string) (cas.Digest, os.FileMode, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return cas.Digest{}, err
+		return cas.Digest{}, 0, err
 	}
 	defer f.Close()
-	return e.Store.Put(ctx, f)
+	info, err := f.Stat()
+	if err != nil {
+		return cas.Digest{}, 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return cas.Digest{}, 0, fmt.Errorf("output %q is not a regular file", path)
+	}
+	digest, err := e.Store.Put(ctx, cas.ContextReader(ctx, f))
+	return digest, info.Mode().Perm(), err
 }
 
-// restoreOutputs restores cached output blobs to their declared paths.
+// restoreOutputs verifies and stages every blob before replacing any output.
+// Renames are atomic per file, not a transaction across multiple destinations.
+// Legacy receipts cannot recover original modes, so they deliberately miss and
+// rebuild instead of guessing that a binary is a non-executable data file.
 func (e *Executor) restoreOutputs(ctx context.Context, a *Action, result *cas.ActionResult) error {
+	if len(a.Outputs) > 0 && result.Version != cas.ActionResultVersion {
+		return fmt.Errorf("cached result version %d lacks supported output metadata", result.Version)
+	}
+	type replacement struct{ staging, destination string }
+	files := make([]replacement, 0, len(a.Outputs))
+	defer func() {
+		for _, file := range files {
+			os.Remove(file.staging)
+		}
+	}()
 	for _, outPath := range a.Outputs {
 		dgst, ok := result.Outputs[outPath]
 		if !ok {
 			return fmt.Errorf("cached result missing output %q", outPath)
 		}
+		mode, ok := result.OutputModes[outPath]
+		if !ok || mode & ^uint32(0o777) != 0 {
+			return fmt.Errorf("cached result has invalid permissions for %q", outPath)
+		}
+		destination := outPath
+		if !filepath.IsAbs(destination) {
+			destination = filepath.Join(a.WorkDir, destination)
+		}
 		rc, err := e.Store.Get(ctx, dgst)
 		if err != nil {
 			return err
 		}
-		if err := writeFile(outPath, rc); err != nil {
-			rc.Close()
+		staging, err := stageFile(ctx, destination, rc, os.FileMode(mode), dgst)
+		closeErr := rc.Close()
+		if staging != "" {
+			files = append(files, replacement{staging, destination})
+		}
+		if err != nil {
 			return err
 		}
-		rc.Close()
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, file := range files {
+		if err := os.Rename(file.staging, file.destination); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// writeFile writes content from rc to the given path, creating parent dirs.
-func writeFile(path string, r io.Reader) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
+// writeFile copies an output without losing its producer's permission bits.
+func writeFile(ctx context.Context, path string, src *os.File) error {
+	info, err := src.Stat()
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(f, r)
-	closeErr := f.Close()
-	if copyErr != nil {
-		return copyErr
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("output %q is not a regular file", path)
 	}
-	return closeErr
+	staging, err := stageFile(ctx, path, src, info.Mode().Perm(), cas.Digest{})
+	if err != nil {
+		return err
+	}
+	defer os.Remove(staging)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Rename(staging, path)
+}
+
+// stageFile creates a private sibling and publishes nothing until reads,
+// optional digest verification, chmod, and close have all succeeded.
+func stageFile(ctx context.Context, path string, r io.Reader, mode os.FileMode, expected cas.Digest) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".mu-output-*")
+	if err != nil {
+		return "", err
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			f.Close()
+			os.Remove(f.Name())
+		}
+	}()
+	r = cas.ContextReader(ctx, r)
+	if expected.IsZero() {
+		_, err = io.Copy(f, r)
+	} else {
+		var actual cas.Digest
+		actual, err = cas.ComputeDigest(io.TeeReader(r, f))
+		if err == nil && actual != expected {
+			err = fmt.Errorf("cached output digest %s does not match %s", actual, expected)
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := f.Chmod(mode.Perm()); err != nil {
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	complete = true
+	return f.Name(), nil
 }
 
 func hasRelativeOutputs(outputs []string) bool {

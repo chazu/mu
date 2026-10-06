@@ -352,3 +352,37 @@ func TestActionManifestPublicationIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestPermissionMetadataRoundtrip(t *testing.T) {
+	for _, backend := range []string{"layout", "registry"} {
+		t.Run(backend, func(t *testing.T) {
+			var s *oci.OCIStore
+			var err error
+			if backend == "layout" {
+				s, err = oci.NewLocal(t.TempDir())
+			} else {
+				s, _ = newTestStore(t)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			digest, err := s.Put(ctx, strings.NewReader("executable bytes"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := cas.ActionKey{Digest: cas.NewSHA256(strings.Repeat("b", 64))}
+			want := &cas.ActionResult{Version: cas.ActionResultVersion, Outputs: map[string]cas.Digest{"tool": digest}, OutputModes: map[string]uint32{"tool": 0o751}}
+			if err := s.PutActionResult(ctx, key, want); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.GetActionResult(ctx, key)
+			if err != nil || got == nil {
+				t.Fatalf("read receipt: %+v, %v", got, err)
+			}
+			if got.Version != cas.ActionResultVersion || got.OutputModes["tool"] != 0o751 || got.Outputs["tool"] != digest {
+				t.Fatalf("lost output metadata: %+v", got)
+			}
+		})
+	}
+}

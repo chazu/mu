@@ -743,3 +743,40 @@ func TestPureActionStillCaches(t *testing.T) {
 		t.Error("second run of pure action should be cached")
 	}
 }
+
+func TestCachedRelativeExecutableKeepsPermissions(t *testing.T) {
+	store := newStore(t)
+	root := t.TempDir()
+	a := &dag.Action{ID: "executable", WorkDir: root, Env: map[string]string{}, Outputs: []string{"bin/tool"},
+		Command: []string{"sh", "-c", `mkdir -p "$MU_OUT/bin"; printf '#!/bin/sh\nprintf restored\n' > "$MU_OUT/bin/tool"; chmod 751 "$MU_OUT/bin/tool"`}}
+	run := func() dag.ActionStatus {
+		t.Helper()
+		graph := dag.NewGraph()
+		if err := graph.AddAction(a); err != nil {
+			t.Fatal(err)
+		}
+		result, err := (&dag.Executor{Store: store, Workers: 1}).Execute(context.Background(), graph)
+		if err != nil || len(result.Failed) > 0 || len(result.Completed) != 1 {
+			t.Fatalf("execute: %+v, %v", result, err)
+		}
+		return result.Completed[0]
+	}
+	if run().Cached {
+		t.Fatal("cold build hit cache")
+	}
+	path := filepath.Join(root, "bin", "tool")
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o751 {
+		t.Fatalf("cold permissions: %v, %v", info, err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "bin")); err != nil {
+		t.Fatal(err)
+	}
+	if !run().Cached {
+		t.Fatal("warm build missed cache")
+	}
+	info, err = os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o751 {
+		t.Fatalf("restored permissions: %v, %v", info, err)
+	}
+}

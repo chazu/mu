@@ -42,11 +42,28 @@ HOW CACHING WORKS
   sealed_outputs are forced impure — caching would skip the
   store_secret side-effect.
 
-  On cache hit: outputs are restored from CAS without re-execution.
+  On cache hit: output blobs are staged beside their destinations, verified
+  against their SHA-256 digests, and restored with the recorded permission
+  bits. Relative paths resolve against the action's work directory. Every
+  output is staged before any is replaced; each rename is atomic, but the
+  set of renames is not a filesystem transaction. Failed reads, closes, or
+  digest checks leave existing files intact. Symlink destinations are replaced
+  rather than followed. POSIX permission bits (0777) are preserved; special
+  mode bits, ownership, ACLs, and extended attributes are not restored.
+
+  New execution receipts use version 2 with output_modes. Legacy receipts
+  lack original modes, so actions with outputs rebuild once to refresh their
+  receipts. The OCI envelope and output-digest shape remain compatible.
   On cache miss: action runs, outputs are hashed and stored in CAS.
 
   Tiered cache writes stream directly to the local store when write-through
-  is disabled. Write-through and blob read-repair still buffer payloads.
+  is disabled. Write-through and blob read-repair replay a private temporary
+  file instead of buffering the whole artifact in memory. Blob read-repair
+  verifies the source digest before repairing any lower layer. A Get reader
+  owns its replay file until Close; callers must close abandoned reads too.
+  Temporary disk space scales with blob size. Cancellation is checked between
+  reads and transfers; an arbitrary reader already blocked in I/O must provide
+  its own interruption mechanism.
   Action-result read-repair streams output blobs and publishes the local
   result only after every transfer succeeds and returns the expected digest.
 
@@ -57,8 +74,9 @@ OCI LAYOUT
     blobs/sha256/<hash>            Content-addressed blobs
 
   Action results are stored as OCI manifests with:
-  - Config blob: {"outputs": {"name": {"Algorithm":"sha256","Hash":"..."}}, "exit_code": 0}
-  - Layer blobs: the actual output file contents
+  - Config blob: {"version":2, "output_modes":{"name":493}, "outputs": {"name": {"Algorithm":"sha256","Hash":"..."}}, "exit_code": 0}
+  - Layer blobs: the actual output file contents, sorted by output name so
+    repeated publication of identical results keeps the same manifest digest
 
 INSPECTING THE CACHE
 
