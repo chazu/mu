@@ -7,13 +7,22 @@ HOW CACHING WORKS
 
   Each build action has a cache key (sha256) computed from:
   - Command (argv, original order)
+  - Inline pith body or ewe program digest, when present
   - Sorted input digests (sha256 of each input file)
-  - Environment variables (sorted)
+  - Environment variables (sorted), including inherited vs empty environment
+  - Sorted toolchain artifact paths and digests, including bare vs sandbox mode
+  - Sorted declared output paths and sandbox source paths
   - Network flag
   - Impure flag
-  - Work directory (if non-default)
+  - Work directory
   - Sealed-input refs and modes (NOT values)
-  - Sealed-output destination refs
+  - Sealed-output destination refs and effective store modes
+
+  Key encoding is versioned and length-prefixed, so embedded newlines or
+  separators in arguments and metadata cannot alias another action. This
+  encoding replaces legacy keys: existing action results miss once and
+  rebuild; their content-addressed blobs remain reusable. Saved exact-plan
+  approvals must be regenerated because plans include action keys.
 
   Cache key INCLUDES (non-secret metadata):
     sealed_input refs       Changing pass:foo/v1 → pass:foo/v2 invalidates.
@@ -35,6 +44,11 @@ HOW CACHING WORKS
 
   On cache hit: outputs are restored from CAS without re-execution.
   On cache miss: action runs, outputs are hashed and stored in CAS.
+
+  Tiered cache writes stream directly to the local store when write-through
+  is disabled. Write-through and blob read-repair still buffer payloads.
+  Action-result read-repair streams output blobs and publishes the local
+  result only after every transfer succeeds and returns the expected digest.
 
 OCI LAYOUT
 
@@ -115,3 +129,7 @@ PLUGIN STORAGE
   Plugin scripts are hashed and stored in CAS. When loaded by script path,
   the script is hashed on startup. When loaded by digest, it's fetched from
   CAS directly. Built plugin bundles are extracted to ~/.mu/plugins/<name>/.
+  Directory bundles use bundle-<full-sha256> and are published only after
+  successful extraction. Interrupted extraction leaves no reusable bundle.
+  Older bundles are retained for running processes. Plugin push selects the
+  build's resolved digest rather than combining cached versions.
