@@ -43,7 +43,7 @@ JSON PLAN CONTRACT
   action includes its ID,
   computed action_key, and every execution-affecting field: command or body,
   ewe_digest, input digests, outputs, dependencies, environment, sealed refs
-  and modes, network/work-dir/impure/retry settings, toolchain digests, and
+  and modes, network/work-dir/project-root/impure/retry settings, toolchain digests, and
   sources. Empty optional fields may be omitted.
 
   Planning resolves file and toolchain digests but never secret values. Sealed
@@ -88,3 +88,25 @@ OTHER COMMANDS
 
   mu target list                List all targets in the project.
   mu target list --json         List targets as JSON.
+
+ACTION ENVIRONMENT AND WORK DIRECTORY
+
+  Pure actions default to an empty environment. Declare PATH and other
+  required variables in action.env; use sealed_inputs for secret values.
+  When a bare command has no PATH, Mu searches only /usr/bin:/bin for its
+  initial executable. An explicit PATH controls lookup; ambient parent PATH
+  cannot select another binary. The sandbox supplies its own toolchain PATH.
+
+  Impure bare commands with no env declaration retain parent inheritance for
+  direct host operations. Explicit env maps, including {}, replace inheritance.
+  VM and sandbox execution never imports arbitrary parent variables.
+
+  Coordinator actions carry project_root in plan-v2 and cache identity.
+  Working-directory resolution permits internal relative symlinks and rejects
+  external links. Execution reopens and pins the directory before cache or
+  provider access; the child uses fchdir on its inherited descriptor. Relative
+  restores, output collection, and sandbox source reads use that pinned root.
+  A later symlink swap cannot redirect those operations. This native descriptor
+  execution is supported on Linux and macOS. Bare commands remain intentional
+  host commands, not a full filesystem sandbox; explicit absolute outputs retain
+  their host-path contract.

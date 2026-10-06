@@ -177,7 +177,15 @@ func RunInit() {
 	// 9. Set hostname
 	syscall.Sethostname([]byte("mu-sandbox"))
 
-	// 10. Exec the build command
+	// 10. Resolve using the declared sandbox environment, not the parent's
+	// PATH carried into the init process.
+	os.Clearenv()
+	for _, entry := range cfg.Env {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok {
+			os.Setenv(name, value)
+		}
+	}
 	argv0 := cfg.Command[0]
 	// Resolve relative to /bin inside sandbox
 	if !filepath.IsAbs(argv0) {

@@ -189,7 +189,7 @@ BUILDING AND DISTRIBUTING PLUGINS
 
   mu plugin list                 List plugins defined in mu.cue.
   mu plugin list --discover      Start plugins and show capabilities.
-  mu plugin list --cached        Show all plugins stored in ~/.mu/plugins/.
+  mu plugin list --cached        Show every cached plugin version, one row per identity.
   mu plugin list --json          Output as JSON.
   mu plugin info <name>          Show capabilities, schemas, digest, and
                                  path for a single plugin (project or
@@ -364,3 +364,24 @@ OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
   doesn't match its directory name.
 
   Full plugin-author guide: docs/plugin-output-schemas.md.
+
+CACHED VERSION SELECTION
+
+  Project-based info/guide uses the configured plugin identity. Outside a
+  project, a sole cached identity can be selected automatically. If several
+  versions exist, info and guide report ambiguity instead of choosing a hash
+  by directory order. Select a full digest explicitly:
+
+    mu plugin info --digest sha256:<64 hex characters> <name>
+    mu guide plugin --digest sha256:<64 hex characters> <name>
+    mu plugin list --cached --json
+
+  --digest selects an already cached version, even inside a project; it does
+  not fetch another version. Listing exposes all available identities. Legacy
+  short cache paths remain usable when unambiguous, but a complete full-digest
+  publication supersedes its old short alias. Re-resolve legacy entries from
+  their project to obtain a full identity for explicit selection.
+
+  Standalone plugin files publish through verified atomic replacement at
+  plugin-<full digest>.<extension>. Failed copy/close/digest checks leave no
+  advertised file. Older versions are retained for running processes.

@@ -11,7 +11,8 @@ ISOLATION LEVELS
 
   Seatbelt   macOS      sandbox-exec with a deny-default SBPL profile.
                         Kernel-enforced: file writes restricted to output/tmp/work,
-                        network denied when hermetic, read access to system libs only.
+                        network denied when hermetic, data reads limited to sandbox
+                        and platform/runtime trees; metadata lookup is allowed.
 
   Namespace  Linux      User/mount/PID/IPC/UTS/network namespaces via clone().
                         pivot_root to tmpfs, minimal /dev, read-only rootfs.
@@ -53,7 +54,7 @@ PLATFORM NOTES
 
   The re-exec pattern (used by Docker, Bazel, bubblewrap): mu re-executes
   itself as PID 1 inside new namespaces. The sentinel __sandbox_init__ in
-  os.Args triggers the init path in cmd/mu/main.go.
+  os.Args triggers package initialization, including in test binaries.
 
 BENCHMARKS (Apple M3, sandbox package)
 
@@ -66,3 +67,19 @@ QUERYING ISOLATION LEVEL
 
   The Sandbox.Level() method returns the actual isolation achieved.
   Build manifests can include this for downstream attestation.
+
+CONTINUOUS QUALIFICATION
+
+  .github/workflows/ci.yml pins Go 1.26.2 and action revisions and runs Linux
+  and macOS unit/race/vet/build gates. Native acceptance separately builds a
+  static helper and requires Namespace on Linux or Seatbelt on macOS; it
+  fails rather than silently accepting copy isolation. Checks cover writable
+  work directories, denied host reads/writes, and denied/allowed networking.
+
+  Run the native gate locally:
+    CGO_ENABLED=0 go build -o /tmp/mu-native-helper ./internal/sandbox/testdata/native-helper
+    MU_NATIVE_HELPER=/tmp/mu-native-helper MU_REQUIRE_NATIVE_SANDBOX=1 go test -count=1 -v ./internal/sandbox -run '^TestNativeSandboxAcceptance$'
+
+  Host-shell unit tests explicitly use copy isolation. They are environment
+  tests, not evidence of kernel enforcement. Babashka qualification and real
+  PUDL integration remain separate from this Go/native matrix.

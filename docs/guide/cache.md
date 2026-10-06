@@ -9,14 +9,19 @@ HOW CACHING WORKS
   - Command (argv, original order)
   - Inline pith body or ewe program digest, when present
   - Sorted input digests (sha256 of each input file)
-  - Environment variables (sorted), including inherited vs empty environment
+  - Declared environment variables (sorted); pure defaults are clean, while
+    impure bare commands may inherit
   - Sorted toolchain artifact paths and digests, including bare vs sandbox mode
   - Sorted declared output paths and sandbox source paths
   - Network flag
   - Impure flag
-  - Work directory
+  - Work directory and coordinator project root
   - Sealed-input refs and modes (NOT values)
   - Sealed-output destination refs and effective store modes
+
+  Action-key encoding v3 records the clean-environment and rooted-execution
+  contract. Upgrading invalidates previous action results once; regenerate
+  saved exact-plan approvals. Content-addressed blobs remain reusable.
 
   Key encoding is versioned and length-prefixed, so embedded newlines or
   separators in arguments and metadata cannot alias another action. This
@@ -151,3 +156,16 @@ PLUGIN STORAGE
   successful extraction. Interrupted extraction leaves no reusable bundle.
   Older bundles are retained for running processes. Plugin push selects the
   build's resolved digest rather than combining cached versions.
+
+REMOTE METADATA BUDGETS
+
+  OCI manifests and action-result configs are limited to 8 MiB each. Plugin
+  configs and plugin indexes are limited to 4 MiB each. These budgets are
+  independent of large artifact layer blobs. A representative 20,000-output
+  action config fits within its budget.
+
+  Declared oversized descriptors fail before fetch. Actual transfer bytes,
+  including trailing whitespace, are also bounded before JSON decoding, so
+  inaccurate sizes cannot bypass the limit. Errors identify the metadata kind
+  and byte budget; split oversized output sets or plugin indexes into smaller
+  artifacts. Native code rejects trailing JSON and closes streams on failure.
