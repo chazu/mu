@@ -140,6 +140,13 @@ func RunInit() {
 	procDir := filepath.Join(cfg.RootDir, "proc")
 	os.MkdirAll(procDir, 0o755)
 
+	// Mount the new PID namespace's procfs while the inherited procfs is still
+	// visible. Mounting only after detaching the old root fails Linux's
+	// mount_too_revealing/mnt_already_visible check in an unprivileged userns.
+	if err := syscall.Mount("proc", procDir, "proc", syscall.MS_RDONLY|syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_NOEXEC, ""); err != nil {
+		fatal("mount private /proc: %v", err)
+	}
+
 	// 5. pivot_root
 	putold := filepath.Join(cfg.RootDir, ".pivot_root")
 	os.MkdirAll(putold, 0o700)
@@ -155,12 +162,6 @@ func RunInit() {
 		fatal("unmount old root: %v", err)
 	}
 	os.RemoveAll("/.pivot_root")
-
-	// 7. Mount /proc (PID namespace gives clean view)
-	if err := syscall.Mount("proc", "/proc", "proc",
-		syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, ""); err != nil {
-		fatal("mount /proc: %v", err)
-	}
 
 	// Separate writable mounts before making the root mount read-only.
 	for _, dir := range []string{"/work", "/out", "/tmp"} {
