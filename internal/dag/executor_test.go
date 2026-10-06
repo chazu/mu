@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -272,12 +273,17 @@ func TestSealedInputsFileMode(t *testing.T) {
 	workDir := t.TempDir()
 	outFile := filepath.Join(workDir, "captured")
 
+	statCommand := "stat -f '%Lp'"
+	if runtime.GOOS == "linux" {
+		statCommand = "stat -c '%a'"
+	}
+
 	g := dag.NewGraph()
 	_ = g.AddAction(&dag.Action{
 		ID: "deploy",
 		// Capture: file path, file contents, file mode.
 		Command: []string{"sh", "-c",
-			`stat -f '%Lp' "$SECRET_KEY" > ` + outFile + `; ` +
+			statCommand + ` "$SECRET_KEY" > ` + outFile + `; ` +
 				`echo --- >> ` + outFile + `; ` +
 				`cat "$SECRET_KEY" >> ` + outFile},
 		WorkDir: workDir,

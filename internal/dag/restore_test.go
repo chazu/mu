@@ -69,7 +69,7 @@ func TestRestoreFailurePreservesExistingOutput(t *testing.T) {
 			if failure == "cancel" {
 				cancel()
 			}
-			if err := (&Executor{Store: store}).restoreOutputs(ctx, &Action{WorkDir: root, Outputs: []string{"out"}}, result); err == nil {
+			if err := (&Executor{Store: store}).restoreOutputs(ctx, &Action{WorkDir: root, Outputs: []string{"out"}}, result, nil); err == nil {
 				t.Fatal("accepted invalid restore")
 			}
 			content, err := os.ReadFile(dest)
@@ -108,7 +108,7 @@ func TestRestoreStagesAllOutputsBeforePublishing(t *testing.T) {
 		}
 		return io.NopCloser(strings.NewReader("replacement"))
 	}}
-	if err := (&Executor{Store: store}).restoreOutputs(context.Background(), &Action{WorkDir: root, Outputs: []string{"first", "second"}}, result); err == nil {
+	if err := (&Executor{Store: store}).restoreOutputs(context.Background(), &Action{WorkDir: root, Outputs: []string{"first", "second"}}, result, nil); err == nil {
 		t.Fatal("accepted corrupt second output")
 	}
 	for _, name := range []string{"first", "second"} {

@@ -2,6 +2,8 @@ package dag
 
 import (
 	"context"
+	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/cas/oci"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,4 +126,69 @@ func executeEnvironmentAction(t *testing.T, a *Action) *ExecuteResult {
 		t.Fatal(err)
 	}
 	return result
+}
+
+type workDirSwapStore struct {
+	cas.Store
+	swap    func()
+	receipt *cas.ActionResult
+}
+
+func (s workDirSwapStore) GetActionResult(context.Context, cas.ActionKey) (*cas.ActionResult, error) {
+	s.swap()
+	return s.receipt, nil
+}
+
+func TestRelativeOutputsStayPinnedDuringCacheAndFreshExecution(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fresh", true: "cached"}[cached], func(t *testing.T) {
+			root, outside := t.TempDir(), t.TempDir()
+			inside := filepath.Join(root, "inside")
+			if err := os.Mkdir(inside, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(root, "work")
+			if err := os.Symlink("inside", link); err != nil {
+				t.Fatal(err)
+			}
+			store, err := oci.NewLocal(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := store.Put(context.Background(), strings.NewReader("pinned"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipt *cas.ActionResult
+			if cached {
+				receipt = &cas.ActionResult{Version: cas.ActionResultVersion, Outputs: map[string]cas.Digest{"out": digest}, OutputModes: map[string]uint32{"out": 0o640}}
+			}
+			swapStore := workDirSwapStore{Store: store, receipt: receipt, swap: func() {
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, link); err != nil {
+					t.Fatal(err)
+				}
+			}}
+			a := &Action{ID: "pinned-output", ProjectRoot: root, WorkDir: link, Outputs: []string{"out"}, Command: []string{"sh", "-c", "printf pinned > out"}}
+			graph := NewGraph()
+			if err := graph.AddAction(a); err != nil {
+				t.Fatal(err)
+			}
+			result, err := (&Executor{Store: swapStore, Workers: 1}).Execute(context.Background(), graph)
+			if err != nil || len(result.Failed) > 0 || len(result.Completed) != 1 {
+				t.Fatalf("execute after swap: %+v, %v", result, err)
+			}
+			if result.Completed[0].Cached != cached {
+				t.Fatal("unexpected execution path")
+			}
+			if data, err := os.ReadFile(filepath.Join(inside, "out")); err != nil || string(data) != "pinned" {
+				t.Fatalf("output did not stay pinned: %q, %v", data, err)
+			}
+			if _, err := os.Stat(filepath.Join(outside, "out")); !os.IsNotExist(err) {
+				t.Fatalf("output escaped: %v", err)
+			}
+		})
+	}
 }
