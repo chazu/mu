@@ -5,6 +5,7 @@ package registryhttp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -39,6 +40,14 @@ func NewClient(options Options) *http.Client {
 	// HTTP/1.1 keeps deadlines attributable to this transfer instead of another
 	// multiplexed request refreshing a silent stream's deadline.
 	transport.ForceAttemptHTTP2 = false
+	// Clone inherits DefaultTransport's TLS config, which already offers h2 via
+	// ALPN; servers such as GitHub then answer in h2 frames and the HTTP/1.1
+	// client fails with EOF. Offer only http/1.1.
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{}
+	}
+	transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	transport.ResponseHeaderTimeout = options.HeaderTimeout
 	transport.TLSHandshakeTimeout = options.ConnectTimeout
 	dialer := &net.Dialer{Timeout: options.ConnectTimeout, KeepAlive: 30 * time.Second}

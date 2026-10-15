@@ -3,6 +3,15 @@
 All notable changes to mu are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
+## [Unreleased]
+
+### Fixed
+
+- `mu plugin search`, `install` and `update` reach the official catalog again.
+  The bounded registry client disabled HTTP/2 but still offered it in the TLS
+  handshake, so HTTP/2 servers such as GitHub's release downloads answered in
+  frames the client could not read and every fetch failed with `EOF`.
+
 ## [v0.3.5] — 2026-08-05
 
 ### Added

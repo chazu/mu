@@ -74,3 +74,24 @@ func TestOfflineRequestNeverContactsServer(t *testing.T) {
 		t.Fatalf("offline request: %v, %d calls", err, requests.Load())
 	}
 }
+
+func TestHTTP2CapableTLSServerIsReachableOverHTTP1(t *testing.T) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, r.Proto)
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+	client := NewClient(Options{})
+	transport := client.Transport.(offlineTransport).inner.(*http.Transport)
+	transport.TLSClientConfig.RootCAs = server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(response.Body)
+	if string(data) != "HTTP/1.1" {
+		t.Fatalf("negotiated %q, want HTTP/1.1", data)
+	}
+}
