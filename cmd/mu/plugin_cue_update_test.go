@@ -106,3 +106,29 @@ func mustWrite(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpdateMuCuePlugin_ReplaceScriptSource switches an entry from a local
+// script to a digest. The schema allows exactly one source form, so the
+// script field must go.
+func TestUpdateMuCuePlugin_ReplaceScriptSource(t *testing.T) {
+	dir := t.TempDir()
+	src := `toolchains: [{toolchain: "go", from: "scratch"}]
+plugins: [
+	{name: "go", script: "plugins/go/plugin.bb"},
+]
+targets: [{target: "//x", toolchain: "go", sources: ["main.go"]}]
+`
+	mustWrite(t, filepath.Join(dir, "mu.cue"), src)
+
+	if err := updateMuCuePlugin(dir, "go", "sha256:new"); err != nil {
+		t.Fatalf("updateMuCuePlugin: %v", err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := findPlugin(cfg.Plugins, "go")
+	if got == nil || got.Digest != "sha256:new" || got.Script != "" {
+		t.Fatalf("script source not replaced by digest: %+v", got)
+	}
+}

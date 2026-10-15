@@ -762,26 +762,33 @@ func pluginEntryStruct(name, digest string) *ast.StructLit {
 
 // mergeDigestField returns a copy of s with its `digest` field set to the
 // given value. An existing `digest` field is replaced in place; otherwise
-// a new one is appended.
+// a new one is appended. #PluginDef allows exactly one source form, so any
+// command, script, url or sha256 field is dropped.
 func mergeDigestField(s *ast.StructLit, digest string) *ast.StructLit {
-	for i, e := range s.Elts {
-		f, ok := e.(*ast.Field)
-		if !ok {
-			continue
-		}
-		id, ok := f.Label.(*ast.Ident)
-		if !ok || id.Name != "digest" {
-			continue
-		}
-		s.Elts[i] = &ast.Field{
-			Label: ast.NewIdent("digest"),
-			Value: ast.NewString(digest),
-		}
-		return s
-	}
-	s.Elts = append(s.Elts, &ast.Field{
+	digestField := &ast.Field{
 		Label: ast.NewIdent("digest"),
 		Value: ast.NewString(digest),
-	})
+	}
+	elts := s.Elts[:0]
+	placed := false
+	for _, e := range s.Elts {
+		if f, ok := e.(*ast.Field); ok {
+			if id, ok := f.Label.(*ast.Ident); ok {
+				switch id.Name {
+				case "command", "script", "url", "sha256":
+					continue
+				case "digest":
+					elts = append(elts, digestField)
+					placed = true
+					continue
+				}
+			}
+		}
+		elts = append(elts, e)
+	}
+	if !placed {
+		elts = append(elts, digestField)
+	}
+	s.Elts = elts
 	return s
 }

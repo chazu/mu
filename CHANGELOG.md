@@ -11,6 +11,10 @@ All notable changes to mu are recorded here. The format follows
   The bounded registry client disabled HTTP/2 but still offered it in the TLS
   handshake, so HTTP/2 servers such as GitHub's release downloads answered in
   frames the client could not read and every fetch failed with `EOF`.
+- `mu plugin install` and `update` now replace a plugin entry's existing
+  `script`, `url` or `command` source with the pinned digest. Previously they
+  added `digest` alongside it, which the schema rejects, leaving `mu.cue`
+  unloadable.
 
 ## [v0.3.5] — 2026-08-05
 
