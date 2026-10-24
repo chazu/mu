@@ -193,6 +193,7 @@ refs/modes instead of inheriting target-wide access. The retired
 | `aws` | AWS resource observer (EC2, VPC, subnets) via AWS CLI |
 | `cowsay` | Demo text transformation |
 | `docker` | Docker image builder |
+| `doppler` | Read-only secret provider over the [Doppler](https://doppler.com) CLI |
 | `file` | File convergence (write/copy/symlink/delete) + sealed-output capture |
 | `go` | Go binaries (cross-compile, tags, ldflags, race) |
 | `host` | Remote host observer over SSH |

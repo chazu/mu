@@ -1,0 +1,23 @@
+#!/usr/bin/env bb
+;; Stand-in for the doppler CLI, used by plugin_test.bb. It records each call
+;; (argv and stdin) as a JSON line in $FAKE_DOPPLER_DIR/calls.jsonl, writes its
+;; pid to pid-<n>, then answers from files named after --project and --config:
+;;   <project>__<config>.out   printed to stdout
+;;   <project>__<config>.err   printed to stderr
+;;   <project>__<config>.exit  exit code (default 0)
+;;   <project>__<config>.hang  if present, sleep instead of answering
+(require '[cheshire.core :as json] '[clojure.java.io :as io] '[clojure.string :as str])
+(let [dir   (System/getenv "FAKE_DOPPLER_DIR")
+      args  (vec *command-line-args*)
+      arg   (fn [flag] (some (fn [[a b]] (when (= a flag) b)) (partition 2 1 args)))
+      stdin (slurp *in*)
+      calls (io/file dir "calls.jsonl")
+      n     (if (.exists calls) (count (line-seq (io/reader calls))) 0)
+      base  (str (arg "--project") "__" (arg "--config"))
+      f     (fn [ext] (io/file dir (str base ext)))]
+  (spit calls (str (json/generate-string {"argv" args "stdin" stdin}) "\n") :append true)
+  (spit (io/file dir (str "pid-" n)) (str (.pid (java.lang.ProcessHandle/current))))
+  (when (.exists (f ".hang")) (Thread/sleep 120000))
+  (when (.exists (f ".out")) (print (slurp (f ".out"))) (flush))
+  (when (.exists (f ".err")) (binding [*out* *err*] (print (slurp (f ".err"))) (flush)))
+  (System/exit (if (.exists (f ".exit")) (parse-long (str/trim (slurp (f ".exit")))) 0)))

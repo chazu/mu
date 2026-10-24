@@ -5,6 +5,16 @@ All notable changes to mu are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`doppler` secret provider plugin** (babashka, read-only). Refs look like
+  `doppler:<project>/<config>/<NAME>` and resolve to the secret's computed
+  value byte for byte. It makes one `doppler secrets download` per config per
+  build and keeps the result in memory only: no fallback file, no update
+  check, and `DOPPLER_*` environment variables are ignored. Errors never
+  contain values, and a broken `${...}` reference is an error rather than a
+  value. Tests: `bb plugins/doppler/test/plugin_test.bb`.
+
 ### Fixed
 
 - `mu plugin search`, `install` and `update` reach the official catalog again.
