@@ -182,7 +182,7 @@ func runPluginList(args []string) int {
 	}
 
 	if *discover {
-		return pluginListDiscover(cfg, projectRoot, *jsonOut)
+		return pluginListDiscover(cli.networkContext(context.Background()), cfg, projectRoot, *jsonOut)
 	}
 	return pluginListConfig(cfg, *jsonOut)
 }
@@ -486,30 +486,43 @@ func pluginListConfig(cfg *config.ProjectConfig, jsonOut bool) int {
 	return 0
 }
 
-func pluginListDiscover(cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
+func pluginListDiscover(resolveCtx context.Context, cfg *config.ProjectConfig, projectRoot string, jsonOut bool) int {
+	return pluginListDiscoverWith(resolveCtx, cfg, projectRoot, jsonOut, resolveProjectPlugin)
+}
+
+// pluginListDiscoverWith materializes every configured plugin through the
+// same resolver mu build uses, so digest, url, local-directory, and command
+// plugins all start the way they would during a build.
+func pluginListDiscoverWith(resolveCtx context.Context, cfg *config.ProjectConfig, projectRoot string, jsonOut bool,
+	resolve func(context.Context, string, config.PluginDef) (plugin.PluginDef, cas.Digest, error)) int {
 	mgr := plugin.NewManager(projectRoot)
 
-	// Resolve bb if any plugin needs it.
+	defs := make([]plugin.PluginDef, 0, len(cfg.Plugins))
+	needsBb := false
 	for _, p := range cfg.Plugins {
-		tc := inferPluginToolchain(p.Script)
-		if tc == "bb" {
-			bbPath := resolveBbPath()
-			if bbPath == "" {
-				fmt.Fprintln(os.Stderr, "mu plugin list: --discover requires bb toolchain; run mu build first to bootstrap it")
-				return 1
-			}
-			mgr.SetScriptRuntime(bbPath)
-			break
+		def, _, err := resolve(resolveCtx, projectRoot, p)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mu plugin list: plugin %q: %v\n", p.Name, err)
+			return 1
 		}
+		if def.Toolchain == "" && def.Script != "" {
+			def.Toolchain = inferPluginToolchain(def.Script)
+		}
+		if def.Toolchain == "bb" {
+			needsBb = true
+		}
+		defs = append(defs, def)
+	}
+	if needsBb {
+		bbPath := resolveBbPath()
+		if bbPath == "" {
+			fmt.Fprintln(os.Stderr, "mu plugin list: --discover requires bb toolchain; run mu build first to bootstrap it")
+			return 1
+		}
+		mgr.SetScriptRuntime(bbPath)
 	}
 
-	for _, p := range cfg.Plugins {
-		def := plugin.PluginDef{
-			Name:      p.Name,
-			Command:   p.Command,
-			Script:    p.Script,
-			Toolchain: inferPluginToolchain(p.Script),
-		}
+	for _, def := range defs {
 		if err := mgr.Register(def); err != nil {
 			fmt.Fprintf(os.Stderr, "mu plugin list: %v\n", err)
 			return 1
