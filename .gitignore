@@ -3,8 +3,8 @@
 
 # Build artifacts
 /mu
-*-plugin.bb
-plugin.bb
+/*-plugin.bb
+/plugin.bb
 
 # Stray plugin binaries built at repo root from `go build ./plugins/<name>`
 /file
