@@ -91,7 +91,32 @@ INSPECTING THE CACHE
   mu cache inspect <ref>           Inspect an action, toolchain, or blob by tag/digest.
   mu cache size                    Show total cache disk usage.
   mu cache size --json             Output as JSON.
-  mu cache clean                   Remove unreachable blobs (garbage collection).
+  mu cache clean                   Remove unreachable blobs (garbage collection)
+                                   and stale staging (see below).
+  mu cache clean --dry-run         Report what would be removed.
+
+STAGING AND CRASH CLEANUP
+
+  mu writes temporary files next to their destination and publishes them
+  atomically: scratch extraction (~/.mu/cache/extract/.extract-*),
+  downloads (.fetch-*), OCI ingest, plugin bundles (.bundle-*, .plugin-*),
+  toolchain binaries (.tool-*), schema installs (.tmp-*), and, in the
+  system temp directory, cache replay and blob spools, sandbox roots, and
+  sealed-value directories (mu-*). A writer removes its own partial output
+  on any failure, including a full disk.
+
+  A process that is killed cannot clean up, so mu sweeps these locations at
+  most once an hour when a command starts (and on every 'mu cache clean').
+  A leftover is removed only when nothing inside it has been modified for
+  24 hours, so a concurrent mu process is never disturbed. Stranded
+  sealed-value directories can hold secret material; the sweep reclaims
+  them too. Set MU_NO_STAGING_SWEEP=1 to keep a crashed run's leftovers for
+  inspection.
+
+  mu does not check free disk space before extracting: a compressed
+  stream's expanded size is unknown until read, and free-space checks race
+  with other writers. Extraction limits (mu guide toolchains) bound the
+  worst case instead.
 
 VERIFYING CACHE INTEGRITY
 

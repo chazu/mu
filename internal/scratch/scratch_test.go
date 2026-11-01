@@ -13,7 +13,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -67,7 +66,9 @@ func makeZip(t *testing.T, files map[string]string) []byte {
 	zw := zip.NewWriter(&buf)
 
 	for name, content := range files {
-		w, err := zw.Create(name)
+		hdr := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		hdr.SetMode(0o755)
+		w, err := zw.CreateHeader(hdr)
 		if err != nil {
 			t.Fatalf("zip create %s: %v", name, err)
 		}
@@ -80,28 +81,6 @@ func makeZip(t *testing.T, files map[string]string) []byte {
 		t.Fatalf("zip close: %v", err)
 	}
 	return buf.Bytes()
-}
-
-// fakeVerifyBinary creates a script at extractDir/bin/<name> that exits 0
-// when called with --version.
-func fakeVerifyBinary(t *testing.T, extractDir, name string) {
-	t.Helper()
-	binDir := filepath.Join(extractDir, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	var script string
-	if runtime.GOOS == "windows" {
-		script = "@echo off\necho fake 1.0.0\n"
-	} else {
-		script = "#!/bin/sh\necho fake 1.0.0\n"
-	}
-
-	binPath := filepath.Join(binDir, name)
-	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func newTestBuilder(t *testing.T) (*Builder, string) {
@@ -133,7 +112,7 @@ func TestBuild_FetchExtractTarGzWithStripPrefix(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBuilder(t)
+	b, _ := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
@@ -147,12 +126,6 @@ func TestBuild_FetchExtractTarGzWithStripPrefix(t *testing.T) {
 			},
 		}},
 	}
-
-	// Create a real verify binary since tar extraction will extract the script.
-	// Actually, the extracted script won't have execute permission correctly on
-	// all platforms from tar, so pre-create it.
-	extractDir := filepath.Join(dir, "cache", "extract", "go-1.0")
-	fakeVerifyBinary(t, extractDir, "go")
 
 	err := b.Build(context.Background(), cfg)
 	if err != nil {
@@ -190,7 +163,7 @@ func TestBuild_ZipExtraction(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBuilder(t)
+	b, _ := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
@@ -203,10 +176,6 @@ func TestBuild_ZipExtraction(t *testing.T) {
 			},
 		}},
 	}
-
-	// Create verify binary.
-	extractDir := filepath.Join(dir, "cache", "extract", "mytool-2.0")
-	fakeVerifyBinary(t, extractDir, "mytool")
 
 	err := b.Build(context.Background(), cfg)
 	if err != nil {
@@ -320,7 +289,7 @@ func TestBuild_NetworkRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBuilder(t)
+	b, _ := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
@@ -333,9 +302,6 @@ func TestBuild_NetworkRetry(t *testing.T) {
 			},
 		}},
 	}
-
-	extractDir := filepath.Join(dir, "cache", "extract", "retrytool-1.0")
-	fakeVerifyBinary(t, extractDir, "retrytool")
 
 	err := b.Build(context.Background(), cfg)
 	if err != nil {
@@ -356,7 +322,7 @@ func TestBuild_VersionChangeTriggersFetch(t *testing.T) {
 		"lib/new.so": "new-in-v2",
 	})
 
-	b, dir := newTestBuilder(t)
+	b, _ := newTestBuilder(t)
 
 	// Pre-register v1 manifest.
 	v1Manifest := &coordinator.ToolchainManifest{
@@ -390,9 +356,6 @@ func TestBuild_VersionChangeTriggersFetch(t *testing.T) {
 			},
 		}},
 	}
-
-	extractDir := filepath.Join(dir, "cache", "extract", "tool-2.0")
-	fakeVerifyBinary(t, extractDir, "tool")
 
 	err := b.Build(context.Background(), cfg)
 	if err != nil {
@@ -465,7 +428,7 @@ func TestBuild_ManifestPersistsToCAS(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, dir := newTestBuilder(t)
+	b, _ := newTestBuilder(t)
 
 	cfg := &config.ProjectConfig{
 		Toolchains: []config.Toolchain{{
@@ -478,9 +441,6 @@ func TestBuild_ManifestPersistsToCAS(t *testing.T) {
 			},
 		}},
 	}
-
-	extractDir := filepath.Join(dir, "cache", "extract", "persist-1.0")
-	fakeVerifyBinary(t, extractDir, "persist")
 
 	err := b.Build(context.Background(), cfg)
 	if err != nil {
@@ -607,5 +567,47 @@ func TestVerifiedLocalArchiveRebuildsMissingManifestWithoutDownload(t *testing.T
 	}
 	if builder.Registry.Get("tool") == nil {
 		t.Fatal("did not rebuild manifest")
+	}
+}
+
+// A tree left by an earlier (or crashed) extraction must never contribute
+// files to a new manifest, and extraction leaves no staging behind.
+func TestBuildIgnoresStaleExtractTreesAndCleansStaging(t *testing.T) {
+	archive := makeTarGz(t, map[string]string{"bin/fresh": "#!/bin/sh\necho fresh 1.0\n"})
+	hash := sha256Hex(archive)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(archive) }))
+	defer srv.Close()
+
+	b, _ := newTestBuilder(t)
+	legacy := filepath.Join(b.CacheDir, "extract", "fresh-1.0", "bin")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "stale"), []byte("from an older archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.ProjectConfig{Toolchains: []config.Toolchain{{
+		Name: "fresh", From: "scratch",
+		Config: config.ToolchainConfig{Version: "1.0", URL: srv.URL + "/fresh-1.0.tar.gz", SHA256: hash},
+	}}}
+	if err := b.Build(context.Background(), cfg); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	manifest, err := b.Registry.Lookup(context.Background(), "fresh", "1.0")
+	if err != nil || manifest == nil {
+		t.Fatalf("Lookup = %v, %v", manifest, err)
+	}
+	if _, ok := manifest.Artifacts["bin/stale"]; ok {
+		t.Fatalf("stale file from a previous extraction entered the manifest: %v", manifest.Artifacts)
+	}
+	if _, ok := manifest.Artifacts["bin/fresh"]; !ok || len(manifest.Artifacts) != 1 {
+		t.Fatalf("artifacts = %v, want only bin/fresh", manifest.Artifacts)
+	}
+	entries, _ := os.ReadDir(filepath.Join(b.CacheDir, "extract"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".extract-") {
+			t.Fatalf("staging directory left behind: %s", e.Name())
+		}
 	}
 }

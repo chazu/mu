@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/chazu/mu/internal/staging"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -61,15 +63,32 @@ func runCacheClean(args []string) int {
 		return 1
 	}
 
+	// Also reclaim staging stranded by crashed processes. The inactivity
+	// threshold still applies, so concurrent runs are never disturbed.
+	var staged []staging.Removal
+	var stagedBytes int64
+	if home, err := os.UserHomeDir(); err == nil {
+		var sweepErr error
+		staged, sweepErr = staging.Sweep(staging.DefaultRules(home, os.TempDir()), staging.MinAge, time.Now(), *dryRun)
+		if sweepErr != nil {
+			fmt.Fprintf(os.Stderr, "mu cache clean: staging: %v\n", sweepErr)
+		}
+		for _, s := range staged {
+			stagedBytes += s.Bytes
+		}
+	}
+
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(map[string]any{
-			"dry_run":       *dryRun,
-			"removed":       removed,
-			"removed_count": len(removed),
-			"freed_bytes":   totalBytes,
-			"freed":         formatSize(totalBytes),
+			"dry_run":             *dryRun,
+			"removed":             removed,
+			"removed_count":       len(removed),
+			"freed_bytes":         totalBytes,
+			"freed":               formatSize(totalBytes),
+			"staging_removed":     staged,
+			"staging_freed_bytes": stagedBytes,
 		})
 		return 0
 	}
@@ -79,6 +98,7 @@ func runCacheClean(args []string) int {
 		verb = "Would remove"
 	}
 	fmt.Printf("%s %d unreachable blob(s), %s\n", verb, len(removed), formatSize(totalBytes))
+	fmt.Printf("%s %d stale staging path(s), %s\n", verb, len(staged), formatSize(stagedBytes))
 	return 0
 }
 

@@ -87,15 +87,21 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 		}
 	}
 
-	// Extract the archive.
-	extractDir := filepath.Join(b.CacheDir, "extract", name+"-"+version)
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	// Extract into a fresh private staging directory. Its files are stored in
+	// CAS below and the tree is then discarded, so a previous or concurrent
+	// run can never contribute stale files to this manifest. A crash leaves
+	// only a ".extract-*" directory, which the staging sweeper reclaims.
+	extractRoot := filepath.Join(b.CacheDir, "extract")
+	if err := os.MkdirAll(extractRoot, 0o755); err != nil {
 		return fmt.Errorf("create extract dir: %w", err)
 	}
+	extractDir, err := os.MkdirTemp(extractRoot, ".extract-"+name+"-"+version+"-*")
+	if err != nil {
+		return fmt.Errorf("create extract dir: %w", err)
+	}
+	defer os.RemoveAll(extractDir)
 
 	if err := extract(archivePath, extractDir, tc.Config.StripPrefix); err != nil {
-		// Never leave a partial (possibly limit-exceeding) tree behind.
-		os.RemoveAll(extractDir)
 		return fmt.Errorf("extract: %w", err)
 	}
 
