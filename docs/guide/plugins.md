@@ -19,7 +19,12 @@ LOADING PLUGINS
      {"name": "go", "script": "plugins/go"}
 
   3. CAS digest (for distribution — previously built plugin):
-     {"name": "file", "digest": "sha256:abc123..."}
+     {"name": "file", "digest": "sha256:<64 lowercase hex characters>"}
+
+     The digest must be a full SHA-256 identity; abbreviated prefixes are
+     rejected by `mu validate` and at resolution. A "url" plugin's
+     "sha256" field must likewise be 64 lowercase hex characters (no
+     "sha256:" prefix).
 
   4. Direct command (escape hatch, not cached):
      {"name": "file", "command": ["python3", "my-plugin.py"]}

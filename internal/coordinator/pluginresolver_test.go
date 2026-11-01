@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/chazu/mu/internal/archivelimit"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 )
@@ -481,5 +483,46 @@ func TestSingleFilePublicationDoesNotAdvertiseFailedTransfers(t *testing.T) {
 				t.Fatalf("left partial cache entries: %v, %v", entries, err)
 			}
 		}
+	}
+}
+
+func TestExtractDirFromCAS_EnforcesExtractionLimits(t *testing.T) {
+	build := func(n int, size int64) []byte {
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		zeros := make([]byte, size)
+		for i := 0; i < n; i++ {
+			tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("f%d", i), Mode: 0o644, Size: size, Typeflag: tar.TypeReg})
+			tw.Write(zeros)
+		}
+		tw.Close()
+		return buf.Bytes()
+	}
+	cases := []struct {
+		name, env, value string
+		n                int
+		size             int64
+	}{
+		{"entries", archivelimit.EnvMaxEntries, "3", 4, 1},
+		{"file bytes", archivelimit.EnvMaxFileBytes, "10", 1, 11},
+		{"total bytes", archivelimit.EnvMaxTotalBytes, "100", 3, 40},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.env, tc.value)
+			store := newTestStore(t)
+			digest, err := store.Put(context.Background(), bytes.NewReader(build(tc.n, tc.size)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := &PluginResolver{Store: store, CacheDir: t.TempDir()}
+			if _, err := r.extractDirFromCAS(context.Background(), "test", digest); !errors.Is(err, archivelimit.ErrExceeded) {
+				t.Fatalf("extractDirFromCAS = %v, want ErrExceeded", err)
+			}
+			entries, _ := os.ReadDir(filepath.Join(r.CacheDir, "test"))
+			if len(entries) != 0 {
+				t.Fatalf("rejected bundle left cache entries: %v", entries)
+			}
+		})
 	}
 }

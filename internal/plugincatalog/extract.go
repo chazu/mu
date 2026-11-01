@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chazu/mu/internal/archivelimit"
 )
 
 // ExtractArchive extracts a catalog source archive into destDir. Only regular
@@ -20,6 +22,10 @@ func ExtractArchive(archivePath, destDir string) error {
 		return fmt.Errorf("open archive: %w", err)
 	}
 	defer f.Close()
+	budget, err := archivelimit.New(archivelimit.Plugin)
+	if err != nil {
+		return err
+	}
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return fmt.Errorf("read gzip archive: %w", err)
@@ -38,6 +44,9 @@ func ExtractArchive(archivePath, destDir string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("read tar entry: %w", err)
+		}
+		if err := budget.Entry(hdr.Name); err != nil {
+			return err
 		}
 		name, err := safeArchivePath(hdr.Name)
 		if err != nil {
@@ -62,11 +71,14 @@ func ExtractArchive(archivePath, destDir string) error {
 			if mode == 0 {
 				mode = 0o644
 			}
+			if err := budget.Declared(name, hdr.Size); err != nil {
+				return err
+			}
 			out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 			if err != nil {
 				return fmt.Errorf("create archive file %q: %w", name, err)
 			}
-			_, copyErr := io.Copy(out, tr)
+			_, copyErr := budget.Copy(out, tr, name)
 			closeErr := out.Close()
 			if copyErr != nil {
 				return fmt.Errorf("extract archive file %q: %w", name, copyErr)

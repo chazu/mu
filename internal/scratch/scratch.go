@@ -11,11 +11,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/chazu/mu/internal/archivelimit"
 	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
@@ -92,6 +94,8 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	}
 
 	if err := extract(archivePath, extractDir, tc.Config.StripPrefix); err != nil {
+		// Never leave a partial (possibly limit-exceeding) tree behind.
+		os.RemoveAll(extractDir)
 		return fmt.Errorf("extract: %w", err)
 	}
 
@@ -239,13 +243,17 @@ func extractTarGz(archivePath, destDir, stripPrefix string) error {
 	}
 	defer f.Close()
 
+	budget, err := archivelimit.New(archivelimit.Toolchain)
+	if err != nil {
+		return err
+	}
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return fmt.Errorf("gzip: %w", err)
 	}
 	defer gz.Close()
 
-	return extractTar(tar.NewReader(gz), destDir, stripPrefix)
+	return extractTar(tar.NewReader(gz), destDir, stripPrefix, budget)
 }
 
 // extractTarXz extracts a .tar.xz archive by piping through the xz command.
@@ -256,6 +264,10 @@ func extractTarXz(archivePath, destDir, stripPrefix string) error {
 	}
 	defer f.Close()
 
+	budget, err := archivelimit.New(archivelimit.Toolchain)
+	if err != nil {
+		return err
+	}
 	cmd := exec.Command("xz", "--decompress", "--stdout")
 	cmd.Stdin = f
 
@@ -268,7 +280,12 @@ func extractTarXz(archivePath, destDir, stripPrefix string) error {
 		return fmt.Errorf("xz start: %w", err)
 	}
 
-	extractErr := extractTar(tar.NewReader(stdout), destDir, stripPrefix)
+	extractErr := extractTar(tar.NewReader(stdout), destDir, stripPrefix, budget)
+	if extractErr != nil {
+		// Stop decompression we no longer read; otherwise xz blocks on a full
+		// pipe and Wait never returns.
+		_ = cmd.Process.Kill()
+	}
 
 	if err := cmd.Wait(); err != nil && extractErr == nil {
 		return fmt.Errorf("xz: %w", err)
@@ -277,8 +294,9 @@ func extractTarXz(archivePath, destDir, stripPrefix string) error {
 }
 
 // extractTar reads entries from a tar reader and writes them to destDir,
-// stripping the given prefix from entry names.
-func extractTar(tr *tar.Reader, destDir, stripPrefix string) error {
+// stripping the given prefix from entry names. Every header counts against
+// budget, including entries that are skipped.
+func extractTar(tr *tar.Reader, destDir, stripPrefix string, budget *archivelimit.Budget) error {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -286,6 +304,9 @@ func extractTar(tr *tar.Reader, destDir, stripPrefix string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("tar next: %w", err)
+		}
+		if err := budget.Entry(hdr.Name); err != nil {
+			return err
 		}
 
 		name := stripPrefixFromPath(hdr.Name, stripPrefix)
@@ -309,7 +330,10 @@ func extractTar(tr *tar.Reader, destDir, stripPrefix string) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
-			if err := writeFile(target, tr, hdr.FileInfo().Mode()); err != nil {
+			if err := budget.Declared(hdr.Name, hdr.Size); err != nil {
+				return err
+			}
+			if err := writeFile(target, tr, hdr.FileInfo().Mode(), hdr.Name, budget); err != nil {
 				return err
 			}
 		case tar.TypeSymlink:
@@ -332,6 +356,17 @@ func extractZip(archivePath, destDir, stripPrefix string) error {
 	}
 	defer zr.Close()
 
+	budget, err := archivelimit.New(archivelimit.Toolchain)
+	if err != nil {
+		return err
+	}
+	// The central directory is read up front, so the entry count can be
+	// rejected before anything is written.
+	for _, f := range zr.File {
+		if err := budget.Entry(f.Name); err != nil {
+			return err
+		}
+	}
 	for _, f := range zr.File {
 		name := stripPrefixFromPath(f.Name, stripPrefix)
 		if name == "" || name == "." {
@@ -356,11 +391,15 @@ func extractZip(archivePath, destDir, stripPrefix string) error {
 			return err
 		}
 
+		// Declared sizes can lie; Copy enforces the bytes actually inflated.
+		if err := budget.Declared(f.Name, int64(min(f.UncompressedSize64, math.MaxInt64))); err != nil {
+			return err
+		}
 		rc, err := f.Open()
 		if err != nil {
 			return fmt.Errorf("zip entry %s: %w", f.Name, err)
 		}
-		writeErr := writeFile(target, rc, f.Mode())
+		writeErr := writeFile(target, rc, f.Mode(), f.Name, budget)
 		rc.Close()
 		if writeErr != nil {
 			return writeErr
@@ -370,12 +409,12 @@ func extractZip(archivePath, destDir, stripPrefix string) error {
 }
 
 // writeFile creates (or truncates) a file at path and copies content from r.
-func writeFile(path string, r io.Reader, mode os.FileMode) error {
+func writeFile(path string, r io.Reader, mode os.FileMode, name string, budget *archivelimit.Budget) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, r); err != nil {
+	if _, err := budget.Copy(f, r, name); err != nil {
 		f.Close()
 		return err
 	}

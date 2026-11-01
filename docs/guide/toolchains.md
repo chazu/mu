@@ -88,6 +88,32 @@ FAILURE MODES
   Toolchain name != binary name
     Verify fails. Use MU_SCRATCH or write a wrapper plugin.
 
+  Archive exceeds extraction limits
+    Extraction stops with "archive exceeds extraction limit" and the
+    partial tree is removed. See EXTRACTION LIMITS.
+
+EXTRACTION LIMITS
+
+  Every archive mu expands (scratch toolchains, catalog source archives,
+  plugin CAS bundles) is bounded by entry count, per-file expanded bytes,
+  and total expanded bytes. Limits apply to bytes actually written, not
+  only to sizes the archive declares, and skipped entries still count.
+
+                    entries   per file   total
+    toolchains      500,000      4 GiB   16 GiB
+    plugins         100,000      1 GiB    2 GiB
+
+  Toolchain defaults leave about 6x headroom over large real toolchains
+  (Rust with docs: ~76k entries / 2.3 GB; LLVM: several GB; Go and Zig:
+  ~17-19k entries). If a legitimate archive is larger, raise the limits
+  for that run (positive integers; they apply to every profile):
+
+    MU_EXTRACT_MAX_ENTRIES=1000000
+    MU_EXTRACT_MAX_FILE_BYTES=8589934592
+    MU_EXTRACT_MAX_TOTAL_BYTES=34359738368
+
+  A malformed value is an error, not an ignored limit.
+
 USING TOOLCHAINS IN PLUGINS
 
   When mu plans a target, it passes toolchain_artifacts to the plugin:

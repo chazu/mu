@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chazu/mu/internal/archivelimit"
 	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
@@ -446,6 +447,10 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 		return "", fmt.Errorf("get plugin bundle from CAS: %w", err)
 	}
 	defer rc.Close()
+	budget, err := archivelimit.New(archivelimit.Plugin)
+	if err != nil {
+		return "", err
+	}
 	tr := tar.NewReader(rc)
 	seen := make(map[string]bool)
 	for {
@@ -458,6 +463,9 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 		}
 		if err != nil {
 			return "", fmt.Errorf("read tar entry: %w", err)
+		}
+		if err := budget.Entry(hdr.Name); err != nil {
+			return "", err
 		}
 		if !filepath.IsLocal(hdr.Name) || filepath.Clean(hdr.Name) == "." {
 			return "", fmt.Errorf("tar entry %q: path traversal not allowed", hdr.Name)
@@ -480,11 +488,14 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 			if mode == 0 {
 				mode = 0o644
 			}
+			if err := budget.Declared(hdr.Name, hdr.Size); err != nil {
+				return "", err
+			}
 			f, err := root.OpenFile(entry, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode)
 			if err != nil {
 				return "", fmt.Errorf("create %s: %w", hdr.Name, err)
 			}
-			_, copyErr := io.Copy(f, tr)
+			_, copyErr := budget.Copy(f, tr, hdr.Name)
 			closeErr := f.Close()
 			if copyErr != nil {
 				return "", fmt.Errorf("extract %s: %w", hdr.Name, copyErr)
