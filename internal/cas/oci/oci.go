@@ -121,6 +121,9 @@ func fromOCIDigest(d godigest.Digest) cas.Digest {
 
 // Has reports whether the blob identified by dgst exists in the registry.
 func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
+	if err := dgst.Validate(); err != nil {
+		return false, fmt.Errorf("oci: check blob %s: %w", dgst, err)
+	}
 	if err := s.available(ctx); err != nil {
 		return false, err
 	}
@@ -154,6 +157,9 @@ func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
 // (HEAD for remote; layout index for local) and populate the descriptor
 // before fetching.
 func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
+	if err := dgst.Validate(); err != nil {
+		return nil, fmt.Errorf("oci: get blob %s: %w", dgst, err)
+	}
 	if err := s.available(ctx); err != nil {
 		return nil, err
 	}
@@ -279,6 +285,9 @@ func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
 
 // Delete removes the blob identified by dgst from the registry.
 func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
+	if err := dgst.Validate(); err != nil {
+		return fmt.Errorf("oci: delete blob %s: %w", dgst, err)
+	}
 	if err := s.available(ctx); err != nil {
 		return err
 	}
@@ -296,6 +305,14 @@ func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
 // action key hash. Each output artifact becomes a layer descriptor, and the
 // result metadata is stored as the config blob.
 func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, result *cas.ActionResult) error {
+	if err := key.Digest.Validate(); err != nil {
+		return fmt.Errorf("oci: action key: %w", err)
+	}
+	for name, out := range result.Outputs {
+		if err := out.Validate(); err != nil {
+			return fmt.Errorf("oci: action result output %q: %w", name, err)
+		}
+	}
 	if err := s.available(ctx); err != nil {
 		return err
 	}
@@ -395,6 +412,9 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 // GetActionResult retrieves an action result by resolving the tag derived from
 // the action key. Returns (nil, nil) on a cache miss.
 func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
+	if err := key.Digest.Validate(); err != nil {
+		return nil, fmt.Errorf("oci: action key: %w", err)
+	}
 	if err := s.available(ctx); err != nil {
 		return nil, err
 	}
@@ -428,6 +448,14 @@ func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas
 	var result cas.ActionResult
 	if err := fetchMetadata(ctx, s.repo, manifest.Config, "action result", MaxActionConfigBytes, &result); err != nil {
 		return nil, s.failed(parentCtx, err)
+	}
+	// A receipt is untrusted registry content. Reject output identities that
+	// could not name stored content (or could name paths) before any caller
+	// restores from them; this is a corrupt entry, not a registry outage.
+	for name, out := range result.Outputs {
+		if err := out.Validate(); err != nil {
+			return nil, fmt.Errorf("oci: action result %s output %q: %w", tag, name, err)
+		}
 	}
 
 	return &result, nil

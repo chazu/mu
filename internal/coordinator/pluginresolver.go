@@ -76,7 +76,7 @@ func (r *PluginResolver) resolveOne(ctx context.Context, p config.PluginDef) (*R
 
 // resolveDigest extracts a plugin directly from CAS by its digest.
 func (r *PluginResolver) resolveDigest(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
-	dgst, err := cas.ParseDigest(p.Digest)
+	dgst, err := cas.ParseFullDigest(p.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("parse digest %q: %w", p.Digest, err)
 	}
@@ -514,6 +514,9 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 // resolveRemote fetches a remote plugin by URL, verifies sha256, stores in CAS.
 func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) (*ResolvedPlugin, error) {
 	expected := cas.NewSHA256(p.SHA256)
+	if err := expected.Validate(); err != nil {
+		return nil, fmt.Errorf("plugin %q sha256 %q: %w", p.Name, p.SHA256, err)
+	}
 	if cached, err := r.cachedDigest(ctx, p.Name, expected, p.URL); err != nil || cached != nil {
 		return cached, err
 	}

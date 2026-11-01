@@ -36,7 +36,59 @@ func NewSHA256(hash string) Digest {
 	return Digest{Algorithm: "sha256", Hash: hash}
 }
 
-// ParseDigest parses a string in "algorithm:hash" format into a Digest.
+// ErrInvalidDigest marks a value that is not a complete content identity.
+var ErrInvalidDigest = errors.New("cas: invalid digest")
+
+// SHA256HexLen is the length of a hex-encoded SHA-256 hash.
+const SHA256HexLen = sha256.Size * 2
+
+// IsSHA256Hex reports whether s is exactly 64 lowercase hexadecimal characters,
+// the canonical OCI encoding of a SHA-256 hash.
+func IsSHA256Hex(s string) bool {
+	if len(s) != SHA256HexLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// Validate reports whether d is a complete identity mu can store and fetch:
+// algorithm "sha256" and 64 lowercase hex characters. Abbreviated display
+// prefixes are not identities and fail here; inspection code that accepts
+// prefixes must match them against full digests instead.
+func (d Digest) Validate() error {
+	if d.Algorithm != "sha256" {
+		return fmt.Errorf("%w: unsupported algorithm %q (want sha256)", ErrInvalidDigest, d.Algorithm)
+	}
+	if !IsSHA256Hex(d.Hash) {
+		return fmt.Errorf("%w: sha256 hash must be %d lowercase hex characters", ErrInvalidDigest, SHA256HexLen)
+	}
+	return nil
+}
+
+// ParseFullDigest parses "sha256:<64 lowercase hex>" and rejects anything
+// else. Use it wherever a digest crosses a trust boundary (configuration,
+// CLI flags, registries, plugin or program input) and will be used to fetch,
+// store, or name content.
+func ParseFullDigest(s string) (Digest, error) {
+	d, err := ParseDigest(s)
+	if err != nil {
+		return Digest{}, fmt.Errorf("%w: %v", ErrInvalidDigest, err)
+	}
+	if err := d.Validate(); err != nil {
+		return Digest{}, err
+	}
+	return d, nil
+}
+
+// ParseDigest splits "algorithm:hash" syntactically without checking the
+// algorithm or hash encoding. It is for display, inspection, and legacy
+// fixtures; content lookups at external boundaries use ParseFullDigest.
 func ParseDigest(s string) (Digest, error) {
 	alg, hash, ok := strings.Cut(s, ":")
 	if !ok {

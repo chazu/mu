@@ -368,9 +368,9 @@ func RegisterExecDrivers(vm *pith.VM, env map[string]string, sealedNames map[str
 				if !ok {
 					return fmt.Errorf("cas/fetch: expected string digest, got %T", v)
 				}
-				dgst, err := cas.ParseDigest(dgstStr)
+				dgst, err := cas.ParseFullDigest(dgstStr)
 				if err != nil {
-					return err
+					return fmt.Errorf("cas/fetch: %w", err)
 				}
 				rc, err := store.Get(vm.Context(), dgst)
 				if err != nil {

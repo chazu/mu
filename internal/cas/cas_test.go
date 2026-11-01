@@ -3,6 +3,7 @@ package cas
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -75,5 +76,56 @@ func TestComputeDigest(t *testing.T) {
 	}
 	if dgst.Hash != wantHash {
 		t.Errorf("Hash = %q, want %q", dgst.Hash, wantHash)
+	}
+}
+
+func TestParseFullDigest(t *testing.T) {
+	full := strings.Repeat("ab", 32)
+	d, err := ParseFullDigest("sha256:" + full)
+	if err != nil || d != NewSHA256(full) {
+		t.Fatalf("ParseFullDigest(full) = %+v, %v", d, err)
+	}
+
+	cases := map[string]string{
+		"missing colon":      "sha256" + full,
+		"empty hash":         "sha256:",
+		"short prefix":       "sha256:" + full[:12],
+		"too long":           "sha256:" + full + "00",
+		"uppercase hex":      "sha256:" + strings.ToUpper(full),
+		"non-hex":            "sha256:" + strings.Repeat("zz", 32),
+		"path traversal":     "sha256:../../" + full[:58],
+		"embedded separator": "sha256:" + full[:63] + "/",
+		"unsupported alg":    "sha512:" + strings.Repeat("ab", 64),
+		"malformed alg":      "SHA256:" + full,
+		"empty alg":          ":" + full,
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseFullDigest(input)
+			if !errors.Is(err, ErrInvalidDigest) {
+				t.Fatalf("ParseFullDigest(%q) error = %v, want ErrInvalidDigest", input, err)
+			}
+		})
+	}
+}
+
+// Syntactic parsing keeps working for abbreviated inspection references.
+func TestParseDigestAcceptsInspectionPrefixes(t *testing.T) {
+	d, err := ParseDigest("sha256:abc123")
+	if err != nil {
+		t.Fatalf("ParseDigest(prefix) error: %v", err)
+	}
+	if err := d.Validate(); !errors.Is(err, ErrInvalidDigest) {
+		t.Fatalf("prefix Validate() = %v, want ErrInvalidDigest", err)
+	}
+}
+
+func TestComputedDigestValidates(t *testing.T) {
+	d, err := ComputeDigest(strings.NewReader("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Validate(); err != nil {
+		t.Fatalf("computed digest failed validation: %v", err)
 	}
 }

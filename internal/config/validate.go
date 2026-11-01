@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	"github.com/chazu/mu/internal/cas"
 )
 
 // Validate checks the loaded ProjectConfig for structural errors. It
@@ -90,6 +92,14 @@ func Validate(cfg *ProjectConfig) error {
 		}
 		if hasURL && p.SHA256 == "" {
 			errs = append(errs, fmt.Sprintf("%s: \"url\" requires \"sha256\"", label))
+		}
+		if p.SHA256 != "" && !cas.IsSHA256Hex(p.SHA256) {
+			errs = append(errs, fmt.Sprintf("%s: \"sha256\" must be %d lowercase hex characters", label, cas.SHA256HexLen))
+		}
+		if hasDigest {
+			if _, err := cas.ParseFullDigest(p.Digest); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: \"digest\" must be a full \"sha256:<64 hex>\" identity: %v", label, err))
+			}
 		}
 		// Runtime field removed — toolchain is declared in plugin manifest.
 	}

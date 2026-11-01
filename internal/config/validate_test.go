@@ -217,7 +217,7 @@ func TestValidate_PluginURLRequiresSHA256(t *testing.T) {
 func TestValidate_PluginURLWithSHA256(t *testing.T) {
 	cfg := &ProjectConfig{
 		Plugins: []PluginDef{
-			{Name: "my-plugin", URL: "https://example.com/plugin.bb", SHA256: "abc123"},
+			{Name: "my-plugin", URL: "https://example.com/plugin.bb", SHA256: strings.Repeat("ab", 32)},
 		},
 	}
 	if err := Validate(cfg); err != nil {
@@ -389,5 +389,26 @@ func TestValidate_FullValidConfig(t *testing.T) {
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("expected full valid config to pass, got: %v", err)
+	}
+}
+
+func TestValidate_PluginDigestAndSHA256MustBeFullIdentities(t *testing.T) {
+	full := strings.Repeat("ab", 32)
+	cases := map[string]PluginDef{
+		"short digest":       {Name: "p", Digest: "sha256:abc123"},
+		"digest without alg": {Name: "p", Digest: full},
+		"uppercase digest":   {Name: "p", Digest: "sha256:" + strings.ToUpper(full)},
+		"short sha256":       {Name: "p", URL: "https://example.com/p", SHA256: "abc123"},
+		"prefixed sha256":    {Name: "p", URL: "https://example.com/p", SHA256: "sha256:" + full},
+	}
+	for name, p := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(&ProjectConfig{Plugins: []PluginDef{p}}); err == nil {
+				t.Fatalf("Validate accepted %+v", p)
+			}
+		})
+	}
+	if err := Validate(&ProjectConfig{Plugins: []PluginDef{{Name: "p", Digest: "sha256:" + full}}}); err != nil {
+		t.Fatalf("full digest rejected: %v", err)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/chazu/mu/internal/cas"
 )
 
 const LockSchemaVersion = 1
@@ -86,6 +88,12 @@ func (l *LockFile) Validate() error {
 	for i, p := range l.Plugins {
 		if p.Name == "" || p.Version == "" || p.SourceRevision == "" || p.AssetSHA256 == "" || p.BundleDigest == "" {
 			return fmt.Errorf("lockfile plugin %d is missing name, version, source_revision, asset_sha256, or bundle_digest", i)
+		}
+		if !isSHA256(p.AssetSHA256) {
+			return fmt.Errorf("lockfile plugin %q: asset_sha256 must be 64 lowercase hex characters", p.Name)
+		}
+		if _, err := cas.ParseFullDigest(p.BundleDigest); err != nil {
+			return fmt.Errorf("lockfile plugin %q: bundle_digest: %w", p.Name, err)
 		}
 		if _, ok := seen[p.Name]; ok {
 			return fmt.Errorf("lockfile contains duplicate plugin %q", p.Name)

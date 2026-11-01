@@ -100,12 +100,9 @@ func resolveCachedPlugin(name string, selection ...string) (plugin.PluginDef, ca
 		requested = selection[0]
 	}
 	if requested != "" {
-		digest, err := cas.ParseDigest(requested)
-		if err != nil || digest.Algorithm != "sha256" || len(digest.Hash) != 64 {
-			return plugin.PluginDef{}, cas.Digest{}, fmt.Errorf("--digest requires a full sha256 digest")
-		}
-		if _, err := hex.DecodeString(digest.Hash); err != nil {
-			return plugin.PluginDef{}, cas.Digest{}, fmt.Errorf("--digest requires hexadecimal SHA-256")
+		digest, err := cas.ParseFullDigest(requested)
+		if err != nil {
+			return plugin.PluginDef{}, cas.Digest{}, fmt.Errorf("--digest requires a full sha256 digest: %w", err)
 		}
 		var matches []cachedPluginVersion
 		for _, v := range versions {

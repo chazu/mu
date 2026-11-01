@@ -3,6 +3,7 @@ package plugincatalog
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,8 +11,8 @@ func TestLockUpsertSortsAndRoundTrips(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mu.lock")
 	lock := NewLock()
 	lock.Catalog = LockedCatalog{URL: "https://example.test/catalog.json", Repository: "example/plugins", ReleaseTag: "v1"}
-	lock.Upsert(LockedPlugin{Name: "zeta", Version: "1.0.0", SourceRevision: "v1", AssetSHA256: "a", BundleDigest: "sha256:z"})
-	lock.Upsert(LockedPlugin{Name: "aws", Version: "1.0.0", SourceRevision: "v1", AssetSHA256: "b", BundleDigest: "sha256:a", Schemas: []Schema{{Module: "mu/aws", Version: "v1", Path: "schemas/mu/aws"}}, PUDLMappings: []PUDLMapping{{ResourceType: "aws.ec2.vpc", Schema: "pudl/aws.#VPC"}}})
+	lock.Upsert(LockedPlugin{Name: "zeta", Version: "1.0.0", SourceRevision: "v1", AssetSHA256: hex64("a"), BundleDigest: "sha256:" + hex64("z")})
+	lock.Upsert(LockedPlugin{Name: "aws", Version: "1.0.0", SourceRevision: "v1", AssetSHA256: hex64("b"), BundleDigest: "sha256:" + hex64("a"), Schemas: []Schema{{Module: "mu/aws", Version: "v1", Path: "schemas/mu/aws"}}, PUDLMappings: []PUDLMapping{{ResourceType: "aws.ec2.vpc", Schema: "pudl/aws.#VPC"}}})
 	if err := WriteLock(path, lock); err != nil {
 		t.Fatalf("WriteLock: %v", err)
 	}
@@ -32,8 +33,33 @@ func TestLockUpsertSortsAndRoundTrips(t *testing.T) {
 	if len(loaded.Plugins[0].Schemas) != 1 || len(loaded.Plugins[0].PUDLMappings) != 1 {
 		t.Fatalf("metadata did not round-trip: %+v", loaded.Plugins[0])
 	}
-	loaded.Upsert(LockedPlugin{Name: "aws", Version: "1.1.0", SourceRevision: "v2", AssetSHA256: "c", BundleDigest: "sha256:c"})
+	loaded.Upsert(LockedPlugin{Name: "aws", Version: "1.1.0", SourceRevision: "v2", AssetSHA256: hex64("c"), BundleDigest: "sha256:" + hex64("c")})
 	if got, ok := loaded.Find("aws"); !ok || got.Version != "1.1.0" {
 		t.Fatalf("updated aws = %+v, found=%v", got, ok)
+	}
+}
+
+// hex64 returns a well-formed SHA-256 hex fixture distinct per label.
+func hex64(label string) string {
+	return strings.Repeat(map[string]string{"a": "a", "b": "b", "c": "c", "z": "e"}[label], 64)
+}
+
+func TestLockValidateRejectsIncompleteDigests(t *testing.T) {
+	base := LockedPlugin{Name: "p", Version: "1", SourceRevision: "v1", AssetSHA256: hex64("a"), BundleDigest: "sha256:" + hex64("b")}
+	short := base
+	short.BundleDigest = "sha256:abc"
+	asset := base
+	asset.AssetSHA256 = "abc"
+	for _, p := range []LockedPlugin{short, asset} {
+		lock := NewLock()
+		lock.Upsert(p)
+		if err := lock.Validate(); err == nil {
+			t.Fatalf("Validate accepted %+v", p)
+		}
+	}
+	lock := NewLock()
+	lock.Upsert(base)
+	if err := lock.Validate(); err != nil {
+		t.Fatalf("Validate rejected full identities: %v", err)
 	}
 }

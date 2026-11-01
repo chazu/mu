@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chazu/mu/internal/cas"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -69,11 +70,13 @@ func readIndex(cacheDir string) ([]indexEntry, error) {
 // blobPath returns the filesystem path for a digest in the OCI layout.
 func blobPath(cacheDir, digest string) string {
 	// digest is "sha256:abcdef..." → blobs/sha256/abcdef...
-	parts := strings.SplitN(digest, ":", 2)
-	if len(parts) != 2 {
+	// Only full identities name a blob file; anything else (prefixes, "..",
+	// separators) could resolve outside the layout and yields no path.
+	d, err := cas.ParseFullDigest(digest)
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(cacheDir, "blobs", parts[0], parts[1])
+	return filepath.Join(cacheDir, "blobs", d.Algorithm, d.Hash)
 }
 
 // blobSize returns the file size of a blob by digest.

@@ -81,7 +81,7 @@ func TestEveryMetadataEntryPointRejectsDeclaredOversizeBeforeFetch(t *testing.T)
 			var err error
 			switch name {
 			case "action":
-				_, err = New(repo).GetActionResult(context.Background(), cas.ActionKey{})
+				_, err = New(repo).GetActionResult(context.Background(), cas.ActionKey{Digest: cas.NewSHA256(strings.Repeat("a", cas.SHA256HexLen))})
 			case "plugin":
 				_, err = FetchPluginConfig(context.Background(), repo, "ref")
 			case "index":

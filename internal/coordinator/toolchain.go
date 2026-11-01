@@ -160,19 +160,13 @@ func (r *ToolchainRegistry) ExtractBinary(ctx context.Context, name, artifact, b
 		return "", fmt.Errorf("toolchain %q has no artifact %q", name, artifact)
 	}
 
-	dgst, err := cas.ParseDigest(digestStr)
+	dgst, err := cas.ParseFullDigest(digestStr)
 	if err != nil {
-		return "", fmt.Errorf("parse digest for %s/%s: %w", name, artifact, err)
+		return "", fmt.Errorf("toolchain binary %s/%s requires a full SHA-256 identity: %w", name, artifact, err)
 	}
 
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
 		return "", fmt.Errorf("invalid toolchain cache name %q", name)
-	}
-	if dgst.Algorithm != "sha256" || len(dgst.Hash) != 64 {
-		return "", fmt.Errorf("toolchain binary requires a full SHA-256 identity")
-	}
-	if _, err := hex.DecodeString(dgst.Hash); err != nil {
-		return "", err
 	}
 	destDir := filepath.Join(baseDir, name, dgst.Hash)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
