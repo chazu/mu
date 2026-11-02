@@ -77,14 +77,14 @@ func TestFlagsAnywhere(t *testing.T) {
 			wantFlag: map[string]string{"ndjson": "true", "config": "x/mu.cue"},
 		},
 		{
-			cmd: "graph",
+			cmd: "targets",
 			variants: [][]string{
-				{"--json", "--reverse", "//cmd/mu"},
-				{"//cmd/mu", "--json", "--reverse"},
-				{"--reverse", "//cmd/mu", "--json"},
+				{"--json", "--dot", "//cmd/..."},
+				{"//cmd/...", "--json", "--dot"},
+				{"--dot", "//cmd/...", "--json"},
 			},
-			wantArgs: []string{"//cmd/mu"},
-			wantFlag: map[string]string{"json": "true", "reverse": "true"},
+			wantArgs: []string{"//cmd/..."},
+			wantFlag: map[string]string{"json": "true", "dot": "true"},
 		},
 		{
 			cmd: "plugin",
@@ -209,7 +209,7 @@ func TestHelpExitsZero(t *testing.T) {
 		{[]string{"cache", "--help"}, "usage: mu cache <command>"},
 		{[]string{"cache", "help"}, "usage: mu cache <command>"},
 		{[]string{"plugin", "--help"}, "usage: mu plugin <command>"},
-		{[]string{"target", "-h"}, "usage: mu target <command>"},
+		{[]string{"targets", "-h"}, "usage: mu targets [flags] [pattern...]"},
 		{[]string{"guide", "plugin", "-h"}, "usage: mu guide plugin [flags] <name>"},
 		{[]string{"plugin", "info", "--help"}, "usage: mu plugin info [flags] <name>"},
 	}

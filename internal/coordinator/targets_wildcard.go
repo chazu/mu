@@ -65,3 +65,17 @@ func expandTargetWildcards(patterns, available []string, errOnNoMatch bool) ([]s
 	}
 	return out, nil
 }
+
+// IsTargetPattern reports whether p is a wildcard pattern ("//pkg/..." or a
+// pattern containing "*") rather than a literal target name.
+func IsTargetPattern(p string) bool {
+	return strings.HasSuffix(p, "/...") || strings.ContainsRune(p, '*')
+}
+
+// ExpandTargetPatterns expands wildcard patterns against the available target
+// names using the same rules as Plan. Literal names pass through unchanged
+// (callers validate existence); a wildcard that matches nothing is an error.
+// Results preserve input order and never contain duplicates.
+func ExpandTargetPatterns(patterns, available []string) ([]string, error) {
+	return expandTargetWildcards(patterns, available, true)
+}

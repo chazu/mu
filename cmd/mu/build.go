@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,9 +24,7 @@ func runBuild(args []string) int {
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	noDiscoverCache := fs.Bool("no-discover-cache", false, "bypass the plugin discover response cache (force live discover)")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
-	dryRun := fs.Bool("dry-run", false, "alias for --plan")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
-	expectPlanSHA256 := fs.String("expect-plan-sha256", "", "execute only if the single in-process plan has this SHA-256")
 	publish := fs.Bool("publish", false, "after a successful build, publish each target's outputs as an artifact (config.publish)")
 	var attach stringSliceFlag
 	fs.Var(&attach, "attach", "attach a file to the published artifact as a referrer: <artifactType>=<path> (repeatable; requires --publish)")
@@ -40,26 +35,14 @@ func runBuild(args []string) int {
 		return cli.fail(exitUsage, "--attach requires --publish")
 	}
 
-	if *dryRun {
-		*planOnly = true
+	if *cli.flagJSON && !*planOnly {
+		return cli.fail(exitUsage, "--json requires --plan; use --emit-manifest for a machine-readable build result")
 	}
 	if *emitManifest && *planOnly {
 		return cli.fail(exitUsage, "--emit-manifest and --plan are mutually exclusive")
 	}
 	if *publish && *planOnly {
 		return cli.fail(exitUsage, "--publish and --plan are mutually exclusive")
-	}
-	if *expectPlanSHA256 != "" && *planOnly {
-		return cli.fail(exitUsage, "--expect-plan-sha256 and --plan are mutually exclusive")
-	}
-	if *expectPlanSHA256 != "" && *publish {
-		return cli.fail(exitUsage, "--expect-plan-sha256 and --publish are mutually exclusive")
-	}
-	if *expectPlanSHA256 != "" {
-		decoded, err := hex.DecodeString(*expectPlanSHA256)
-		if err != nil || len(decoded) != sha256.Size {
-			return cli.fail(exitUsage, "--expect-plan-sha256 requires a 64-character hexadecimal SHA-256")
-		}
 	}
 
 	if *publish && !cli.requireRegistry() {
@@ -132,13 +115,7 @@ func runBuild(args []string) int {
 	fmt.Fprintln(os.Stderr, "  building...")
 
 	start := time.Now()
-	var validate func(*coordinator.PlanResult) error
-	if *expectPlanSHA256 != "" {
-		validate = func(plan *coordinator.PlanResult) error {
-			return validateExpectedPlan(plan, targets, *expectPlanSHA256)
-		}
-	}
-	result, err := c.BuildValidated(ctx, targets, validate)
+	result, err := c.Build(ctx, targets)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -152,10 +129,6 @@ func runBuild(args []string) int {
 		if encErr := enc.Encode(manifest); encErr != nil {
 			return cli.fail(exitFail, "encoding manifest: %v", encErr)
 		}
-	}
-
-	if cli.JSON && !*emitManifest {
-		printBuildJSON(result, elapsed)
 	}
 
 	if result.Failed > 0 {
@@ -176,22 +149,6 @@ func runBuild(args []string) int {
 		}
 	}
 	return exitOK
-}
-
-func validateExpectedPlan(plan *coordinator.PlanResult, targets []string, expected string) error {
-	for _, identity := range plan.Plugins {
-		if identity.Digest == "" {
-			return fmt.Errorf("exact plan contains mutable command plugin %q; use a content-addressed script, URL, or digest", identity.Name)
-		}
-	}
-	actual, err := planJSONDigest(plan, targets)
-	if err != nil {
-		return fmt.Errorf("encoding exact plan identity: %w", err)
-	}
-	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
-		return fmt.Errorf("exact plan SHA-256 mismatch: expected %s, planned %s", expected, actual)
-	}
-	return nil
 }
 
 type planAction struct {
@@ -222,12 +179,11 @@ type planAction struct {
 }
 
 type planJSONDocument struct {
-	Version    int                          `json:"version"`
-	PlanSHA256 string                       `json:"plan_sha256,omitempty"`
-	Targets    []string                     `json:"targets"`
-	Plugins    []coordinator.PluginIdentity `json:"plugins"`
-	Actions    []planAction                 `json:"actions"`
-	Summary    map[string]int               `json:"summary"`
+	Version int                          `json:"version"`
+	Targets []string                     `json:"targets"`
+	Plugins []coordinator.PluginIdentity `json:"plugins"`
+	Actions []planAction                 `json:"actions"`
+	Summary map[string]int               `json:"summary"`
 }
 
 func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSONDocument {
@@ -282,37 +238,9 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 	}
 }
 
-func planJSONDigest(plan *coordinator.PlanResult, targets []string) (string, error) {
-	document := newPlanJSONDocument(plan, targets)
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		return "", err
-	}
-	var canonical any
-	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&canonical); err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(canonical)
-	if err != nil {
-		return "", err
-	}
-	digest := sha256.Sum256(payload)
-	return hex.EncodeToString(digest[:]), nil
-}
-
-// printPlanJSON emits the planned action DAG as JSON to stdout. plan_sha256 is
-// the digest of the same document with that self-referential field omitted.
+// printPlanJSON emits the planned action DAG as JSON to stdout.
 func printPlanJSON(plan *coordinator.PlanResult, targets []string) int {
 	document := newPlanJSONDocument(plan, targets)
-	digest, err := planJSONDigest(plan, targets)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mu build: encoding plan identity: %v\n", err)
-		return 1
-	}
-	document.PlanSHA256 = digest
-
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(document); err != nil {
@@ -352,19 +280,4 @@ func printPlanHuman(g *dag.Graph, targets []string) int {
 		fmt.Println()
 	}
 	return 0
-}
-
-// printBuildJSON emits a structured build summary to stdout.
-func printBuildJSON(result *coordinator.BuildResult, elapsed time.Duration) {
-	summary := map[string]any{
-		"version":   1,
-		"completed": result.Completed,
-		"cached":    result.Cached,
-		"failed":    result.Failed,
-		"cancelled": result.Cancelled,
-		"duration":  elapsed.Seconds(),
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	enc.Encode(summary)
 }
