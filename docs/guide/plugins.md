@@ -13,10 +13,11 @@ LOADING PLUGINS
      {"name": "file", "url": "https://example.com/file-plugin.bb", "sha256": "abc123..."}
 
   2. Local script (preferred for development):
-     {"name": "file", "script": "plugins/file/plugin.bb"}
+     {"name": "myplugin", "script": "plugins/myplugin/plugin.bb"}
 
      Also works with a directory containing mu.cue with a "plugin" key:
      {"name": "go", "script": "plugins/go"}
+     {"name": "file", "script": "plugins/file"}   (Go: build the binary first)
 
   3. CAS digest (for distribution — previously built plugin):
      {"name": "file", "digest": "sha256:<64 lowercase hex characters>"}
@@ -89,9 +90,9 @@ WRITING A PLUGIN
     mu.cue (see GO PLUGINS below). Full SDK reference: 'mu guide sdk'.
     Canonical example: examples/plugins/hello-go/.
 
-    In-tree Go plugins: plugins/{pass,keypair-gen,remote-exec,
-    remote-file}. Go ports that are not yet their plugin's entrypoint:
-    plugins/{file,host}/main.go.
+    In-tree Go plugins: plugins/{file,pass,keypair-gen,remote-exec,
+    remote-file}. (plugins/host/main.go is an unflipped port of an
+    observe-only plugin that is being deleted.)
 
   OTHER LANGUAGES
 

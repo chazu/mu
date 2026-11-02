@@ -7,6 +7,11 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **The `file` plugin runs its Go implementation.** `plugin.bb` is gone;
+  build the binary with `go build -trimpath -o plugins/file/plugin ./plugins/file`.
+  Paths in its shell commands are now escaped, so a path containing `'` no
+  longer breaks the command, and a target without `path` gets an error
+  instead of crashing the plugin.
 - **`remote-exec` and `remote-file` run their Go implementations.** Their
   `plugin.bb` files are gone; build the binaries with
   `go build -trimpath -o plugins/<name>/plugin ./plugins/<name>`. Both declare
