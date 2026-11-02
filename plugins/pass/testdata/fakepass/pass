@@ -1,0 +1,35 @@
+#!/bin/sh
+# Fake `pass` CLI for tests. Entries live as plain files under
+# $FAKE_PASS_STORE (required), so tests never touch a real password store.
+# Supports exactly the subset the pass plugin uses:
+#   pass show <path>
+#   pass insert -m -f <path>   (contents on stdin)
+set -eu
+store="${FAKE_PASS_STORE:?fake pass: FAKE_PASS_STORE is not set}"
+
+case "${1:-}" in
+show)
+	f="$store/$2"
+	if [ -f "$f" ]; then
+		cat "$f"
+	else
+		echo "Error: $2 is not in the password store." >&2
+		exit 1
+	fi
+	;;
+insert)
+	if [ "${2:-}" != "-m" ] || [ "${3:-}" != "-f" ] || [ -z "${4:-}" ]; then
+		echo "fake pass: unsupported insert arguments: $*" >&2
+		exit 2
+	fi
+	f="$store/$4"
+	mkdir -p "$(dirname "$f")"
+	# Real pass prompts on stdout; the plugin must keep it off NDJSON stdout.
+	echo "Enter contents of $4 and press Ctrl+D when finished:"
+	cat >"$f"
+	;;
+*)
+	echo "fake pass: unsupported command: $*" >&2
+	exit 2
+	;;
+esac

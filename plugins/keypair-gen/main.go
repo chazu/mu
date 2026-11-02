@@ -2,8 +2,11 @@
 // both halves into sealed_outputs so they land in a secret backend instead
 // of on disk or in CAS.
 //
-// Port of the Babashka plugin (plugin.bb) to Go using sdk/muplugin. The
-// discover response, action shape, and sealed-output wiring are preserved.
+// Built on sdk/muplugin; this is the plugin's only implementation (the
+// manifest's entrypoint is the compiled binary, see GUIDE.md). It replaced
+// a Babashka plugin whose captured responses live in
+// testdata/parity_bb_responses.ndjson; main_test.go checks the discover
+// response, action shape, script text and sealed-output wiring still match.
 //
 // Sealed outputs CONTRACT (target side):
 //
@@ -34,8 +37,20 @@ var curveBits = map[string]string{
 
 var requiredOutputNames = []string{"PRIVATE", "PUBLIC"}
 
+// actionEnv is the generate action's complete environment. An explicit
+// map keeps the action hermetic: with no env at all, mu lets this impure
+// (sealed-output) action inherit mu's own environment. The bb plugin sent
+// "env": {} for the same effect, but the SDK omits empty maps, so name the
+// system dirs that hold bash, mktemp, chmod, mv and ssh-keygen.
+var actionEnv = map[string]string{"PATH": "/usr/bin:/bin"}
+
 func main() {
-	(&muplugin.Plugin{
+	newPlugin().Main()
+}
+
+// newPlugin builds the plugin value; tests drive it in-process.
+func newPlugin() *muplugin.Plugin {
+	return &muplugin.Plugin{
 		Name:        "keypair-gen",
 		Version:     "0.1.0",
 		Description: "Generate SSH key pairs (Ed25519 or ECDSA) as sealed outputs",
@@ -60,7 +75,7 @@ func main() {
 			},
 		},
 		Plan: plan,
-	}).Main()
+	}
 }
 
 // shellQuote single-quotes a string for safe inclusion in a bash command.
@@ -173,7 +188,7 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 		Inputs:        map[string]string{},
 		Outputs:       []string{},
 		DependsOn:     []string{},
-		Env:           map[string]string{},
+		Env:           actionEnv,
 		Network:       false,
 		SealedOutputs: sealedOut,
 	}

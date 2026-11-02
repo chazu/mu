@@ -69,7 +69,7 @@ type PUDLMapping struct {
 }
 
 // BuildSpec describes a source build needed before the package can be
-// bundled. It is currently used by the Go source-only envsecret plugin.
+// bundled, e.g. compiling a source-only Go plugin.
 type BuildSpec struct {
 	Command []string `json:"command"`
 	Sources []string `json:"sources,omitempty"`

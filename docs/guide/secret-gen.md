@@ -59,7 +59,7 @@ CACHING
 
 WORKED EXAMPLE — bootstrap zot's admin password
 
-  plugins: [{name: "pass", script: "plugins/pass/plugin.bb"}]
+  plugins: [{name: "pass", script: "plugins/pass"}]
   secrets: writable_refs: ["pass:registry/*"]
 
   targets: [

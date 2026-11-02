@@ -1,7 +1,6 @@
 mu guide plugin keypair-gen — EC keypair generator (sealed outputs only)
 
-(Implemented in Go using sdk/muplugin; the original Babashka version
- at plugin.bb remains in-tree for one release cycle. See 'mu guide sdk'.)
+(A Go plugin built on sdk/muplugin. See 'mu guide sdk'.)
 
 Generates an EC keypair (ed25519 or ecdsa P-256/P-384/P-521) and routes
 both halves through sealed_outputs into a secret backend (pass / sops /
@@ -15,8 +14,16 @@ output case that secret-gen can't.
 
 SETUP
 
-  Requires `ssh-keygen` on PATH (part of OpenSSH; preinstalled on every
-  modern Linux/macOS). No other dependencies.
+  Requires `ssh-keygen` in /usr/bin or /bin (part of OpenSSH;
+  preinstalled on every modern Linux/macOS). The generate action runs
+  with the explicit environment PATH=/usr/bin:/bin rather than
+  inheriting mu's.
+
+  The plugin's entrypoint is a compiled binary named "plugin" inside
+  the plugin directory. It is not committed; build it first (mu does not
+  compile local Go plugins — see 'mu guide plugins', GO PLUGINS):
+
+    go build -trimpath -o plugins/keypair-gen/plugin ./plugins/keypair-gen
 
 USAGE IN mu.cue
 
@@ -97,6 +104,7 @@ ACTIONS GENERATED
             sealed_output_modes so the runner stores via store_secret.
 
   Network: false. Impure: forced true (sealed_outputs side-effect).
+  Env: PATH=/usr/bin:/bin only.
 
 CAPABILITIES
 
