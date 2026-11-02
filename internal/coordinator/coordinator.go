@@ -17,9 +17,7 @@ import (
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator/discovercache"
 	"github.com/chazu/mu/internal/dag"
-	"github.com/chazu/mu/internal/pithvm"
 	"github.com/chazu/mu/internal/plugin"
-	"github.com/chazu/pith"
 )
 
 // ToolchainBuilder builds toolchains from scratch before the planning phase.
@@ -119,9 +117,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	}
 	needed := make(map[string]bool)
 	for _, target := range targets {
-		if len(target.Plan) == 0 {
-			needed[target.Toolchain] = true
-		}
+		needed[target.Toolchain] = true
 	}
 	var planningPlugins []config.PluginDef
 	for _, definition := range c.Config.Plugins {
@@ -290,19 +286,6 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 			planActions = actions
 			declaredOutputs = declared
-		} else if len(t.Plan) > 0 {
-			// Inline pith plan program — run the VM to emit action specs.
-			vm := pith.New(ctx)
-			buf := &pithvm.ActionBuffer{}
-			pithvm.RegisterPlanDrivers(vm, t.Config, buf)
-			if err := vm.Run(t.Plan); err != nil {
-				return nil, fmt.Errorf("coordinator: target %q plan: %w", t.Name, err)
-			}
-			// Convert emitted action maps to ActionSpecs.
-			for _, m := range buf.Actions {
-				spec := mapToActionSpec(m)
-				planActions = append(planActions, spec)
-			}
 		} else {
 			ti := plugin.TargetInfo{
 				Name:              t.Name,
@@ -335,31 +318,6 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 			planActions = plan.Actions
 			declaredOutputs = plan.Outputs
-		}
-
-		// Inject a synthetic transform action if the target has a Transform program.
-		// The transform must wait for all dependency targets to complete,
-		// then plan actions within this target depend on _transform.
-		if len(t.Transform) > 0 {
-			var depActionIDs []string
-			for _, depName := range t.Deps {
-				prefix := depName + ":"
-				for _, a := range graph.Actions() {
-					if strings.HasPrefix(a.ID, prefix) {
-						depActionIDs = append(depActionIDs, a.ID)
-					}
-				}
-			}
-			transformAction := plugin.ActionSpec{
-				ID:        "_transform",
-				Body:      t.Transform,
-				Outputs:   []string{},
-				DependsOn: depActionIDs,
-			}
-			for i := range planActions {
-				planActions[i].DependsOn = append(planActions[i].DependsOn, "_transform")
-			}
-			planActions = append([]plugin.ActionSpec{transformAction}, planActions...)
 		}
 
 		// Target-level sealed maps are the complete allow-list; actions
@@ -529,7 +487,7 @@ func collectSealedProviders(graph *dag.Graph, plugins []ResolvedPlugin, inputs b
 func collectPluginIdentities(targets []config.Target, graph *dag.Graph, resolved []ResolvedPlugin, mgr *plugin.Manager) []PluginIdentity {
 	used := make(map[string]struct{})
 	for _, target := range targets {
-		if target.Toolchain != "" && target.Toolchain != "shell" && target.Toolchain != "secret-gen" && len(target.Plan) == 0 {
+		if target.Toolchain != "" && target.Toolchain != "shell" && target.Toolchain != "secret-gen" {
 			used[target.Toolchain] = struct{}{}
 		}
 	}
@@ -1274,101 +1232,6 @@ func cloneStringMap(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// mapToActionSpec converts a map[string]any (emitted by a pith plan program)
-// into a plugin.ActionSpec. Only recognized keys are mapped; unknown keys are
-// silently ignored so that plan programs can evolve independently of the spec.
-func mapToActionSpec(m map[string]any) plugin.ActionSpec {
-	var spec plugin.ActionSpec
-	if id, ok := m["id"].(string); ok {
-		spec.ID = id
-	}
-	if cmd, ok := m["command"].([]any); ok {
-		for _, c := range cmd {
-			if s, ok := c.(string); ok {
-				spec.Command = append(spec.Command, s)
-			}
-		}
-	}
-	if body, ok := m["body"].([]any); ok {
-		spec.Body = body
-	}
-	if es, ok := m["eweSource"].(string); ok {
-		spec.EweSource = es
-	}
-	if outputs, ok := m["outputs"].([]any); ok {
-		for _, o := range outputs {
-			if s, ok := o.(string); ok {
-				spec.Outputs = append(spec.Outputs, s)
-			}
-		}
-	}
-	if deps, ok := m["depends_on"].([]any); ok {
-		for _, d := range deps {
-			if s, ok := d.(string); ok {
-				spec.DependsOn = append(spec.DependsOn, s)
-			}
-		}
-	}
-	if env, ok := m["env"].(map[string]any); ok {
-		spec.Env = make(map[string]string, len(env))
-		for k, v := range env {
-			if s, ok := v.(string); ok {
-				spec.Env[k] = s
-			}
-		}
-	}
-	if inputs, ok := m["inputs"].(map[string]any); ok {
-		spec.Inputs = make(map[string]string, len(inputs))
-		for k, v := range inputs {
-			if s, ok := v.(string); ok {
-				spec.Inputs[k] = s
-			}
-		}
-	}
-	if wd, ok := m["work_dir"].(string); ok {
-		spec.WorkDir = wd
-	}
-	if si, ok := m["sealed_inputs"].(map[string]any); ok {
-		spec.SealedInputs = make(map[string]string, len(si))
-		for k, v := range si {
-			if s, ok := v.(string); ok {
-				spec.SealedInputs[k] = s
-			}
-		}
-	}
-	if sm, ok := m["sealed_input_modes"].(map[string]any); ok {
-		spec.SealedInputModes = make(map[string]string, len(sm))
-		for k, v := range sm {
-			if s, ok := v.(string); ok {
-				spec.SealedInputModes[k] = s
-			}
-		}
-	}
-	if so, ok := m["sealed_outputs"].(map[string]any); ok {
-		spec.SealedOutputs = make(map[string]string, len(so))
-		for k, v := range so {
-			if s, ok := v.(string); ok {
-				spec.SealedOutputs[k] = s
-			}
-		}
-	}
-	if sm, ok := m["sealed_output_modes"].(map[string]any); ok {
-		spec.SealedOutputModes = make(map[string]string, len(sm))
-		for k, v := range sm {
-			if s, ok := v.(string); ok {
-				spec.SealedOutputModes[k] = s
-			}
-		}
-	}
-	if imp, ok := m["impure"].(bool); ok {
-		spec.Impure = imp
-	}
-	if net, ok := m["network"].(bool); ok {
-		spec.Network = net
-	}
-	return spec
 }
 
 // prefixActions rewrites action IDs and DependsOn references with a target

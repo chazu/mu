@@ -57,8 +57,6 @@ package mu
 	sources?: [...string]
 	deps?: [...string]
 	config?: {...}
-	plan?: [...]
-	transform?: [...]
 	sealed_inputs?: {[string]: string}
 	sealed_input_modes?: {[string]: "env" | "file"}
 	sealed_outputs?: {[string]: string}

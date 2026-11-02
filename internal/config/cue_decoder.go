@@ -143,6 +143,18 @@ func rejectRemovedFields(val cue.Value, path string) error {
 				return fmt.Errorf("%s: target %q: kind/implements were removed; delete the %q field", path, name, field)
 			}
 		}
+		for _, field := range []string{"plan", "transform", "body"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: inline pith programs were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
+		for _, field := range []string{"ewe", "ewe_source"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: ewe actions were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
 		if t.LookupPath(cue.ParsePath("sealed_routing")).Exists() {
 			name, _ := t.LookupPath(cue.ParsePath("target")).String()
 			return fmt.Errorf("%s: target %q: sealed_routing was removed; strict routing is always on — delete the field", path, name)

@@ -122,11 +122,6 @@ ACTION SPEC FIELDS
 
   id                  Unique within the subgraph.
   command             []string — the command to execute.
-  body                []any — pith VM program; mutually exclusive with
-                      command (optional).
-  ewe_source          string — project-relative path to an ewe populator
-                      .cue program; mutually exclusive with command/body
-                      (optional).
   inputs              map[name]path — input files (paths resolved to CAS digests).
   outputs             []string — declared output file paths.
   depends_on          []string — IDs of actions this depends on (within subgraph).

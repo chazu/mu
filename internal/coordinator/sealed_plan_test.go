@@ -90,18 +90,20 @@ func TestPlan_StrictSealedInputResolutionWaitsUntilExecute(t *testing.T) {
 			Name:             "//strict",
 			SealedInputs:     map[string]string{"TOKEN": "env:" + variable},
 			SealedInputModes: map[string]string{"TOKEN": "env"},
-			Plan: []any{
+			Toolchain:        "cfg",
+			Config: map[string]any{"actions": []any{
 				map[string]any{
 					"id":                 "read",
-					"body":               []any{"'TOKEN", "secret/get", "drop"},
+					"command":            []any{"sh", "-c", `test -n "$TOKEN"`},
 					"outputs":            []any{},
 					"sealed_inputs":      map[string]any{"TOKEN": "env:" + variable},
 					"sealed_input_modes": map[string]any{"TOKEN": "env"},
 					"impure":             true,
 				},
-				"action/emit",
-			},
-		}}},
+			}},
+		}},
+			Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
+		},
 		Store: newTestStore(t), Workers: 1,
 	}
 

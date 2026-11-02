@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,55 +12,44 @@ import (
 )
 
 func TestResolveConfinesSymlinkReads(t *testing.T) {
-	for _, ewe := range []bool{false, true} {
-		for _, outside := range []bool{false, true} {
-			name := "input"
-			if ewe {
-				name = "ewe"
-			}
-			if outside {
-				name += " outside"
-			} else {
-				name += " inside"
-			}
-			t.Run(name, func(t *testing.T) {
-				root := t.TempDir()
-				target := filepath.Join(root, "actual")
-				if outside {
-					target = filepath.Join(t.TempDir(), "actual")
-				}
-				if err := os.WriteFile(target, []byte("program or input"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
-					t.Fatal(err)
-				}
-				// Root follows relative symlinks that stay inside the tree.
-				if !outside {
-					if err := os.Remove(filepath.Join(root, "link")); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.Symlink("actual", filepath.Join(root, "link")); err != nil {
-						t.Fatal(err)
-					}
-				}
-				spec := plugin.ActionSpec{ID: "test", Inputs: map[string]string{"src": "link"}}
-				if ewe {
-					spec.Inputs = nil
-					spec.EweSource = "link"
-				}
-				_, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, root, newTestStore(t), nil)
-				if outside && err == nil {
-					t.Fatal("read escaped project through symlink")
-				}
-				if !outside && err != nil {
-					t.Fatalf("in-project link rejected: %v", err)
-				}
-				if err != nil && !strings.Contains(err.Error(), "test") {
-					t.Fatalf("missing action context: %v", err)
-				}
-			})
+	for _, outside := range []bool{false, true} {
+		name := "input inside"
+		if outside {
+			name = "input outside"
 		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "actual")
+			if outside {
+				target = filepath.Join(t.TempDir(), "actual")
+			}
+			if err := os.WriteFile(target, []byte("input"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
+				t.Fatal(err)
+			}
+			// Root follows relative symlinks that stay inside the tree.
+			if !outside {
+				if err := os.Remove(filepath.Join(root, "link")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("actual", filepath.Join(root, "link")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			spec := plugin.ActionSpec{ID: "test", Inputs: map[string]string{"src": "link"}}
+			_, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, root, newTestStore(t), nil)
+			if outside && err == nil {
+				t.Fatal("read escaped project through symlink")
+			}
+			if !outside && err != nil {
+				t.Fatalf("in-project link rejected: %v", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "test") {
+				t.Fatalf("missing action context: %v", err)
+			}
+		})
 	}
 }
 
@@ -539,58 +527,6 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-func TestResolveEweSource(t *testing.T) {
-	dir := t.TempDir()
-	progPath := filepath.Join(dir, "populate.cue")
-	src := "_x: op.#Env & { args: [] }\n"
-	if err := os.WriteFile(progPath, []byte(src), 0o644); err != nil {
-		t.Fatalf("write program: %v", err)
-	}
-	store := newTestStore(t)
-
-	specs := []plugin.ActionSpec{{ID: "fetch", EweSource: "populate.cue", Impure: true}}
-	actions, err := Resolve(context.Background(), specs, dir, store, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if len(actions) != 1 {
-		t.Fatalf("got %d actions, want 1", len(actions))
-	}
-	ref := actions[0].EweRef
-	if ref == (cas.Digest{}) {
-		t.Fatal("EweRef not set")
-	}
-	// The program is stored and restorable by its digest.
-	rc, err := store.Get(context.Background(), ref)
-	if err != nil {
-		t.Fatalf("store.Get: %v", err)
-	}
-	defer rc.Close()
-	got, _ := io.ReadAll(rc)
-	if string(got) != src {
-		t.Errorf("restored program = %q, want %q", got, src)
-	}
-}
-
-func TestResolveEweSourceErrors(t *testing.T) {
-	dir := t.TempDir()
-	store := newTestStore(t)
-
-	// Missing file → clear error.
-	_, err := Resolve(context.Background(),
-		[]plugin.ActionSpec{{ID: "a", EweSource: "nope.cue"}}, dir, store, nil)
-	if err == nil {
-		t.Error("expected error for missing ewe_source file")
-	}
-
-	// Path escaping project root → rejected.
-	_, err = Resolve(context.Background(),
-		[]plugin.ActionSpec{{ID: "a", EweSource: "../escape.cue"}}, dir, store, nil)
-	if err == nil || !contains(err.Error(), "escapes project root") {
-		t.Errorf("expected escape rejection, got %v", err)
-	}
 }
 
 func TestResolveImplicitDependenciesAreStable(t *testing.T) {

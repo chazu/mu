@@ -112,9 +112,6 @@ Plugins receive **toolchain artifacts** in plan requests — the content-address
 binaries and files that were produced by the scratch build. This is how a Go
 plugin knows where the `go` binary lives.
 
-Targets with a `plan` field (a pith VM program) skip plugin dispatch entirely —
-the coordinator interprets the inline program instead.
-
 ### 4. Target
 
 A declared build unit. Defined in `mu.cue`. A target says "I want to build
@@ -129,8 +126,6 @@ Target = {
   config:         map[any]            # plugin-specific configuration
   sealed_inputs:  map[name -> ref]    # secret references resolved at runtime
   sealed_outputs: map[name -> ref]    # secret capture destinations
-  plan:           pith.#Program       # inline planning (optional, replaces plugin dispatch)
-  transform:      pith.#Program       # inter-target data reshaping (optional)
 }
 ```
 
@@ -335,7 +330,6 @@ Step 6: Nothing to execute
 │  Scratch environment       (fetch/extract/store) │
 │  Sandbox execution         (hermetic rootfs)     │
 │  Sealed inputs/outputs     (secret lifecycle)    │
-│  Inline programs           (pith VM)             │
 │  Advice protocol           (lifecycle observers) │
 │                                                  │
 ├─────────────────────────────────────────────────┤

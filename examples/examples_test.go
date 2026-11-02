@@ -18,10 +18,8 @@ import (
 
 // skipExample lists example directories that are not checked at all.
 var skipExample = map[string]string{
-	"cowsay":            "being deleted by mu-lx8.4 (toy plugin)",
-	"scratch":           "being deleted by mu-lx8.4 (duplicates mu scratch)",
-	"pith-e2e":          "being deleted with the pith VM by mu-d5k.2",
-	"pith-go-toolchain": "being deleted with the pith VM by mu-d5k.2",
+	"cowsay":  "being deleted by mu-lx8.4 (toy plugin)",
+	"scratch": "being deleted by mu-lx8.4 (duplicates mu scratch)",
 }
 
 // skipPlan lists examples whose config is loaded and validated but not

@@ -156,8 +156,6 @@ type planAction struct {
 	ActionKey         string            `json:"action_key,omitempty"`     // absent while inputs are pending
 	PendingInputs     []string          `json:"pending_inputs,omitempty"` // inputs produced by upstream actions
 	Command           []string          `json:"command"`
-	Body              []any             `json:"body,omitempty"`
-	EweDigest         string            `json:"ewe_digest,omitempty"`
 	Inputs            map[string]string `json:"inputs"`
 	Outputs           []string          `json:"outputs"`
 	DependsOn         []string          `json:"depends_on"`
@@ -206,10 +204,6 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 		for name, digest := range a.Toolchain {
 			toolchain[name] = digest.String()
 		}
-		eweDigest := ""
-		if !a.EweRef.IsZero() {
-			eweDigest = a.EweRef.String()
-		}
 		// An action consuming upstream outputs has no meaningful key until
 		// those outputs exist; report which inputs are pending instead.
 		actionKey, pending := "", a.PendingInputs()
@@ -218,8 +212,7 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 		}
 		out = append(out, planAction{
 			ID: a.ID, ActionKey: actionKey, PendingInputs: pending,
-			Command: a.Command, Body: a.Body, EweDigest: eweDigest,
-			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env, EnvPassthrough: a.EnvPassthrough,
+			Command: a.Command, Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env, EnvPassthrough: a.EnvPassthrough,
 			SealedInputs: a.SealedInputs, SealedInputModes: a.SealedInputModes,
 			SealedOutputs: a.SealedOutputs, SealedOutputModes: a.SealedOutputModes,
 			Network: a.Network, WorkDir: a.WorkDir, ProjectRoot: a.ProjectRoot, Impure: a.Impure,

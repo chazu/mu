@@ -27,7 +27,6 @@ var topicFiles = map[string]string{
 	"shell":            "shell.md",
 	"secret-providers": "secret-providers.md",
 	"protocol":         "protocol.md",
-	"pith-plugins":     "pith-plugins.md",
 	"sandbox":          "sandbox.md",
 	"advice":           "advice.md",
 	"sdk":              "sdk.md",

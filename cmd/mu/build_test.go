@@ -225,27 +225,3 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 		t.Errorf("action projection incomplete: %#v", action)
 	}
 }
-
-func TestPlanJSONProjectsBodyAndEweExecutionForms(t *testing.T) {
-	eweDigest, err := cas.ParseDigest("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-	if err != nil {
-		t.Fatal(err)
-	}
-	graph := dag.NewGraph()
-	if err := graph.AddAction(&dag.Action{ID: "//app:body", Body: []any{"apply"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := graph.AddAction(&dag.Action{ID: "//app:ewe", EweRef: eweDigest}); err != nil {
-		t.Fatal(err)
-	}
-	document := newPlanJSONDocument(&coordinator.PlanResult{Graph: graph}, []string{"//app"})
-	if len(document.Actions) != 2 {
-		t.Fatalf("actions = %d, want 2", len(document.Actions))
-	}
-	if len(document.Actions[0].Body) != 1 || document.Actions[0].Command != nil {
-		t.Errorf("body action projection = %#v", document.Actions[0])
-	}
-	if document.Actions[1].EweDigest != eweDigest.String() || document.Actions[1].Command != nil {
-		t.Errorf("ewe action projection = %#v", document.Actions[1])
-	}
-}

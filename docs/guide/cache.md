@@ -9,7 +9,6 @@ HOW CACHING WORKS
 
   Each build action has a cache key (sha256) computed from:
   - Command (argv, original order)
-  - Inline pith body or ewe program digest, when present
   - Sorted input digests (sha256 of each input file). Inputs produced by
     another action use the digest of what that action actually produced,
     filled in after it runs and before this action's cache lookup.

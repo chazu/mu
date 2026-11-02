@@ -42,7 +42,6 @@ WHAT TO READ NEXT
 
   Authoring a project:    mu guide mu.cue → mu guide build
   Writing a plugin:       mu guide plugins → mu guide protocol
-  Inline pith plugins:   mu guide pith-plugins
   Working with secrets:   mu guide secrets → mu guide secret-gen
   Drift detection:        mu guide observe
   Hermetic toolchains:    mu guide toolchains
