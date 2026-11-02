@@ -95,9 +95,10 @@ FAILURE MODES
 EXTRACTION LIMITS
 
   Every archive mu expands (scratch toolchains, catalog source archives,
-  plugin CAS bundles) is bounded by entry count, per-file expanded bytes,
-  and total expanded bytes. Limits apply to bytes actually written, not
-  only to sizes the archive declares, and skipped entries still count.
+  plugin CAS bundles) goes through one extractor, bounded by entry count,
+  per-file expanded bytes, and total expanded bytes. Limits apply to bytes
+  actually written, not only to sizes the archive declares, and skipped
+  entries still count.
 
                     entries   per file   total
     toolchains      500,000      4 GiB   16 GiB
@@ -105,14 +106,31 @@ EXTRACTION LIMITS
 
   Toolchain defaults leave about 6x headroom over large real toolchains
   (Rust with docs: ~76k entries / 2.3 GB; LLVM: several GB; Go and Zig:
-  ~17-19k entries). If a legitimate archive is larger, raise the limits
-  for that run (positive integers; they apply to every profile):
+  ~17-19k entries). If a legitimate archive is larger, raise the byte
+  limit for that run; it replaces both the per-file and the total limit
+  of every profile (a positive integer):
 
-    MU_EXTRACT_MAX_ENTRIES=1000000
-    MU_EXTRACT_MAX_FILE_BYTES=8589934592
-    MU_EXTRACT_MAX_TOTAL_BYTES=34359738368
+    MU_ARCHIVE_MAX_BYTES=34359738368
 
-  A malformed value is an error, not an ignored limit.
+  A malformed value is an error, not an ignored limit. Entry counts have
+  no override.
+
+EXTRACTION SAFETY
+
+  All writes go through a directory handle rooted at the extraction
+  directory, so no entry can create or modify anything outside it.
+
+  - An absolute entry, or one whose path escapes the directory, fails the
+    extraction (it is not silently skipped).
+  - Hard links, device files, and other special entries are rejected.
+  - Toolchain archives may contain symlinks with relative targets that
+    stay inside the tree; absolute or escaping targets are rejected, and
+    so is a link that resolves outside the tree through another link.
+    Catalog and plugin bundles may not contain symlinks at all.
+  - Symlinks are not stored in the toolchain manifest (it holds regular
+    files only) and are never read through; mu scratch prints a warning
+    listing them. A toolchain whose bin/<toolchain> is a symlink therefore
+    passes verify but is unusable; repackage it with a regular file.
 
 USING TOOLCHAINS IN PLUGINS
 

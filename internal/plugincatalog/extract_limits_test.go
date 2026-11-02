@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chazu/mu/internal/archivelimit"
+	"github.com/chazu/mu/internal/archive"
 )
 
 func catalogArchive(t testing.TB, n int, size int64) []byte {
@@ -46,9 +46,8 @@ func TestExtractArchiveEnforcesLimits(t *testing.T) {
 		n                int
 		size             int64
 	}{
-		{"entries", archivelimit.EnvMaxEntries, "3", 4, 1},
-		{"file bytes", archivelimit.EnvMaxFileBytes, "100", 1, 101},
-		{"total bytes", archivelimit.EnvMaxTotalBytes, "1048576", 4, 512 << 10},
+		{"file bytes", archive.EnvMaxBytes, "100", 1, 101},
+		{"total bytes", archive.EnvMaxBytes, "1048576", 4, 512 << 10},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,7 +56,7 @@ func TestExtractArchiveEnforcesLimits(t *testing.T) {
 			os.WriteFile(path, catalogArchive(t, tc.n, tc.size), 0o644)
 			dest := filepath.Join(t.TempDir(), "out")
 			err := ExtractArchive(path, dest)
-			if !errors.Is(err, archivelimit.ErrExceeded) {
+			if !errors.Is(err, archive.ErrExceeded) {
 				t.Fatalf("ExtractArchive = %v, want ErrExceeded", err)
 			}
 			if total := expandedBytes(dest); total > 1<<20 {
@@ -77,8 +76,7 @@ func FuzzExtractArchive(f *testing.F) {
 	f.Add([]byte{0x1f, 0x8b, 0x08})
 	f.Add([]byte("not an archive"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		t.Setenv(archivelimit.EnvMaxEntries, "32")
-		t.Setenv(archivelimit.EnvMaxTotalBytes, "65536")
+		t.Setenv(archive.EnvMaxBytes, "65536")
 		parent := t.TempDir()
 		path := filepath.Join(parent, "in.tar.gz")
 		if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -96,4 +94,23 @@ func FuzzExtractArchive(f *testing.F) {
 			t.Fatalf("expanded %d bytes past a 65536-byte budget", total)
 		}
 	})
+}
+
+func TestExtractArchiveRejectsLinks(t *testing.T) {
+	for _, hdr := range []*tar.Header{
+		{Name: "pkg/link", Linkname: "target", Typeflag: tar.TypeSymlink},
+		{Name: "pkg/hard", Linkname: "pkg/f", Typeflag: tar.TypeLink},
+	} {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(zw)
+		tw.WriteHeader(hdr)
+		tw.Close()
+		zw.Close()
+		path := filepath.Join(t.TempDir(), "a.tar.gz")
+		os.WriteFile(path, buf.Bytes(), 0o644)
+		if err := ExtractArchive(path, filepath.Join(t.TempDir(), "out")); err == nil {
+			t.Fatalf("%s accepted", hdr.Name)
+		}
+	}
 }

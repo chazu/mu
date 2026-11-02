@@ -1,4 +1,4 @@
-package archivelimit
+package archive
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 
 func budget(t *testing.T, l Limits) *Budget {
 	t.Helper()
-	b, err := NewWithLimits(l)
+	b, err := NewBudgetWithLimits(l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +24,8 @@ func TestEntryLimitIsInclusive(t *testing.T) {
 			t.Fatalf("entry %d: %v", i, err)
 		}
 	}
-	if err := b.Entry("third"); !errors.Is(err, ErrExceeded) || !strings.Contains(err.Error(), EnvMaxEntries) {
-		t.Fatalf("third entry = %v, want ErrExceeded naming %s", err, EnvMaxEntries)
+	if err := b.Entry("third"); !errors.Is(err, ErrExceeded) {
+		t.Fatalf("third entry = %v, want ErrExceeded", err)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestCopyOneByteOverFileLimitFails(t *testing.T) {
 	b := budget(t, Limits{MaxEntries: 10, MaxFileBytes: 4, MaxTotalBytes: 100})
 	var out bytes.Buffer
 	_, err := b.Copy(&out, strings.NewReader("abcde"), "big")
-	if !errors.Is(err, ErrExceeded) || !strings.Contains(err.Error(), EnvMaxFileBytes) {
+	if !errors.Is(err, ErrExceeded) || !strings.Contains(err.Error(), EnvMaxBytes) {
 		t.Fatalf("Copy = %v, want file-limit ErrExceeded", err)
 	}
 	if out.Len() > 4 {
@@ -62,7 +62,7 @@ func TestCopyOneByteOverTotalFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := b.Copy(&out, strings.NewReader("def"), "b")
-	if !errors.Is(err, ErrExceeded) || !strings.Contains(err.Error(), EnvMaxTotalBytes) {
+	if !errors.Is(err, ErrExceeded) || !strings.Contains(err.Error(), EnvMaxBytes) {
 		t.Fatalf("Copy = %v, want total-limit ErrExceeded", err)
 	}
 	if out.Len() > 5 {
@@ -99,17 +99,17 @@ func TestDeclaredRejectsBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestEnvOverrides(t *testing.T) {
-	env := map[string]string{EnvMaxEntries: "7", EnvMaxFileBytes: "8", EnvMaxTotalBytes: "9"}
+func TestEnvOverride(t *testing.T) {
+	env := map[string]string{EnvMaxBytes: "9"}
 	l, err := withEnv(Plugin, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l != (Limits{MaxEntries: 7, MaxFileBytes: 8, MaxTotalBytes: 9}) {
+	if l != (Limits{MaxEntries: Plugin.MaxEntries, MaxFileBytes: 9, MaxTotalBytes: 9}) {
 		t.Fatalf("limits = %+v", l)
 	}
 	for _, bad := range []string{"0", "-1", "lots", "1e9"} {
-		_, err := withEnv(Plugin, func(k string) (string, bool) { return bad, k == EnvMaxTotalBytes })
+		_, err := withEnv(Plugin, func(k string) (string, bool) { return bad, k == EnvMaxBytes })
 		if err == nil {
 			t.Errorf("override %q accepted", bad)
 		}
@@ -120,14 +120,14 @@ func TestEnvOverrides(t *testing.T) {
 	}
 }
 
-func TestNewEnvironment(t *testing.T) {
-	t.Setenv(EnvMaxEntries, "3")
-	b, err := New(Toolchain)
-	if err != nil || b.Limits().MaxEntries != 3 || b.Limits().MaxTotalBytes != Toolchain.MaxTotalBytes {
-		t.Fatalf("New = %+v, %v", b, err)
+func TestNewBudgetEnvironment(t *testing.T) {
+	t.Setenv(EnvMaxBytes, "3")
+	b, err := NewBudget(Toolchain)
+	if err != nil || b.Limits().MaxTotalBytes != 3 || b.Limits().MaxEntries != Toolchain.MaxEntries {
+		t.Fatalf("NewBudget = %+v, %v", b, err)
 	}
-	t.Setenv(EnvMaxEntries, "nope")
-	if _, err := New(Toolchain); err == nil {
+	t.Setenv(EnvMaxBytes, "nope")
+	if _, err := NewBudget(Toolchain); err == nil {
 		t.Fatal("malformed env accepted")
 	}
 }

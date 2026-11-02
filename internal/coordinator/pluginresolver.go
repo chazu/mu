@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chazu/mu/internal/archivelimit"
+	"github.com/chazu/mu/internal/archive"
 	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
@@ -437,81 +437,18 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 		return "", err
 	}
 	defer os.RemoveAll(staging)
-	root, err := os.OpenRoot(staging)
-	if err != nil {
-		return "", err
-	}
-	defer root.Close()
 	rc, err := r.Store.Get(ctx, dgst)
 	if err != nil {
 		return "", fmt.Errorf("get plugin bundle from CAS: %w", err)
 	}
 	defer rc.Close()
-	budget, err := archivelimit.New(archivelimit.Plugin)
-	if err != nil {
+	if err := archive.ExtractTar(ctx, rc, staging, archive.Policy{Limits: archive.Plugin}); err != nil {
+		return "", fmt.Errorf("extract plugin bundle: %w", err)
+	}
+	if entries, err := os.ReadDir(staging); err != nil {
 		return "", err
-	}
-	tr := tar.NewReader(rc)
-	seen := make(map[string]bool)
-	for {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("read tar entry: %w", err)
-		}
-		if err := budget.Entry(hdr.Name); err != nil {
-			return "", err
-		}
-		if !filepath.IsLocal(hdr.Name) || filepath.Clean(hdr.Name) == "." {
-			return "", fmt.Errorf("tar entry %q: path traversal not allowed", hdr.Name)
-		}
-		entry := filepath.Clean(hdr.Name)
-		if seen[entry] {
-			return "", fmt.Errorf("duplicate tar entry %q", hdr.Name)
-		}
-		seen[entry] = true
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := root.MkdirAll(entry, 0o755); err != nil {
-				return "", err
-			}
-		case tar.TypeReg, tar.TypeRegA:
-			if err := root.MkdirAll(filepath.Dir(entry), 0o755); err != nil {
-				return "", err
-			}
-			mode := fs.FileMode(hdr.Mode) & fs.ModePerm
-			if mode == 0 {
-				mode = 0o644
-			}
-			if err := budget.Declared(hdr.Name, hdr.Size); err != nil {
-				return "", err
-			}
-			f, err := root.OpenFile(entry, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode)
-			if err != nil {
-				return "", fmt.Errorf("create %s: %w", hdr.Name, err)
-			}
-			_, copyErr := budget.Copy(f, tr, hdr.Name)
-			closeErr := f.Close()
-			if copyErr != nil {
-				return "", fmt.Errorf("extract %s: %w", hdr.Name, copyErr)
-			}
-			if closeErr != nil {
-				return "", fmt.Errorf("close %s: %w", hdr.Name, closeErr)
-			}
-		default:
-			return "", fmt.Errorf("tar entry %q: unsupported type %d", hdr.Name, hdr.Typeflag)
-		}
-	}
-	if len(seen) == 0 {
+	} else if len(entries) == 0 {
 		return "", fmt.Errorf("empty plugin bundle")
-	}
-	if err := root.Close(); err != nil {
-		return "", err
 	}
 	if err := os.Rename(staging, extractDir); err != nil {
 		// A concurrent resolver may have published this exact bundle first.
