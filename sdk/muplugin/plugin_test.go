@@ -222,6 +222,35 @@ func (b *fakeBackend) Store(_ context.Context, ref, value, _ string) error {
 	return nil
 }
 
+type readOnlyBackend struct{}
+
+func (readOnlyBackend) Resolve(_ context.Context, ref string) (string, error) {
+	return "value-of-" + ref, nil
+}
+
+func TestSecretPluginReadOnlyBackendOmitsStore(t *testing.T) {
+	p := muplugin.SecretPlugin("ro", "0.1.0", readOnlyBackend{})
+
+	var disc muplugin.DiscoverResponse
+	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewDiscoverRequest(), &disc); err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if disc.HasCapability("store_secret") {
+		t.Fatalf("read-only backend advertises store_secret: %v", disc.Capabilities)
+	}
+	if !disc.HasCapability("resolve_secret") {
+		t.Fatalf("capabilities %v missing resolve_secret", disc.Capabilities)
+	}
+
+	var stored muplugin.StoreSecretResponse
+	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewStoreSecretRequest("k", "v", muplugin.StoreSecretModeOverwrite), &stored); err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if stored.Error == "" {
+		t.Fatal("store_secret on read-only backend succeeded, want capability error")
+	}
+}
+
 func TestSecretPluginExposesBackend(t *testing.T) {
 	b := &fakeBackend{store: map[string]string{"k": "v"}}
 	p := muplugin.SecretPlugin("pass", "0.1.0", b)
