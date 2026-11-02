@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"path/filepath"
 	"sort"
 	"strconv"
 
@@ -19,7 +20,8 @@ import (
 // Sealed values never enter the key. Only refs and effective delivery/store
 // modes are hashed. Action IDs and dependency IDs are excluded: resolved input
 // digests identify upstream content. Timeout/retry policy does not identify a
-// successful build's artifacts.
+// successful build's artifacts. The checkout location does not either: only
+// the project-relative work directory is hashed (v4), never the project root.
 func ComputeActionKey(a *Action) cas.ActionKey {
 	h := sha256.New()
 	field := func(parts ...string) {
@@ -30,7 +32,7 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 			_, _ = h.Write([]byte(part))
 		}
 	}
-	field("mu.action-key/v3")
+	field("mu.action-key/v4")
 	for _, arg := range a.Command {
 		field("cmd", arg)
 	}
@@ -67,8 +69,7 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	}
 	field("network", strconv.FormatBool(a.Network))
 	field("impure", strconv.FormatBool(a.Impure))
-	field("work_dir", a.WorkDir)
-	field("project_root", a.ProjectRoot)
+	field("work_dir", keyWorkDir(a))
 	for _, name := range sortedKeys(a.SealedInputs) {
 		mode := a.SealedInputModes[name]
 		if mode == "" {
@@ -84,6 +85,24 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 		field("sealed_out", name, a.SealedOutputs[name], mode)
 	}
 	return cas.ActionKey{Digest: cas.NewSHA256(hex.EncodeToString(h.Sum(nil)))}
+}
+
+// keyWorkDir is the work directory as it enters the action key: relative to
+// the project root and slash-separated, so checkouts of the same project at
+// different paths (or on different machines) share cache entries. Actions
+// without a project root have nothing to be relative to and keep WorkDir.
+func keyWorkDir(a *Action) string {
+	if a.ProjectRoot == "" {
+		return a.WorkDir
+	}
+	if a.WorkDir == "" {
+		return "."
+	}
+	rel, err := filepath.Rel(a.ProjectRoot, a.WorkDir)
+	if err != nil {
+		return a.WorkDir
+	}
+	return filepath.ToSlash(rel)
 }
 
 func sortedKeys[V any](m map[string]V) []string {

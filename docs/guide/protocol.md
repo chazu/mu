@@ -167,7 +167,10 @@ INTER-ACTION REFERENCES
 
   Inputs can reference outputs of other actions in the same subgraph:
     "inputs": {"lib.a": "{action:compile-lib}"}
-  mu resolves these to the actual output digests after execution.
+  The reference implies a depends_on edge to that action. Once it has run,
+  and before the consumer's cache lookup, mu replaces the input's digest
+  with a digest over the producer's declared outputs, so the consumer's
+  action key changes whenever the producer's output content does.
 
 CROSS-TARGET ARTIFACTS
 
@@ -180,7 +183,9 @@ CROSS-TARGET ARTIFACTS
     "inputs": {"cryptolib": "lib/crypto/libcrypto.a"}
   mu detects that the path is produced by an already-planned action,
   defers the input digest, and injects an implicit DependsOn edge to the
-  producing action so the consumer runs after the producer. Paths are
+  producing action so the consumer runs after the producer. The deferred digest is
+  filled with the produced file's digest before the consumer's cache
+  lookup. Paths are
   compared after cleaning: outputs relative to the producer's work_dir,
   inputs relative to the project root ("./x" and "x" match).
 

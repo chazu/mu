@@ -80,6 +80,11 @@ type Action struct {
 	// Sources lists relative file paths (from WorkDir) to copy into the
 	// sandbox's working directory. Used only when Toolchain is set.
 	Sources []string
+
+	// InputSources marks inputs produced by another action in the graph. Their
+	// Inputs entry is a zero placeholder until the executor fills in the
+	// producer's actual output digest, before computing this action's key.
+	InputSources map[string]InputSource
 }
 
 // Graph is an adjacency-list representation of a build DAG.

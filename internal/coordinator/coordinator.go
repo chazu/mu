@@ -1420,6 +1420,12 @@ func prefixActions(target string, actions []plugin.ActionSpec) {
 				actions[i].DependsOn[j] = prefix + actions[i].DependsOn[j]
 			}
 		}
+		// "{action:id}" inputs name subgraph-local IDs, like depends_on.
+		for name, value := range actions[i].Inputs {
+			if id := actionRefID(value); isActionRef(value) && !strings.Contains(id, ":") {
+				actions[i].Inputs[name] = "{action:" + prefix + id + "}"
+			}
+		}
 	}
 }
 

@@ -196,7 +196,8 @@ func validateExpectedPlan(plan *coordinator.PlanResult, targets []string, expect
 
 type planAction struct {
 	ID                string            `json:"id"`
-	ActionKey         string            `json:"action_key"`
+	ActionKey         string            `json:"action_key,omitempty"`     // absent while inputs are pending
+	PendingInputs     []string          `json:"pending_inputs,omitempty"` // inputs produced by upstream actions
 	Command           []string          `json:"command"`
 	Body              []any             `json:"body,omitempty"`
 	EweDigest         string            `json:"ewe_digest,omitempty"`
@@ -253,8 +254,14 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 		if !a.EweRef.IsZero() {
 			eweDigest = a.EweRef.String()
 		}
+		// An action consuming upstream outputs has no meaningful key until
+		// those outputs exist; report which inputs are pending instead.
+		actionKey, pending := "", a.PendingInputs()
+		if len(pending) == 0 {
+			actionKey = dag.ComputeActionKey(a).Digest.String()
+		}
 		out = append(out, planAction{
-			ID: a.ID, ActionKey: dag.ComputeActionKey(a).Digest.String(),
+			ID: a.ID, ActionKey: actionKey, PendingInputs: pending,
 			Command: a.Command, Body: a.Body, EweDigest: eweDigest,
 			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env, EnvPassthrough: a.EnvPassthrough,
 			SealedInputs: a.SealedInputs, SealedInputModes: a.SealedInputModes,
