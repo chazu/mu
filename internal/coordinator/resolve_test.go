@@ -211,6 +211,35 @@ func TestResolveActionRef(t *testing.T) {
 	if !dgst.IsZero() {
 		t.Errorf("expected zero digest for action ref, got %v", dgst)
 	}
+	// The ref alone orders the DAG: the plugin did not declare depends_on.
+	if got := actions[0].DependsOn; len(got) != 1 || got[0] != "compile" {
+		t.Errorf("DependsOn = %v, want [compile]", got)
+	}
+	if src := actions[0].InputSources["obj"]; src.ProducerID != "compile" || src.OutputPath != "" {
+		t.Errorf("InputSources[obj] = %+v, want producer compile with all outputs", src)
+	}
+}
+
+func TestPrefixActionsQualifiesActionRefs(t *testing.T) {
+	specs := []plugin.ActionSpec{{
+		ID: "link",
+		Inputs: map[string]string{
+			"local":  "{action:compile}",
+			"remote": "{action://lib:compile}",
+			"file":   "main.go",
+		},
+	}}
+	prefixActions("//app", specs)
+	want := map[string]string{
+		"local":  "{action://app:compile}",
+		"remote": "{action://lib:compile}",
+		"file":   "main.go",
+	}
+	for name, value := range want {
+		if got := specs[0].Inputs[name]; got != value {
+			t.Errorf("Inputs[%s] = %q, want %q", name, got, value)
+		}
+	}
 }
 
 func TestResolveMixedInputs(t *testing.T) {

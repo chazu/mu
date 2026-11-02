@@ -17,6 +17,13 @@ All notable changes to mu are recorded here. The format follows
 
 ### Fixed
 
+- Pure actions that consume another action's output now miss the cache when
+  that output changes. Upstream-produced inputs (`{action:id}` refs and a
+  dependency's output paths) used to hash as a zero placeholder, so a
+  downstream action could be served stale outputs from cache. The executor
+  now fills in the real digest before the cache lookup, `{action:id}` inputs
+  imply a `depends_on` edge, and `mu build --plan --json` lists such inputs in
+  `pending_inputs` instead of printing an `action_key` for those actions.
 - `mu plugin search`, `install` and `update` reach the official catalog again.
   The bounded registry client disabled HTTP/2 but still offered it in the TLS
   handshake, so HTTP/2 servers such as GitHub's release downloads answered in

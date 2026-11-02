@@ -47,6 +47,11 @@ JSON PLAN CONTRACT
   and modes, network/work-dir/project-root/impure/retry settings, toolchain digests, and
   sources. Empty optional fields may be omitted.
 
+  An action whose inputs are produced by other actions ("{action:id}" refs or
+  a dependency's output paths) has no action_key in the plan: its key depends
+  on content that does not exist yet. Such actions list those input names in
+  pending_inputs instead, and their digests in inputs are zero placeholders.
+
   Planning resolves file and toolchain digests but never secret values. Sealed
   provider refs and modes are non-secret plan metadata and are projected so an
   exact-plan consumer such as PUDL can validate and hash the executable plan.

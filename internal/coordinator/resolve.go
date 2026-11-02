@@ -19,14 +19,23 @@ func isActionRef(value string) bool {
 	return strings.HasPrefix(value, "{action:") && strings.HasSuffix(value, "}")
 }
 
+// actionRefID returns the action ID named by an "{action:id}" reference.
+func actionRefID(value string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(value, "{action:"), "}")
+}
+
 // Resolve converts a slice of plugin ActionSpecs into resolved dag.Actions.
 // File-path inputs are resolved relative to projectRoot and hashed via cas.ComputeDigest.
-// Action-reference inputs ("{action:id}") are stored with a zero cas.Digest placeholder.
+// Action-reference inputs ("{action:id}") are stored with a zero cas.Digest
+// placeholder, recorded in InputSources, and add a DependsOn edge to the
+// referenced action. The executor fills the placeholder with a digest over the
+// producer's declared outputs before computing the consumer's action key.
 //
 // crossTargetProducers maps project-relative output paths to the action IDs
 // that produce them in this build. When a plugin declares an input whose
 // path matches such an entry, the input is treated as deferred (zero
-// digest) and an implicit DependsOn edge to the producing action is added
+// digest, recorded in InputSources so the executor substitutes the produced
+// file's digest) and an implicit DependsOn edge to the producing action is added
 // so the DAG executes in the correct order. This lets a dependent target
 // consume a dep's declared output by path without needing to wait for
 // execution during planning.
@@ -38,12 +47,22 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 
 	for _, spec := range specs {
 		inputs := make(map[string]cas.Digest, len(spec.Inputs))
+		var inputSources map[string]dag.InputSource
 		extraDeps := make(map[string]struct{})
+		deferInput := func(name string, src dag.InputSource) {
+			inputs[name] = cas.Digest{}
+			if inputSources == nil {
+				inputSources = make(map[string]dag.InputSource)
+			}
+			inputSources[name] = src
+			extraDeps[src.ProducerID] = struct{}{}
+		}
 
 		for name, value := range spec.Inputs {
 			if isActionRef(value) {
-				// Placeholder for inter-action dependency; executor resolves later.
-				inputs[name] = cas.Digest{}
+				// Inter-action dependency: the executor substitutes a digest
+				// over the producer's outputs once it has run.
+				deferInput(name, dag.InputSource{ProducerID: actionRefID(value)})
 				continue
 			}
 
@@ -51,8 +70,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			// another already-planned action produces. File won't exist on
 			// disk yet, so defer hashing and wire in a DependsOn edge.
 			if producer, ok := crossTargetProducers[value]; ok {
-				inputs[name] = cas.Digest{}
-				extraDeps[producer] = struct{}{}
+				deferInput(name, dag.InputSource{ProducerID: producer, OutputPath: value})
 				continue
 			}
 
@@ -204,6 +222,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			Body:              spec.Body,
 			EweRef:            eweRef,
 			Inputs:            inputs,
+			InputSources:      inputSources,
 			Outputs:           spec.Outputs,
 			DependsOn:         dependsOn,
 			Env:               env,

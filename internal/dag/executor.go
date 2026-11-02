@@ -88,6 +88,10 @@ type Executor struct {
 	// "_result" key without requiring file-based output declarations.
 	pithResults map[string]any // target -> stack result
 
+	// completed records finished actions (and their output digests) by ID so
+	// downstream placeholder inputs can be resolved. Guarded by outputsMu.
+	completed map[string]completedAction
+
 	outputsMu sync.RWMutex
 }
 
@@ -119,6 +123,7 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 	// Initialize completed outputs tracking for pith VM getOutput.
 	e.completedOutputs = make(map[string]map[string]string)
 	e.pithResults = make(map[string]any)
+	e.completed = make(map[string]completedAction)
 
 	// Track state for each action.
 	var mu sync.Mutex
@@ -186,6 +191,10 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 				result.Completed = append(result.Completed, status)
 				mu.Unlock()
 
+				e.outputsMu.Lock()
+				e.completed[status.ID] = completedAction{action: g.Action(status.ID), outputs: status.Outputs}
+				e.outputsMu.Unlock()
+
 				// Record completed outputs by target prefix for pith VM getOutput.
 				if idx := strings.LastIndex(status.ID, ":"); idx >= 0 {
 					targetName := status.ID[:idx]
@@ -248,6 +257,12 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 			return ActionStatus{ID: a.ID, Err: err}
 		}
 		defer workDir.Close()
+	}
+
+	// Upstream-produced inputs carry placeholders until their producers have
+	// run; resolve them before the action key is computed.
+	if err := e.resolveUpstreamInputs(a); err != nil {
+		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: %w", a.ID, err)}
 	}
 
 	// Cache check — only for pure actions.
