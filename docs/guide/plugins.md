@@ -257,10 +257,10 @@ OFFICIAL SOURCE-PACKAGE CATALOG
   builds source-only packages when the catalog declares a build command,
   bundles the plugin into the local CAS, extracts it under ~/.mu/plugins/, and
   writes a digest entry into mu.cue. The selected catalog release, asset hash,
-  and local bundle digest are recorded in mu.lock. The lock entry also keeps
-  the package's vendored wire schemas and PUDL mappings, and installation
-  writes the same metadata to `mu-plugin.json` inside the extracted bundle so
-  downstream tools can inspect an installed package without its source tree.
+  and local bundle digest are recorded in mu.lock. Installation also writes
+  the package's name, version, bundle digest and entrypoint to
+  `mu-plugin.json` inside the extracted bundle so other tools can inspect an
+  installed package without its source tree.
 
   To update a plugin, install the newer version: `mu plugin install k8s`
   installs the latest release and rewrites its mu.cue and mu.lock entries.
@@ -293,7 +293,7 @@ PLUGIN GUIDES
   RECOMMENDED GUIDE.md CONTENTS
 
   A good plugin guide is the user's first stop after 'mu plugin info'.
-  The metadata side (capabilities, consumes/produces, schemas) is
+  The metadata side (capabilities, consumes/produces, config schema) is
   surfaced by 'mu plugin info' automatically — your GUIDE.md should
   cover everything info CAN'T tell them. Use this skeleton:
 
@@ -348,50 +348,6 @@ PLUGIN GUIDES
     plugins/sops/GUIDE.md         file-based provider, write policy
     plugins/remote-exec/GUIDE.md  consumer + emitter, sealed_output_files
     plugins/keypair-gen/GUIDE.md  generator, two-name sealed_outputs contract
-
-OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
-
-  A plugin can declare one or more CUE schemas for the data it produces so that
-  pudl classifies imports under a meaningful type instead of the
-  catchall pudl/core.#Item.
-
-  1. Add output_schema for one default schema, or output_schemas for
-     resource-specific schemas, to the discover response:
-
-       "output_schema": {"module":     "mu/aws",
-                         "version":    "v1",
-                         "definition": "#EC2Instance"}
-
-     For plugins that emit multiple resource types:
-
-       "output_schemas": [{"resource_type": "aws.ec2.instance",
-                           "module":        "mu/aws",
-                           "version":       "v1",
-                           "definition":    "#EC2Instance"},
-                          {"resource_type": "aws.ec2.vpc",
-                           "module":        "mu/aws",
-                           "version":       "v1",
-                           "definition":    "#VPC"}]
-
-  2. Vendor the schema files with the plugin (mirrored layout):
-
-       plugins/aws/
-         schemas/mu/aws/ec2.cue          # package aws
-
-  3. Declare the vendored module in mu.cue:
-
-       plugin: {
-         schemas: [
-           {module: "mu/aws", version: "v1", path: "schemas/mu/aws"},
-         ]
-       }
-
-  Namespace convention (see 'docs/cue-conventions.md' §6):
-    pudl/...         first-party pudl schemas
-    mu/<plugin>      schemas authored by the plugin's authors
-    anything else    third-party / user-defined
-
-  Full plugin-author guide: docs/plugin-output-schemas.md.
 
 CACHED VERSION SELECTION
 

@@ -62,8 +62,6 @@ THE PLUGIN STRUCT
       Name, Version, Description string
       Consumes, Produces         []string
       ConfigSchema               map[string]any
-      OutputSchema               *SchemaRef
-      OutputSchemas              []SchemaRef
 
       Plan          func(ctx, PlanRequest) (PlanResponse, error)  // optional
       ResolveSecret func(ctx, ref string) (string, error)         // optional

@@ -127,6 +127,9 @@ func rejectRemovedFields(val cue.Value, path string) error {
 			return fmt.Errorf("%s: cache.%s was removed; the cache is now local disk plus one optional read-only remote:%s", path, field, cacheMigrationHint)
 		}
 	}
+	if val.LookupPath(cue.ParsePath("plugin.schemas")).Exists() {
+		return fmt.Errorf("%s: plugin.schemas was removed; mu no longer ships plugin output schemas — delete the field", path)
+	}
 	if val.LookupPath(cue.ParsePath("advice")).Exists() {
 		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
 	}

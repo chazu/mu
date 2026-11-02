@@ -97,7 +97,7 @@ Commands:
   cache      Inspect the local CAS cache
   targets    List targets and their dependency chains (alias t)
   plugin (p) List and inspect plugins
-  verify     Re-hash CAS blobs, check schema namespace conventions, report issues
+  verify     Re-hash CAS blobs and report corrupt or missing ones
   guide      Quick-reference guides for mu features
   version    Print the mu version
   help       Show help for mu or a command (mu help <command> [<subcommand>])

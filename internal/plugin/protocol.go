@@ -17,7 +17,6 @@ const ProtocolVersion = muplugin.ProtocolVersion
 type (
 	Request               = muplugin.Request
 	DiscoverResponse      = muplugin.DiscoverResponse
-	SchemaRef             = muplugin.SchemaRef
 	PlanResponse          = muplugin.PlanResponse
 	TargetInfo            = muplugin.TargetInfo
 	DepInfo               = muplugin.DepInfo

@@ -22,7 +22,7 @@ func TestLoadSearchAndSelect(t *testing.T) {
   "repository": "example/plugins",
   "release_tag": "catalog-v1",
   "plugins": [
-    {"name":"zeta","version":"1.0.0","description":"Zed","asset_url":"https://example.test/zeta.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","path":"plugins/zeta","entrypoint":"plugin.bb"},
+    {"name":"zeta","version":"1.0.0","description":"Zed","asset_url":"https://example.test/zeta.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","path":"plugins/zeta","entrypoint":"plugin.bb","schemas":[{"module":"mu/zeta","version":"v1","path":"schemas/mu/zeta"}]},
     {"name":"demo","version":"1.0.0","description":"Demo observer","asset_url":"https://example.test/demo-1.tar.gz","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","path":"plugins/demo","entrypoint":"plugin.bb"},
     {"name":"demo","version":"1.1.0","description":"Demo observer newer","asset_url":"https://example.test/demo-2.tar.gz","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","path":"plugins/demo","entrypoint":"plugin.bb"}
   ]

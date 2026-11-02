@@ -100,8 +100,6 @@ func runPluginInfo(args []string) int {
 		Consumes:        info.Consumes,
 		Produces:        info.Produces,
 		ConfigSchema:    info.ConfigSchema,
-		OutputSchema:    info.OutputSchema,
-		OutputSchemas:   info.OutputSchemas,
 		Toolchain:       def.Toolchain,
 		Path:            def.Script,
 	}
@@ -122,20 +120,18 @@ func runPluginInfo(args []string) int {
 }
 
 type pluginInfoOutput struct {
-	Name            string             `json:"name"`
-	Description     string             `json:"description,omitempty"`
-	Version         string             `json:"version,omitempty"`
-	ProtocolVersion int                `json:"protocol_version,omitempty"`
-	Source          string             `json:"source"` // "project" | "cache"
-	Digest          string             `json:"digest,omitempty"`
-	Toolchain       string             `json:"toolchain,omitempty"`
-	Path            string             `json:"path,omitempty"`
-	Capabilities    []string           `json:"capabilities,omitempty"`
-	Consumes        []string           `json:"consumes,omitempty"`
-	Produces        []string           `json:"produces,omitempty"`
-	ConfigSchema    map[string]any     `json:"config_schema,omitempty"`
-	OutputSchema    *plugin.SchemaRef  `json:"output_schema,omitempty"`
-	OutputSchemas   []plugin.SchemaRef `json:"output_schemas,omitempty"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description,omitempty"`
+	Version         string         `json:"version,omitempty"`
+	ProtocolVersion int            `json:"protocol_version,omitempty"`
+	Source          string         `json:"source"` // "project" | "cache"
+	Digest          string         `json:"digest,omitempty"`
+	Toolchain       string         `json:"toolchain,omitempty"`
+	Path            string         `json:"path,omitempty"`
+	Capabilities    []string       `json:"capabilities,omitempty"`
+	Consumes        []string       `json:"consumes,omitempty"`
+	Produces        []string       `json:"produces,omitempty"`
+	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
 }
 
 // resolveInfoTarget locates the plugin by name. Returns the source label
@@ -322,39 +318,6 @@ func printPluginInfo(o pluginInfoOutput) {
 
 	fmt.Println(label.Render("Consumes") + bright.Render(joinOrDash(o.Consumes)))
 	fmt.Println(label.Render("Produces") + bright.Render(joinOrDash(o.Produces)))
-
-	if o.OutputSchema != nil {
-		fmt.Println()
-		fmt.Println(accent.Bold(true).Render("Output Schema"))
-		if o.OutputSchema.Description != "" {
-			fmt.Println("  " + dim.Italic(true).Render(o.OutputSchema.Description))
-		}
-		fmt.Println(dim.Render("  module") + "  " + bright.Render(o.OutputSchema.Module+"@"+o.OutputSchema.Version))
-		if o.OutputSchema.Definition != "" {
-			fmt.Println(dim.Render("  def") + "     " + accent.Render(o.OutputSchema.Definition))
-		}
-		if o.OutputSchema.Source != "" {
-			fmt.Println(dim.Render("  source") + "  " + bright.Render(o.OutputSchema.Source))
-		}
-	}
-	if len(o.OutputSchemas) > 0 {
-		fmt.Println()
-		fmt.Println(accent.Bold(true).Render("Output Schemas"))
-		for _, schema := range o.OutputSchemas {
-			label := schema.ResourceType
-			if label == "" {
-				label = "default"
-			}
-			fmt.Println("  " + bright.Render(label))
-			fmt.Println(dim.Render("    module") + "  " + bright.Render(schema.Module+"@"+schema.Version))
-			if schema.Definition != "" {
-				fmt.Println(dim.Render("    def") + "     " + accent.Render(schema.Definition))
-			}
-			if schema.Source != "" {
-				fmt.Println(dim.Render("    source") + "  " + bright.Render(schema.Source))
-			}
-		}
-	}
 
 	if len(o.ConfigSchema) > 0 {
 		fmt.Println()

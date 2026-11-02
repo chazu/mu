@@ -346,24 +346,6 @@ func ValidateDiscoverResponse(resp DiscoverResponse) error {
 		}
 	}
 
-	if err := validateSchemaRef(resp.OutputSchema); err != nil {
-		return fmt.Errorf("output_schema: %w", err)
-	}
-	seenResourceTypes := make(map[string]struct{}, len(resp.OutputSchemas))
-	for i := range resp.OutputSchemas {
-		schema := &resp.OutputSchemas[i]
-		if err := validateSchemaRef(schema); err != nil {
-			return fmt.Errorf("output_schemas[%d]: %w", i, err)
-		}
-		if schema.ResourceType == "" {
-			continue
-		}
-		if _, ok := seenResourceTypes[schema.ResourceType]; ok {
-			return fmt.Errorf("output_schemas: duplicate resource_type %q", schema.ResourceType)
-		}
-		seenResourceTypes[schema.ResourceType] = struct{}{}
-	}
-
 	return nil
 }
 
@@ -378,19 +360,6 @@ var validCapabilities = map[string]struct{}{
 	"plan":           {},
 	"resolve_secret": {},
 	"store_secret":   {},
-}
-
-func validateSchemaRef(schema *SchemaRef) error {
-	if schema == nil {
-		return nil
-	}
-	if strings.TrimSpace(schema.Module) == "" {
-		return fmt.Errorf("module is required")
-	}
-	if strings.TrimSpace(schema.Version) == "" {
-		return fmt.Errorf("version is required")
-	}
-	return nil
 }
 
 // Plan sends a plan request and returns the response.

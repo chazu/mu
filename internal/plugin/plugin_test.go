@@ -217,15 +217,11 @@ func TestValidateDiscoverResponse(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "valid explicit capabilities and schemas",
+			name: "valid explicit capabilities",
 			resp: plugin.DiscoverResponse{
-				Name:         "aws",
+				Name:         "go",
 				Version:      "0.1.0",
 				Capabilities: []string{"discover", "plan"},
-				OutputSchemas: []plugin.SchemaRef{
-					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
-					{ResourceType: "aws.ec2.vpc", Module: "mu/aws", Version: "v1"},
-				},
 			},
 		},
 		{
@@ -284,27 +280,6 @@ func TestValidateDiscoverResponse(t *testing.T) {
 				Capabilities: []string{"discover", "discover"},
 			},
 			wantErr: "duplicate capability",
-		},
-		{
-			name: "schema module required",
-			resp: plugin.DiscoverResponse{
-				Name:         "bad-schema",
-				Version:      "0.1.0",
-				OutputSchema: &plugin.SchemaRef{Version: "v1"},
-			},
-			wantErr: "output_schema: module is required",
-		},
-		{
-			name: "resource types unique",
-			resp: plugin.DiscoverResponse{
-				Name:    "duplicate-schema",
-				Version: "0.1.0",
-				OutputSchemas: []plugin.SchemaRef{
-					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
-					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
-				},
-			},
-			wantErr: "duplicate resource_type",
 		},
 	}
 

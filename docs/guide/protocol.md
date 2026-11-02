@@ -36,9 +36,7 @@ METHODS
       "consumes": ["source:any"],
       "produces": ["binary"],
       "capabilities": ["discover", "plan"],
-      "config_schema": {"output": {"type": "string"}},
-      "output_schema": {"module": "mu/plugin", "version": "v1", "definition": "#Type"},
-      "output_schemas": [{"resource_type": "plugin.type", "module": "mu/plugin", "version": "v1", "definition": "#Type"}]
+      "config_schema": {"output": {"type": "string"}}
     }
 
     Plugins must declare every supported method in `capabilities`.

@@ -59,31 +59,7 @@ type DiscoverResponse struct {
 	Consumes        []string       `json:"consumes"` // artifact types this plugin can consume
 	Produces        []string       `json:"produces"` // artifact types this plugin can produce
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
-	Capabilities    []string       `json:"capabilities,omitempty"`   // supported methods, e.g. ["discover","plan"]
-	OutputSchema    *SchemaRef     `json:"output_schema,omitempty"`  // legacy single-schema form
-	OutputSchemas   []SchemaRef    `json:"output_schemas,omitempty"` // resource-specific output schemas
-}
-
-// SchemaRef is an optional, declarative reference to a CUE schema that
-// describes the shape of a plugin's output. It is consumed by downstream
-// tools (notably pudl) to classify imported data without re-inferring.
-//
-// The reference is a pointer to a schema; the schema itself is resolved
-// from a vendored module shipped in the plugin bundle, the local schema
-// cache, or (eventually) a remote registry. Plugins do not embed CUE
-// content here.
-//
-// Namespace convention (see brainstorm 2026-05-04-plugin-output-schemas):
-//   - "pudl/..."         → first-party pudl schemas
-//   - "mu/<plugin-name>" → schemas originated by a mu plugin's authors
-//   - anything else      → third-party / user-defined
-type SchemaRef struct {
-	ResourceType string `json:"resource_type,omitempty"` // emitted record type, e.g. "aws.ec2.instance"
-	Module       string `json:"module"`                  // CUE module path, e.g. "mu/aws"
-	Version      string `json:"version"`                 // module version, e.g. "v1"
-	Definition   string `json:"definition,omitempty"`    // optional CUE definition selector, e.g. "#EC2Instance"
-	Description  string `json:"description,omitempty"`   // human-readable summary of the schema's purpose
-	Source       string `json:"source,omitempty"`        // advisory: "vendored" | "remote"
+	Capabilities    []string       `json:"capabilities,omitempty"` // supported methods, e.g. ["discover","plan"]
 }
 
 // HasCapability reports whether the plugin declared support for the given method.

@@ -125,6 +125,12 @@ All notable changes to mu are recorded here. The format follows
   their observe handlers (k8s also drops the observe-only `ignore_paths` and
   `inventory` config). lint's `working_dir`, previously read only by observe,
   now sets the lint action's `work_dir`.
+- Plugin output schemas. Discover's `output_schema` / `output_schemas` are
+  gone from the SDK, from discover validation and from `mu plugin info`; a
+  plugin that still sends them has them ignored. A plugin `mu.cue` that sets
+  `plugin.schemas` (vendored CUE schema modules) fails to load. Catalog
+  `schemas` / `pudl_mappings` are no longer copied into `mu.lock` or the
+  installed bundle's `mu-plugin.json`. docs/plugin-output-schemas.md is gone.
 
 ## [v0.3.5] — 2026-08-05
 

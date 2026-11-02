@@ -24,11 +24,9 @@ type Plugin struct {
 	Consumes []string
 	Produces []string
 
-	// Optional: declarative config schema and output schemas. The SDK
-	// passes these through to the discover response unmodified.
-	ConfigSchema  map[string]any
-	OutputSchema  *SchemaRef
-	OutputSchemas []SchemaRef
+	// Optional: declarative config schema. The SDK passes it through to
+	// the discover response unmodified.
+	ConfigSchema map[string]any
 
 	// Optional. A plugin that supports build/convergence implements Plan.
 	Plan func(ctx context.Context, req PlanRequest) (PlanResponse, error)
@@ -163,8 +161,6 @@ func (p *Plugin) discover() DiscoverResponse {
 		Produces:        p.Produces,
 		ConfigSchema:    p.ConfigSchema,
 		Capabilities:    caps,
-		OutputSchema:    p.OutputSchema,
-		OutputSchemas:   p.OutputSchemas,
 	}
 	if p.Consumes == nil {
 		resp.Consumes = []string{}
