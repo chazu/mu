@@ -16,8 +16,7 @@ package mu
 	cache?:   #CacheConfig
 	publish?: #PublishConfig
 	plugins?: [...#PluginDef]
-	preprocessor?: #Preprocessor
-	secrets?:      #SecretsConfig
+	secrets?: #SecretsConfig
 	...
 }
 
@@ -149,13 +148,6 @@ package mu
 	read_repair?:   bool
 	write_through?: bool
 	push?:          #CachePush
-	...
-}
-
-// #Preprocessor transforms non-JSON config files into JSON before loading.
-#Preprocessor: {
-	extension: string & !=""
-	command: [string, ...string]
 	...
 }
 

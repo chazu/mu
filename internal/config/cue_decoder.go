@@ -48,6 +48,9 @@ func (d cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectRemovedFields(val, filepath.Join(projectRoot, "mu.cue")); err != nil {
+		return nil, err
+	}
 	_, projectDef, _, err := compileSchemaDefs(val.Context())
 	if err != nil {
 		return nil, err
@@ -98,6 +101,16 @@ func (d cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
 	}
 	sortTargetsByName(cfg.Targets)
 	return &cfg, nil
+}
+
+// rejectRemovedFields fails the load when mu.cue still sets a field that mu
+// no longer supports. The schema is open, so without this check such a field
+// would decode to nothing and be silently ignored.
+func rejectRemovedFields(val cue.Value, path string) error {
+	if val.LookupPath(cue.ParsePath("preprocessor")).Exists() {
+		return fmt.Errorf("%s: preprocessor was removed; write sub-directory configs as mu.cue", path)
+	}
+	return nil
 }
 
 // IsCuePluginDir reports whether the given mu.cue file (raw bytes)
