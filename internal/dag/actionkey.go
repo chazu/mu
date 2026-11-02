@@ -48,6 +48,10 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	}
 	// Only impure actions may inherit. Pure defaults are explicitly hashed.
 	field("env_inherit", strconv.FormatBool(env == nil))
+	// Passthrough names, never their host values.
+	for _, name := range sortedStrings(a.EnvPassthrough) {
+		field("env_passthrough", name)
+	}
 	for _, name := range sortedKeys(a.Inputs) {
 		field("input", name, a.Inputs[name].String())
 	}

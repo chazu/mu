@@ -270,26 +270,6 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command, body, or ewe program", a.ID)}
 	}
 
-	// Merge resolved secrets into a copy of the env. We must not mutate a.Env
-	// because ComputeActionKey is called again after execution for cache storage,
-	// and secrets must never be part of the cache key.
-	declared := ActionEnvironment(a.Env, a.Impure)
-	execEnv := make(map[string]string, len(declared)+1)
-	if declared == nil && a.Toolchain == nil && a.EweRef.IsZero() && len(a.Body) == 0 {
-		// Inheritance is permitted only for impure actions. Runtime-only values
-		// never mutate the plan or enter identity/manifest fields.
-		for _, entry := range os.Environ() {
-			name, value, ok := strings.Cut(entry, "=")
-			if ok {
-				execEnv[name] = value
-			}
-		}
-	} else {
-		for name, value := range declared {
-			execEnv[name] = value
-		}
-	}
-
 	secrets := e.ResolvedSecrets[a.ID]
 	if e.SealedInputResolver != nil && len(a.SealedInputs) > 0 {
 		resolved, err := e.SealedInputResolver(ctx, a)
@@ -298,47 +278,45 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 		secrets = resolved
 	}
+	// Apply per-name delivery modes. "env" (or empty) is the default and
+	// exports the value verbatim; "file" writes to a 0600 temp file under a
+	// per-action sealed-input directory and exports the path. Sandbox-mode
+	// actions cannot use "file" because the temp file lives outside the
+	// sandbox view.
 	var sealedInDir string
-	if len(secrets) > 0 {
-		execEnv = make(map[string]string, len(a.Env)+len(secrets)+1)
-		for k, v := range a.Env {
-			execEnv[k] = v
-		}
-		// Apply per-name delivery modes. "env" (or empty) is the default
-		// and exports the value verbatim; "file" writes to a 0600 temp
-		// file under a per-action sealed-input directory and exports the
-		// path. Sandbox-mode actions cannot use "file" because the temp
-		// file lives outside the sandbox view.
-		for k, v := range secrets {
-			mode := a.SealedInputModes[k]
-			switch mode {
-			case "", "env":
-				execEnv[k] = v
-			case "file":
-				if a.Toolchain != nil {
-					return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q uses mode=file, which is not supported in sandboxed (toolchain) actions", a.ID, k)}
-				}
-				if sealedInDir == "" {
-					dir, err := os.MkdirTemp("", "mu-sealed-in-*")
-					if err != nil {
-						return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create sealed-in dir: %w", a.ID, err)}
-					}
-					sealedInDir = dir
-					defer os.RemoveAll(sealedInDir)
-					if err := os.Chmod(sealedInDir, 0o700); err != nil {
-						return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: chmod sealed-in dir: %w", a.ID, err)}
-					}
-				}
-				path := filepath.Join(sealedInDir, k)
-				if err := os.WriteFile(path, []byte(v), 0o600); err != nil {
-					return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: write sealed_input %q: %w", a.ID, k, err)}
-				}
-				execEnv[k] = path
-			default:
-				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q: unknown mode %q", a.ID, k, mode)}
+	sealedEnv := make(map[string]string, len(secrets))
+	for k, v := range secrets {
+		mode := a.SealedInputModes[k]
+		switch mode {
+		case "", "env":
+			sealedEnv[k] = v
+		case "file":
+			if a.Toolchain != nil {
+				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q uses mode=file, which is not supported in sandboxed (toolchain) actions", a.ID, k)}
 			}
+			if sealedInDir == "" {
+				dir, err := os.MkdirTemp("", "mu-sealed-in-*")
+				if err != nil {
+					return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create sealed-in dir: %w", a.ID, err)}
+				}
+				sealedInDir = dir
+				defer os.RemoveAll(sealedInDir)
+				if err := os.Chmod(sealedInDir, 0o700); err != nil {
+					return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: chmod sealed-in dir: %w", a.ID, err)}
+				}
+			}
+			path := filepath.Join(sealedInDir, k)
+			if err := os.WriteFile(path, []byte(v), 0o600); err != nil {
+				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: write sealed_input %q: %w", a.ID, k, err)}
+			}
+			sealedEnv[k] = path
+		default:
+			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q: unknown mode %q", a.ID, k, mode)}
 		}
 	}
+
+	// muVars holds the per-execution MU_* runtime variables.
+	muVars := map[string]string{}
 
 	// Sealed-output side channel: create a per-action temp directory and
 	// expose its path via $MU_SEALED_OUT_DIR. The action writes each
@@ -360,7 +338,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		if err := os.Chmod(sealedOutDir, 0o700); err != nil {
 			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: chmod sealed-out dir: %w", a.ID, err)}
 		}
-		execEnv["MU_SEALED_OUT_DIR"] = sealedOutDir
+		muVars["MU_SEALED_OUT_DIR"] = sealedOutDir
 	}
 
 	// For bare-mode actions with relative output paths, create a per-action
@@ -374,14 +352,13 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 		muOutDir = dir
 		defer os.RemoveAll(muOutDir)
-		if execEnv == nil {
-			execEnv = make(map[string]string, len(a.Env)+1)
-			for k, v := range a.Env {
-				execEnv[k] = v
-			}
-		}
-		execEnv["MU_OUT"] = muOutDir
+		muVars["MU_OUT"] = muOutDir
 	}
+
+	// Build the environment once, into a fresh map: a.Env is never mutated
+	// (ComputeActionKey runs again after execution, and secrets must never
+	// enter the key).
+	execEnv := actionEnv(a, os.Environ(), muVars, sealedEnv)
 
 	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv, workDir, workRoot)
 
@@ -985,14 +962,10 @@ func hasRelativeOutputs(outputs []string) bool {
 	return false
 }
 
-// buildEnv converts an env map to the os/exec []string format.
-// A nil map means "inherit parent environment" (backward compat).
-// An explicit empty map means "clean environment with no variables".
+// buildEnv converts an env map to the os/exec []string format. The result is
+// always non-nil, so os/exec never implicitly inherits the parent environment;
+// host inheritance is decided once, by actionEnv.
 func buildEnv(env map[string]string) []string {
-	if env == nil {
-		return nil // nil env = inherit parent (backward compat)
-	}
-	// Explicit env map (even if empty) = use only declared vars
 	result := make([]string, 0, len(env))
 	for k, v := range env {
 		result = append(result, k+"="+v)

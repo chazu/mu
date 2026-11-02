@@ -138,8 +138,23 @@ PORTING A BB PLUGIN
     (json/generate-string)                     handled by SDK
     (read-line) loop                           handled by SDK
 
-  Action shapes (id/command/inputs/outputs/depends_on/env/network)
-  match field-for-field via muplugin.ActionSpec.
+  Action shapes (id/command/inputs/outputs/depends_on/env/env_passthrough/
+  network) match field-for-field via muplugin.ActionSpec.
+
+HOST ENVIRONMENT
+
+  Do not copy host values (os.Getenv("HOME"), PATH, GOCACHE, ...) into
+  ActionSpec.Env: they become part of the cache key and the shared cache
+  never hits across machines. Name them in ActionSpec.EnvPassthrough
+  instead; mu copies them from the host at execution time and hashes only
+  the names:
+
+    muplugin.ActionSpec{
+        ID:             "compile",
+        Command:        []string{"go", "build", "-o", "app", "."},
+        Env:            map[string]string{"CGO_ENABLED": "0"},
+        EnvPassthrough: []string{"HOME", "PATH", "GOCACHE"},
+    }
 
 WHEN TO USE GO vs BB vs PITH
 

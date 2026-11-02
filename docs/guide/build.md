@@ -100,7 +100,10 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
 
   Impure bare commands with no env declaration retain parent inheritance for
   direct host operations. Explicit env maps, including {}, replace inheritance.
-  VM and sandbox execution never imports arbitrary parent variables.
+  VM and sandbox execution never imports arbitrary parent variables. Any
+  action may name host variables in env_passthrough; they are copied at
+  execution time and only their names enter the cache key. Sealed inputs and
+  MU_OUT / MU_SEALED_OUT_DIR are layered on top without dropping the rest.
 
   Coordinator actions carry project_root in plan-v2 and cache identity.
   Working-directory resolution permits internal relative symlinks and rejects

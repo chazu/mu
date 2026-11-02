@@ -132,6 +132,12 @@ ACTION SPEC FIELDS
   outputs             []string — declared output file paths.
   depends_on          []string — IDs of actions this depends on (within subgraph).
   env                 map[string]string — environment variables (optional).
+  env_passthrough     []string — names of host environment variables copied
+                      into the action at execution time, when set on the host
+                      (optional). Only the names enter the cache key, never
+                      the values: use this (not env) to forward HOME, PATH,
+                      GOCACHE, SSH_AUTH_SOCK, ... without baking host values
+                      into the plan. Applies to pure and impure actions.
   sealed_inputs       map[NAME]ref — secret refs, resolved at runtime (optional).
   sealed_input_modes  map[NAME]mode — "env" (default) or "file" (optional).
   sealed_outputs      map[NAME]ref — destinations for $MU_SEALED_OUT_DIR/<NAME>
@@ -146,6 +152,16 @@ ACTION SPEC FIELDS
   timeout_s           int — per-attempt wall-clock timeout in seconds (optional).
   retries             int — additional attempts on failure (network actions only).
   retry_backoff_ms    int — sleep between retries.
+
+ACTION ENVIRONMENT
+
+  mu builds each action's environment in one place, in this order (later
+  layers win):
+    1. base — pure actions: env only (empty when absent), never the host.
+       Impure bare commands with no env: the host environment; otherwise env.
+    2. env_passthrough — each named host variable that is set.
+    3. MU_OUT / MU_SEALED_OUT_DIR — per-execution runtime paths.
+    4. sealed_inputs — env-mode values, file-mode paths. Secrets always win.
 
 INTER-ACTION REFERENCES
 
