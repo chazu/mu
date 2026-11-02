@@ -21,9 +21,9 @@ import (
 // from scratch (when a Builder is configured). Names that no configured
 // `from: "scratch"` toolchain carries resolve to (nil, nil).
 func (c *Coordinator) toolchainLookup(registry *ToolchainRegistry) ToolchainLookup {
-	return func(ctx context.Context, name string) (map[string]string, error) {
-		if artifacts := registry.ArtifactsMap(name); artifacts != nil {
-			return artifacts, nil
+	return func(ctx context.Context, name string) (*ToolchainManifest, error) {
+		if m := registry.Get(name); m != nil {
+			return m, nil
 		}
 		var tc *config.Toolchain
 		if c.Config != nil {
@@ -38,7 +38,7 @@ func (c *Coordinator) toolchainLookup(registry *ToolchainRegistry) ToolchainLook
 			return nil, nil
 		}
 		if m, err := registry.Lookup(ctx, name, tc.Config.Version); err == nil && m != nil {
-			return registry.ArtifactsMap(name), nil
+			return m, nil
 		}
 		if c.Builder == nil {
 			return nil, fmt.Errorf("toolchain %q is configured but not built; run `mu scratch`", name)
@@ -48,8 +48,8 @@ func (c *Coordinator) toolchainLookup(registry *ToolchainRegistry) ToolchainLook
 		if err := c.Builder.Build(ctx, &subset); err != nil {
 			return nil, fmt.Errorf("scratch build: %w", err)
 		}
-		if artifacts := registry.ArtifactsMap(name); artifacts != nil {
-			return artifacts, nil
+		if m := registry.Get(name); m != nil {
+			return m, nil
 		}
 		return nil, fmt.Errorf("toolchain %q was built but is not registered", name)
 	}
@@ -60,6 +60,12 @@ type ToolchainManifest struct {
 	Name      string            `json:"name"`      // e.g. "go"
 	Version   string            `json:"version"`   // e.g. "1.25.7"
 	Artifacts map[string]string `json:"artifacts"` // logical name -> CAS digest string (e.g. "bin/go" -> "sha256:abc...")
+	// Modes holds each artifact's permission bits. A file without an entry
+	// is unpacked 0755.
+	Modes map[string]uint32 `json:"modes,omitempty"`
+	// Symlinks maps in-tree link paths to their relative targets (e.g.
+	// "bin/tool" -> "../libexec/tool"); the sandbox recreates them.
+	Symlinks map[string]string `json:"symlinks,omitempty"`
 }
 
 // ToolchainRegistry stores and retrieves toolchain manifests, backed by CAS for persistence.
@@ -78,9 +84,10 @@ func NewToolchainRegistry(store cas.Store) *ToolchainRegistry {
 }
 
 // actionKey computes a deterministic ActionKey from the toolchain name and version.
-// The key material is SHA256("toolchain:<name>:<version>").
+// The key material is SHA256("toolchain/v2:<name>:<version>"); v2 manifests
+// record modes and symlinks, so older receipts miss and are rebuilt.
 func actionKey(name, version string) cas.ActionKey {
-	h := sha256.Sum256([]byte("toolchain:" + name + ":" + version))
+	h := sha256.Sum256([]byte("toolchain/v2:" + name + ":" + version))
 	return cas.ActionKey{
 		Digest: cas.NewSHA256(hex.EncodeToString(h[:])),
 	}

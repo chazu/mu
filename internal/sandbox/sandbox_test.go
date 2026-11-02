@@ -252,7 +252,7 @@ func TestUnpackToolchain(t *testing.T) {
 		"bin/go": dgst,
 	}
 
-	if err := sb.UnpackToolchain(ctx, artifacts); err != nil {
+	if err := sb.UnpackToolchain(ctx, artifacts, nil, nil); err != nil {
 		t.Fatalf("UnpackToolchain: %v", err)
 	}
 
@@ -272,6 +272,47 @@ func TestUnpackToolchain(t *testing.T) {
 	}
 	if string(got) != content {
 		t.Errorf("content = %q, want %q", got, content)
+	}
+}
+
+// Recorded modes and in-tree symlinks are recreated; a link leaving the
+// tree is refused.
+func TestUnpackToolchainModesAndSymlinks(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	tool, err := store.Put(ctx, strings.NewReader("#!/bin/sh\necho x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := store.Put(ctx, strings.NewReader("data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Cleanup()
+	err = sb.UnpackToolchain(ctx,
+		map[string]cas.Digest{"libexec/x": tool, "share/x.txt": data},
+		map[string]uint32{"libexec/x": 0o755, "share/x.txt": 0o644},
+		map[string]string{"bin/x": "../libexec/x", "lib": "share"})
+	if err != nil {
+		t.Fatalf("UnpackToolchain: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(sb.RootDir(), "share", "x.txt")); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("share/x.txt mode = %v, %v; want 0644", info.Mode(), err)
+	}
+	if target, err := os.Readlink(filepath.Join(sb.RootDir(), "bin", "x")); err != nil || target != "../libexec/x" {
+		t.Fatalf("bin/x -> %q, %v", target, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(sb.RootDir(), "lib", "x.txt")); err != nil || string(got) != "data" {
+		t.Fatalf("lib/x.txt through directory link = %q, %v", got, err)
+	}
+	for _, target := range []string{"../../etc/passwd", "/etc/passwd"} {
+		if err := sb.UnpackToolchain(ctx, nil, nil, map[string]string{"bin/escape": target}); err == nil {
+			t.Fatalf("link to %q accepted", target)
+		}
 	}
 }
 

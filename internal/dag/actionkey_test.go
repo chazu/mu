@@ -63,6 +63,8 @@ func TestActionKey_ExecutionDeclarationsAffectKey(t *testing.T) {
 		"toolchain":  func(a *dag.Action) { a.Toolchain = map[string]cas.Digest{"bin/cc": cas.NewSHA256("cc")} },
 		"input_path": func(a *dag.Action) { a.InputPaths = map[string]string{"src": "extra.c"} },
 		"host_path":  func(a *dag.Action) { a.HostPaths = map[string]string{"/opt/tools": "dir"} },
+		"tool_mode":  func(a *dag.Action) { a.ToolchainModes = map[string]uint32{"bin/cc": 0o644} },
+		"tool_link":  func(a *dag.Action) { a.ToolchainLinks = map[string]string{"bin/cc": "../libexec/cc"} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, b := baseAction(), baseAction()

@@ -40,7 +40,7 @@ func TestNativeSandboxAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sb.UnpackToolchain(context.Background(), map[string]cas.Digest{"bin/native-helper": digest}); err != nil {
+	if err := sb.UnpackToolchain(context.Background(), map[string]cas.Digest{"bin/native-helper": digest}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	run := func(network bool, args ...string) {

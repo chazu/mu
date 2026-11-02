@@ -72,6 +72,13 @@ type Action struct {
 	// Toolchain sandboxes a pure action even when MU_SANDBOX is off.
 	Toolchain map[string]cas.Digest
 
+	// ToolchainModes holds permission bits for Toolchain files; a file
+	// without an entry is unpacked 0755. ToolchainLinks maps sandbox-root
+	// paths to relative, in-tree symlink targets the sandbox recreates. Both
+	// are visible to the command, so both enter the action key.
+	ToolchainModes map[string]uint32
+	ToolchainLinks map[string]string
+
 	// HostPaths maps absolute host paths granted read+exec inside the
 	// sandbox to an identity of what they pointed at when planned:
 	// "file:<digest>" for a regular file, "dir" for a directory (the

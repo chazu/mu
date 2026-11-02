@@ -105,27 +105,63 @@ var reservedRootDirs = map[string]bool{
 	"dev": true, "proc": true, ".pivot_root": true,
 }
 
-// UnpackToolchain extracts all artifacts from a toolchain manifest into the
-// sandbox's rootfs. Each artifact is fetched from CAS by digest and written
-// to its relative path under the root directory.
-func (s *Sandbox) UnpackToolchain(ctx context.Context, artifacts map[string]cas.Digest) error {
+// UnpackToolchain lays a toolchain tree out in the sandbox's rootfs. Each
+// artifact is fetched from CAS by digest and written to its relative path
+// under the root directory with its recorded permission bits (0755 when
+// modes has no entry). Then each symlink in links is recreated; its target
+// must be relative and resolve inside the tree.
+func (s *Sandbox) UnpackToolchain(ctx context.Context, artifacts map[string]cas.Digest, modes map[string]uint32, links map[string]string) error {
 	for relPath, dgst := range artifacts {
-		if err := s.unpackBlob(ctx, relPath, dgst); err != nil {
+		mode := os.FileMode(0o755)
+		if m, ok := modes[relPath]; ok {
+			mode = os.FileMode(m).Perm()
+		}
+		if err := s.unpackBlob(ctx, relPath, dgst, mode); err != nil {
 			return fmt.Errorf("sandbox: unpack %s: %w", relPath, err)
+		}
+	}
+	// Links come last, so no file is ever written through one.
+	for relPath, target := range links {
+		if err := s.unpackLink(relPath, target); err != nil {
+			return fmt.Errorf("sandbox: unpack symlink %s: %w", relPath, err)
 		}
 	}
 	return nil
 }
 
-// unpackBlob fetches a blob from CAS and writes it to relPath under rootDir.
-func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Digest) error {
-	// Guard against path traversal.
+// toolchainDest checks that relPath is a local path outside the reserved
+// sandbox directories and returns its host path under rootDir.
+func (s *Sandbox) toolchainDest(relPath string) (string, error) {
 	dest := filepath.Join(s.rootDir, relPath)
 	if !filepath.IsLocal(relPath) || !strings.HasPrefix(dest, s.rootDir+string(filepath.Separator)) {
-		return fmt.Errorf("path traversal: %s", relPath)
+		return "", fmt.Errorf("path traversal: %s", relPath)
 	}
 	if first, _, _ := strings.Cut(filepath.ToSlash(filepath.Clean(relPath)), "/"); reservedRootDirs[first] {
-		return fmt.Errorf("toolchain path %s is inside reserved sandbox directory %s/", relPath, first)
+		return "", fmt.Errorf("toolchain path %s is inside reserved sandbox directory %s/", relPath, first)
+	}
+	return dest, nil
+}
+
+// unpackLink creates the symlink relPath -> target under rootDir.
+func (s *Sandbox) unpackLink(relPath, target string) error {
+	dest, err := s.toolchainDest(relPath)
+	if err != nil {
+		return err
+	}
+	if filepath.IsAbs(target) || !filepath.IsLocal(filepath.Join(filepath.Dir(filepath.Clean(relPath)), target)) {
+		return fmt.Errorf("target %q leaves the toolchain tree", target)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(target, dest)
+}
+
+// unpackBlob fetches a blob from CAS and writes it to relPath under rootDir.
+func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Digest, mode os.FileMode) error {
+	dest, err := s.toolchainDest(relPath)
+	if err != nil {
+		return err
 	}
 	if s.store == nil {
 		return fmt.Errorf("no CAS store to fetch %s", dgst)
@@ -141,11 +177,16 @@ func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Diges
 	}
 	defer rc.Close()
 
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		return err
+	}
+	// Chmod, not the create mode, so the umask cannot change the bits.
+	if err := f.Chmod(mode); err != nil {
 		f.Close()
 		return err
 	}

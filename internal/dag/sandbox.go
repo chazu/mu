@@ -91,7 +91,7 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env, sealedF
 	sb.Stdout = e.SubprocessStdout
 	sb.HostPaths = sortedKeys(a.HostPaths)
 
-	if err := sb.UnpackToolchain(ctx, a.Toolchain); err != nil {
+	if err := sb.UnpackToolchain(ctx, a.Toolchain, a.ToolchainModes, a.ToolchainLinks); err != nil {
 		return -1, fmt.Errorf("unpack toolchain: %w", err)
 	}
 	if err := e.materializeInputs(ctx, sb, a); err != nil {

@@ -132,10 +132,12 @@ EXTRACTION SAFETY
     stay inside the tree; absolute or escaping targets are rejected, and
     so is a link that resolves outside the tree through another link.
     Catalog and plugin bundles may not contain symlinks at all.
-  - Symlinks are not stored in the toolchain manifest (it holds regular
-    files only) and are never read through; mu scratch prints a warning
-    listing them. A toolchain whose bin/<toolchain> is a symlink therefore
-    passes verify but is unusable; repackage it with a regular file.
+  - The toolchain manifest records each regular file's digest and
+    permission bits, and each in-tree symlink as a link (path -> relative
+    target); links are never read through. The sandbox recreates both, so
+    a toolchain whose bin/<toolchain> is a symlink (bin/x -> ../libexec/x)
+    works. Manifests use receipt format v2: toolchains registered by older
+    mu versions are rebuilt once from their verified archives.
 
 USING TOOLCHAINS IN PLUGINS
 
