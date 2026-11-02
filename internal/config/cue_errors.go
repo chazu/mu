@@ -65,7 +65,7 @@ func formatCueError(ctx string, root, unified cue.Value, err error) error {
 func formatCueDiagnostic(root, unified cue.Value, e cueerrors.Error) string {
 	path := stripDefPrefix(e.Path())
 	where := describeWhere(root, path)
-	hint := rewriteHint(e)
+	hint := rewriteHint(root, path, e)
 	if format, _ := e.Msg(); format == "field not allowed" {
 		if s := suggestField(unified, path); s != "" {
 			hint += fmt.Sprintf("; did you mean %q?", s)
@@ -172,7 +172,9 @@ func lookupTargetName(root cue.Value, idx string) string {
 
 // rewriteHint inspects the CUE diagnostic format string and returns a
 // plain-English hint. Unknown shapes return the rendered original message.
-func rewriteHint(e cueerrors.Error) string {
+// root and path locate the user's value, which a type mismatch needs to tell
+// the expected type from the given one.
+func rewriteHint(root cue.Value, path []string, e cueerrors.Error) string {
 	format, args := e.Msg()
 	switch {
 	case format == "field not allowed":
@@ -183,8 +185,7 @@ func rewriteHint(e cueerrors.Error) string {
 		strings.Contains(format, "(mismatched types"):
 		// "conflicting values %s and %s (mismatched types %s and %s)"
 		if len(args) >= 4 {
-			return fmt.Sprintf("expected %s, got %s (value %s)",
-				fmtArg(args[3]), fmtArg(args[2]), fmtArg(args[0]))
+			return mismatchHint(root, path, args)
 		}
 	case strings.HasPrefix(format, "conflicting values "):
 		// "conflicting values %s and %s"
@@ -235,6 +236,32 @@ func rewriteHint(e cueerrors.Error) string {
 	}
 	// Fallback: render raw format with its args.
 	return fmt.Sprintf(format, args...)
+}
+
+// mismatchHint renders a "mismatched types" diagnostic. CUE names the two
+// conflicting values and their types in no fixed order, so the side whose
+// type matches the value the user wrote at path is the one they gave; the
+// other is what the schema expects. When neither side matches, both types
+// are reported without assigning blame.
+func mismatchHint(root cue.Value, path []string, args []interface{}) string {
+	types := [2]string{fmtArg(args[2]), fmtArg(args[3])}
+	given := -1
+	if root.Exists() && len(path) > 0 {
+		if v := root.LookupPath(selectorPath(path)); v.Exists() {
+			kind := v.IncompleteKind().String()
+			for i, t := range types {
+				if t == kind {
+					given = i
+					break
+				}
+			}
+		}
+	}
+	if given < 0 {
+		return fmt.Sprintf("mismatched types %s and %s", types[0], types[1])
+	}
+	return fmt.Sprintf("expected %s, got %s (value %s)",
+		types[1-given], types[given], fmtArg(args[given]))
 }
 
 // suggestField returns the field allowed at path's parent in unified whose

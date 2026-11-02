@@ -5,6 +5,16 @@ All notable changes to mu are recorded here. The format follows
 
 ## [Unreleased]
 
+## [v0.4.1] — 2026-11-02
+
+### Fixed
+
+- **Type-mismatch config errors name the right types.** A value of the
+  wrong type in `mu.cue` could be reported backwards: `targets: {}` said
+  "expected struct, got list (value [...#Target])". mu now checks which
+  side of CUE's conflict is the value you wrote, so it reads "expected
+  list, got struct (value {})".
+
 ## [v0.4.0] — 2026-11-01
 
 ### Changed

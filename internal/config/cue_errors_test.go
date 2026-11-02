@@ -16,6 +16,7 @@ var updateGolden = flag.Bool("update", false, "update golden files under testdat
 func TestFormatCueError_Golden(t *testing.T) {
 	cases := []string{
 		"type_mismatch",
+		"type_mismatch_reversed",
 		"missing_required",
 		"regex_mismatch",
 		"closed_struct",

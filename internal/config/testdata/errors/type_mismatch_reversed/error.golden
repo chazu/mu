@@ -1,0 +1,2 @@
+testdata/errors/type_mismatch_reversed/mu.cue: unifying with #ProjectConfig:
+  targets: expected list, got struct (value {}) at mu.cue:2:10
