@@ -96,7 +96,7 @@ func (s *Sandbox) namespaceEnv(env map[string]string) []string {
 	result := s.buildEnv(env)
 	for i, entry := range result {
 		name, _, _ := strings.Cut(entry, "=")
-		if name == "PATH" || name == "TMPDIR" {
+		if name == "PATH" || name == "TMPDIR" || name == "HOME" {
 			result[i] = strings.ReplaceAll(entry, s.rootDir+"/", "/")
 		}
 	}
@@ -177,13 +177,13 @@ func RunInit() {
 
 	// Separate writable mounts before making the root mount read-only.
 	// Recursive, so read-only grants nested under them stay visible.
-	for _, dir := range []string{"/work", "/out", "/tmp"} {
+	for _, dir := range []string{"/work", "/out", "/tmp", "/home"} {
 		if err := syscall.Mount(dir, dir, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
 			fatal("bind writable %s: %v", dir, err)
 		}
 	}
 	// 8. Make most of the filesystem read-only
-	makeReadOnly([]string{"/work", "/out", "/tmp", "/dev"})
+	makeReadOnly([]string{"/work", "/out", "/tmp", "/home", "/dev"})
 	cwd := cfg.Cwd
 	if cwd == "" {
 		cwd = "/work"

@@ -71,7 +71,7 @@ func New(store cas.Store) (*Sandbox, error) {
 	}
 
 	// Create standard subdirectories.
-	for _, d := range []string{"bin", "work", "out", "tmp"} {
+	for _, d := range []string{"bin", "work", "out", "tmp", "home"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			os.RemoveAll(root)
 			return nil, fmt.Errorf("sandbox: create subdir %s: %w", d, err)
@@ -101,7 +101,7 @@ func (s *Sandbox) WorkDir() string {
 // masquerade as an action input, and the others are mount points or
 // runtime-managed (tmp/, out/, sealed/, and Linux's dev/ and proc/).
 var reservedRootDirs = map[string]bool{
-	"work": true, "out": true, "tmp": true, "sealed": true,
+	"work": true, "out": true, "tmp": true, "home": true, "sealed": true,
 	"dev": true, "proc": true, ".pivot_root": true,
 }
 
@@ -403,6 +403,11 @@ func (s *Sandbox) buildEnv(env map[string]string) []string {
 	if _, ok := merged["TMPDIR"]; !ok {
 		merged["TMPDIR"] = filepath.Join(s.rootDir, "tmp")
 	}
+
+	// HOME is always the sandbox's empty, writable home/: a host HOME would
+	// be unreadable under kernel isolation, and tools deriving caches from
+	// it (Go's GOCACHE and GOPATH, for one) need somewhere to write.
+	merged["HOME"] = filepath.Join(s.rootDir, "home")
 
 	result := make([]string, 0, len(merged))
 	for k, v := range merged {

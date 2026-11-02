@@ -21,6 +21,8 @@ WHAT A SANDBOXED ACTION SEES
     work/<work_dir>  the command's working directory
     out/             $MU_OUT, for actions with relative outputs
     tmp/             $TMPDIR
+    home/            $HOME: empty and writable (tools such as go keep their
+                     caches under it); the host HOME is never used
     sealed/          file-mode sealed inputs (0600), removed right after exit
 
   Host paths named in the action's "host_paths" are readable and executable
@@ -68,7 +70,10 @@ NETWORK FLAG
   Actions declare Network: true/false. With Seatbelt or Namespace isolation,
   Network: false is enforced by the kernel (not honor-system).
 
-  - Seatbelt: SBPL rules deny network-outbound/inbound/bind
+  - Seatbelt: SBPL rules deny network-outbound/inbound/bind. Network: true
+    allows outbound/bind plus what macOS clients need to use it: name
+    resolution (mDNSResponder) and TLS certificate verification (trustd,
+    Security, and reads of the system keychains and /private/etc)
   - Namespace: CLONE_NEWNET creates isolated network stack (loopback down)
   - Copy: Network flag is advisory only
 

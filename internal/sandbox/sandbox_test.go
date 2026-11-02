@@ -309,9 +309,11 @@ func TestExecHermeticEnv(t *testing.T) {
 
 	lines := strings.Split(string(got), "\n")
 	found := make(map[string]bool)
+	values := make(map[string]string)
 	for _, line := range lines {
-		if k, _, ok := strings.Cut(line, "="); ok {
+		if k, v, ok := strings.Cut(line, "="); ok {
 			found[k] = true
+			values[k] = v
 		}
 	}
 
@@ -327,8 +329,8 @@ func TestExecHermeticEnv(t *testing.T) {
 	if !found["TMPDIR"] {
 		t.Error("TMPDIR not in environment")
 	}
-	// HOME should NOT be inherited (not explicitly set).
-	if found["HOME"] {
-		t.Error("HOME leaked into sandbox environment")
+	// HOME is the sandbox's own home/, never the host's.
+	if want := sb.VisiblePath("home"); values["HOME"] != want {
+		t.Errorf("HOME = %q, want sandbox home %q", values["HOME"], want)
 	}
 }

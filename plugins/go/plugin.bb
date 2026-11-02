@@ -3,8 +3,8 @@
 ;; Go toolchain plugin for mu.
 ;;
 ;; Treats `go build` as a single opaque action (Go manages its own compile/link
-;; pipeline). A separate `go mod download` action handles network-dependent
-;; module fetching when go.mod is present.
+;; pipeline). It runs in mu's sandbox with the project's `go` scratch
+;; toolchain and downloads modules itself when go.mod is present.
 ;;
 ;; Config options:
 ;;   output    - output binary name (default: last segment of target name)
@@ -46,20 +46,27 @@
   [target-name]
   (last (str/split target-name #"[:/]")))
 
+;; Builds run in mu's sandbox with the project's `go` scratch toolchain: its
+;; files are unpacked into the sandbox root, so bin/go is first on PATH and Go
+;; derives GOROOT from it. HOME (and with it GOCACHE, GOPATH and GOMODCACHE)
+;; is a fresh sandbox directory, so nothing from the host's Go setup leaks in.
+(def go-toolchain "go")
+
 (def passthrough-env
-  "Host variables the go actions read at execution time. They are sent as
-   env_passthrough (names only), never as values: values such as $HOME or
-   $PATH differ per machine and would otherwise enter the action key, so a
-   shared cache could never hit across machines. With HOME passed through,
-   Go derives its usual GOCACHE/GOPATH/GOMODCACHE defaults itself."
-  ["PATH" "HOME" "GOCACHE" "GOPATH" "GOMODCACHE"
-   "GOPROXY" "GOPRIVATE" "GONOPROXY" "GONOSUMDB" "GOTOOLCHAIN"])
+  "Host module-proxy settings, sent as env_passthrough (names only, never
+   values) so private-module setups keep working without baking host values
+   into the action key."
+  ["GOPROXY" "GOPRIVATE" "GONOPROXY" "GONOSUMDB" "GOSUMDB" "GOINSECURE"])
 
 (defn build-env
   "Build the declared (keyed) environment for go commands: only values
-   chosen by the config, never copied from the planning machine."
+   chosen by the config, never copied from the planning machine.
+   GOTOOLCHAIN=local keeps go from fetching another toolchain; -modcacherw
+   leaves the module cache deletable when the sandbox is cleaned up."
   [config]
-  (cond-> {"CGO_ENABLED" (if (get config "cgo" false) "1" "0")}
+  (cond-> {"CGO_ENABLED" (if (get config "cgo" false) "1" "0")
+           "GOTOOLCHAIN" "local"
+           "GOFLAGS"     "-modcacherw"}
     (get config "goos")   (assoc "GOOS"   (get config "goos"))
     (get config "goarch") (assoc "GOARCH" (get config "goarch"))))
 
@@ -111,42 +118,25 @@
         ;; Build input map: all declared sources
         inputs   (into {} (map (fn [s] [s s]) sources))
 
-        ;; Find go.mod and go.sum keys (may have directory prefix)
-        go-mod-key (first (filter #(str/ends-with? % "go.mod") (keys inputs)))
-        go-sum-key (first (filter #(str/ends-with? % "go.sum") (keys inputs)))
-        mod-inputs (cond-> {}
-                     go-mod-key (assoc go-mod-key (get inputs go-mod-key))
-                     go-sum-key (assoc go-sum-key (get inputs go-sum-key)))
-
-        ;; Output path: if work_dir is set, output is relative to it
+        ;; Action outputs are relative to work_dir; declared_outputs (what
+        ;; downstream targets consume) are project-relative.
         output-path (if mod-dir (str mod-dir "/" output) output)
 
-        ;; Actions list — conditionally include mod-download
+        ;; One action: the sandbox starts with an empty module cache, so the
+        ;; build downloads its modules itself (network: true when go.mod is
+        ;; present); a separate download action's cache would not survive
+        ;; into the build's sandbox.
         actions
-        (cond-> []
-          ;; If go.mod is in sources, add a mod-download action first
-          has-mod
-          (conj (cond-> {"id"         "mod-download"
-                         "command"    ["go" "mod" "download"]
-                         "inputs"     mod-inputs
-                         "outputs"    []
-                         "depends_on" []
-                         "env"        (assoc env "GOFLAGS" "-modcacherw")
-                         "env_passthrough" passthrough-env
-                         "network"    true}
-                  mod-dir (assoc "work_dir" mod-dir)))
-
-          ;; Always add the build action
-          true
-          (conj (cond-> {"id"         "build"
-                         "command"    cmd
-                         "inputs"     inputs
-                         "outputs"    [output-path]
-                         "depends_on" (if has-mod ["mod-download"] [])
-                         "env"        env
-                         "env_passthrough" passthrough-env
-                         "network"    false}
-                  mod-dir (assoc "work_dir" mod-dir))))]
+        [(cond-> {"id"              "build"
+                  "command"         cmd
+                  "inputs"          inputs
+                  "outputs"         [output]
+                  "depends_on"      []
+                  "env"             env
+                  "env_passthrough" passthrough-env
+                  "toolchains"      [go-toolchain]
+                  "network"         has-mod}
+           mod-dir (assoc "work_dir" mod-dir))]]
 
     {"actions"          actions
      "declared_outputs" {"executable" output-path}}))
