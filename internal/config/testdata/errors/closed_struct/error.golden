@@ -1,6 +1,6 @@
-unifying mu.cue with #ProjectConfig:
-  field combination rejected by schema disjunction at schema.cue:101:13
-  field combination rejected by schema disjunction at schema.cue:110:13
-  field combination rejected by schema disjunction at schema.cue:116:13
-  field combination rejected by schema disjunction at schema.cue:94:12
-  plugins[0]: no disjunction variant accepts this value
+testdata/errors/closed_struct/mu.cue: unifying with #ProjectConfig:
+  field combination rejected by schema disjunction at schema.cue:135:12
+  field combination rejected by schema disjunction at schema.cue:142:13
+  field combination rejected by schema disjunction at schema.cue:151:13
+  field combination rejected by schema disjunction at schema.cue:157:13
+  plugins[0]: no disjunction variant accepts this value at mu.cue:5:2

@@ -1,2 +1,2 @@
-unifying mu.cue with #ProjectConfig:
+testdata/errors/missing_required/mu.cue: unifying with #ProjectConfig:
   target //foo/bar: field toolchain: value "" out of bound !="" at mu.cue:5:14
