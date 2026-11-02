@@ -24,7 +24,6 @@ func runBuild(args []string) int {
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	noDiscoverCache := fs.Bool("no-discover-cache", false, "bypass the plugin discover response cache (force live discover)")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
-	dryRun := fs.Bool("dry-run", false, "alias for --plan")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
 	publish := fs.Bool("publish", false, "after a successful build, publish each target's outputs as an artifact (config.publish)")
 	var attach stringSliceFlag
@@ -36,8 +35,8 @@ func runBuild(args []string) int {
 		return cli.fail(exitUsage, "--attach requires --publish")
 	}
 
-	if *dryRun {
-		*planOnly = true
+	if *cli.flagJSON && !*planOnly {
+		return cli.fail(exitUsage, "--json requires --plan; use --emit-manifest for a machine-readable build result")
 	}
 	if *emitManifest && *planOnly {
 		return cli.fail(exitUsage, "--emit-manifest and --plan are mutually exclusive")
@@ -130,10 +129,6 @@ func runBuild(args []string) int {
 		if encErr := enc.Encode(manifest); encErr != nil {
 			return cli.fail(exitFail, "encoding manifest: %v", encErr)
 		}
-	}
-
-	if cli.JSON && !*emitManifest {
-		printBuildJSON(result, elapsed)
 	}
 
 	if result.Failed > 0 {
@@ -285,19 +280,4 @@ func printPlanHuman(g *dag.Graph, targets []string) int {
 		fmt.Println()
 	}
 	return 0
-}
-
-// printBuildJSON emits a structured build summary to stdout.
-func printBuildJSON(result *coordinator.BuildResult, elapsed time.Duration) {
-	summary := map[string]any{
-		"version":   1,
-		"completed": result.Completed,
-		"cached":    result.Cached,
-		"failed":    result.Failed,
-		"cancelled": result.Cancelled,
-		"duration":  elapsed.Seconds(),
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	enc.Encode(summary)
 }

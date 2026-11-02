@@ -67,11 +67,15 @@ func TestEmitManifestAndPlanMutuallyExclusive(t *testing.T) {
 	}
 }
 
-func TestEmitManifestAndDryRunMutuallyExclusive(t *testing.T) {
-	// --dry-run is an alias for --plan, so this should also be rejected.
-	code := runBuild([]string{"--emit-manifest", "--dry-run", "//target"})
-	if code != 2 {
-		t.Errorf("runBuild(--emit-manifest --dry-run) = %d, want 2", code)
+func TestBuildJSONRequiresPlan(t *testing.T) {
+	if code := runBuild([]string{"--json", "//target"}); code != exitUsage {
+		t.Errorf("runBuild(--json) = %d, want %d", code, exitUsage)
+	}
+}
+
+func TestBuildDryRunIsRemoved(t *testing.T) {
+	if code := runBuild([]string{"--dry-run", "//target"}); code != exitUsage {
+		t.Errorf("runBuild(--dry-run) = %d, want %d", code, exitUsage)
 	}
 }
 

@@ -7,9 +7,9 @@ USAGE
 FLAGS
 
   --plan            Show planned actions without executing (dry run).
-  --dry-run         Alias for --plan.
-  --json            Output as JSON.
-  --emit-manifest   Emit a build manifest to stdout (for pudl's ACUTE loop).
+  --json            With --plan, emit the plan as JSON (requires --plan; use
+                    --emit-manifest for a machine-readable build result).
+  --emit-manifest   Emit a build manifest as JSON to stdout (for CI).
   --no-cache        Skip action-result reads; retain dependency CAS storage.
   --offline         Use local dependencies; disable Mu-owned remote access.
   --no-discover-cache
