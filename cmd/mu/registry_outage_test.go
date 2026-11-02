@@ -116,7 +116,7 @@ func TestRemoteCacheAuthFailureFailsBuildWithLoginHint(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("build succeeded despite registry auth failure:\n%s", output)
 	}
-	if !strings.Contains(string(output), "run: mu cache login "+host) {
+	if !strings.Contains(string(output), "run: mu login "+host) {
 		t.Fatalf("output lacks login hint:\n%s", output)
 	}
 	if strings.Contains(string(output), "remote cache unavailable") {

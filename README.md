@@ -139,7 +139,8 @@ Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventio
 ```
 mu build      Build targets
 mu scratch    Build toolchains from scratch
-mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
+mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push)
+mu login      Store OCI registry credentials for a host (mu logout removes them)
 mu targets    List targets; --deps/--rdeps show dependency chains (tree/DOT/JSON)
 mu plugin     List, inspect, and install plugins
 mu observe    Ask plugins to report current state

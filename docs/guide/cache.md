@@ -170,7 +170,7 @@ REMOTE CACHE
   Registry references: every registry location in mu.cue is one string,
   "host/namespace/repo" (for publish, the base "host/namespace" that each
   target's slug is appended to), with no scheme. The host is everything
-  before the first "/" and is what `mu cache login` takes. localhost and
+  before the first "/" and is what `mu login` takes. localhost and
   127.0.0.1 registries use plain HTTP; all others use TLS. The older split
   {registry, repository} forms of cache.push and publish are rejected at
   load.
@@ -195,7 +195,7 @@ REMOTE CACHE
 
   An authentication failure (HTTP 401/403, or a challenge mu has no
   credential for) is not an outage: it fails the lookup, and the build, with
-  an error ending in "run: mu cache login <host>". Log in, fix the remote, or
+  an error ending in "run: mu login <host>". Log in, fix the remote, or
   build with --offline.
 
   Earlier releases configured a list under cache.backends, with read_repair
@@ -235,20 +235,24 @@ PUSHING
 
 AUTHENTICATION
 
-  mu cache login [host]            Log in to an OCI registry and store the
-                                   credential. Host defaults to the host of
-                                   cache.push (else cache.remote, else
-                                   publish.repository).
-  mu cache login [host] --username <u> --password-stdin
-  mu cache logout [host]           Remove the stored credential.
+  mu login <host>                  Log in to an OCI registry and store the
+                                   credential in ~/.mu/credentials.json (0600).
+  mu login --username <u> --password-stdin <host>
+                                   Non-interactive login (CI). A personal
+                                   access token is passed as the password.
+  mu logout <host>                 Remove the stored credential.
 
-  Flags: --username, --password (prefer --password-stdin), --password-stdin.
-  On a TTY, username/password are prompted interactively when omitted.
+  No project is needed. The host may be omitted only inside a project whose
+  mu.cue names exactly one registry host (across cache.push, cache.remote
+  and publish.repository). On a TTY, the username and password are prompted
+  when omitted; otherwise pass --username and --password-stdin. Login also
+  serves build --publish and remote cache reads, which is why it is not a
+  `mu cache` subcommand (`mu cache login` now only points here).
 
   Every registry access (cache.remote reads, cache push, build --publish)
   uses the same client and credentials:
     Lookups try ~/.mu/credentials.json first (Docker-format JSON, plaintext,
-    written by `mu cache login`), then the Docker chain
+    written by `mu login`), then the Docker chain
     (~/.docker/config.json and its credential helpers), so existing
     `docker login` / `oras login` sessions keep working. A broken Docker
     chain (e.g. a missing docker-credential-desktop) is skipped. With no

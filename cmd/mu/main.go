@@ -49,6 +49,10 @@ func run(cmd string, args []string) int {
 		return runScratch(args)
 	case "cache":
 		return runCache(args)
+	case "login":
+		return runLogin(args)
+	case "logout":
+		return runLogout(args)
 	case "targets", "t":
 		return runTargets(args)
 	case "target", "graph":
@@ -95,6 +99,7 @@ Commands:
   build (b)  Build one or more targets
   scratch    Build toolchains from scratch
   cache      Inspect the local CAS cache
+  login      Store credentials for an OCI registry host (mu logout <host> removes them)
   targets    List targets and their dependency chains (alias t)
   plugin (p) List and inspect plugins
   observe    Check current state of targets (drift detection)

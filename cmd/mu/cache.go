@@ -451,8 +451,8 @@ Commands:
   size      Show total cache disk usage
   clean     Remove unreachable blobs (GC)
   push      Push the cached results of [targets] (default //...) to cache.push
-  login     Log in to an OCI registry [host] (default: cache.push's host; stored in ~/.mu/credentials.json)
-  logout    Remove stored credentials for an OCI registry [host] (default: cache.push's host)`)
+
+Registry credentials: mu login <host> / mu logout <host>.`)
 		return code
 	}
 
@@ -467,10 +467,8 @@ Commands:
 		return runCacheClean(args[1:])
 	case "push":
 		return runCachePush(args[1:])
-	case "login":
-		return runCacheLogin(args[1:])
-	case "logout":
-		return runCacheLogout(args[1:])
+	case "login", "logout":
+		return runCacheLoginMoved(args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "mu cache: unknown command %q\n", args[0])
 		return 2

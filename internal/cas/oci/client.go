@@ -43,7 +43,7 @@ func NewRepository(ref string) (*remote.Repository, error) {
 }
 
 // NewRegistry opens a registry host (no repository) with mu's registry HTTP
-// client and no credentials, for `mu cache login` to verify a credential.
+// client and no credentials, for `mu login` to verify a credential.
 func NewRegistry(host string) (*remote.Registry, error) {
 	reg, err := remote.NewRegistry(host)
 	if err != nil {
@@ -90,7 +90,7 @@ func IsLocalRegistry(ref string) bool {
 }
 
 // CredentialsPath returns mu's own credentials file, ~/.mu/credentials.json:
-// Docker-format JSON that `mu cache login` writes, kept under ~/.mu so it
+// Docker-format JSON that `mu login` writes, kept under ~/.mu so it
 // never conflicts with ~/.docker and never needs a credential helper binary.
 func CredentialsPath() (string, error) {
 	p, err := paths.Default()
@@ -154,7 +154,7 @@ func LoginHint(host string) string {
 	if host == "" {
 		host = "<host>"
 	}
-	return "run: mu cache login " + host
+	return "run: mu login " + host
 }
 
 // AuthError reports that host refused mu's credentials (HTTP 401 or 403, or

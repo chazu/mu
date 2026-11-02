@@ -73,5 +73,6 @@ mu targets                      # targets defined in this project (--json)
 mu targets --deps //target      # dependency chain (--rdeps, --dot, --json)
 mu plugin list                  # registered plugins; `mu plugin info <name>`
 mu cache ls                     # cached action results; also size, clean, push
+mu login <host>                 # registry credentials for remote cache/publish
 mu guide <topic>                # reference topics; `mu guide` lists them
 ```

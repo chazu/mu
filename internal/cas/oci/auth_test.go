@@ -172,7 +172,7 @@ func TestRemoteCacheAuthFailureIsAnErrorWithLoginHint(t *testing.T) {
 					t.Fatalf("attempt %d: err = %v, want cas.ErrUnauthorized", attempt, err)
 				}
 				t.Logf("error: %v", err)
-				if want := "run: mu cache login " + reg.authHost; !strings.Contains(err.Error(), want) {
+				if want := "run: mu login " + reg.authHost; !strings.Contains(err.Error(), want) {
 					t.Fatalf("attempt %d: error %q lacks hint %q", attempt, err, want)
 				}
 				if reg.authRequests.Load() == before {
