@@ -78,7 +78,7 @@ done
 		Config: &config.ProjectConfig{
 			Plugins: []config.PluginDef{{Name: "fake", Script: providerPath}},
 			Targets: []config.Target{{
-				Name: "//app", SealedRouting: "strict",
+				Name:             "//app",
 				SealedInputs:     map[string]string{"TOKEN": "fake:apps/token"},
 				SealedInputModes: map[string]string{"TOKEN": "env"},
 				Plan: []any{map[string]any{

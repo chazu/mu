@@ -5,6 +5,20 @@ All notable changes to mu are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Strict sealed routing is the only mode.** A target's `sealed_inputs` /
+  `sealed_outputs` are the complete allow-list: every action claim must match a
+  declared name, ref, and mode; every declared input must be claimed at least
+  once and every declared output exactly once. Previously, without
+  `sealed_routing: "strict"`, mu copied target inputs onto every unclaimed
+  action and never checked an action's own claims, so a plugin could claim a
+  ref the target never declared. One convenience remains: a plan with exactly
+  one action and no claims gets the target's maps. The `sealed_routing` field
+  was removed; setting it is a load error. secret-gen targets must declare
+  `sealed_outputs: {VALUE: <ref>}` with the matching mode until `config.ref`
+  goes away.
+
 ### Added
 
 - **`doppler` secret provider plugin** (babashka, read-only). Refs look like

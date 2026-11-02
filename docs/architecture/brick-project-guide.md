@@ -76,8 +76,8 @@ name: "example"
 secrets: writable_refs: ["pass:example/*"]
 ```
 
-PUDL-generated mu targets use `sealed_routing: "strict"`. Plugins must emit
-explicit per-action claims. Sealed outputs are converge-only; a mutating
+Mu sealed routing is always strict. Plugins must emit explicit per-action
+claims. Sealed outputs are converge-only; a mutating
 run-set containing one pauses for exact-plan approval:
 
 ```bash

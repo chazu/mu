@@ -151,12 +151,13 @@ WRITING A PLUGIN
   SEALED ACTION ROUTING
 
     TargetInfo carries sealed_inputs, sealed_input_modes, sealed_outputs,
-    sealed_output_modes, and sealed_routing. In convenience mode mu retains its
-    inheritance behavior. When sealed_routing is "strict", emit explicit action
-    claims using the exact target refs and effective modes. Each declared input
-    must be claimed by at least one action; each output by exactly one. Do not
-    resolve provider values in the plugin planner: mu resolves inputs only when
-    the claiming action is about to execute.
+    and sealed_output_modes. Emit explicit action claims using the exact
+    target refs and effective modes. Each declared input must be claimed by
+    at least one action; each output by exactly one. A single-action plan
+    may leave its claims empty and mu fills them from the target maps;
+    multi-action plans get nothing implicitly. Do not resolve provider
+    values in the plugin planner: mu resolves inputs only when the claiming
+    action is about to execute.
 
 PLUGIN DIRECTORY STRUCTURE
 
@@ -297,8 +298,8 @@ PLUGIN GUIDES
       - If the plugin is itself a secret provider (resolve_secret /
         store_secret), describe its ref grammar and any 'raw:' /
         scoping prefixes — see 'mu guide secret-providers'.
-      - State whether the plugin emits exact action claims suitable for
-        `sealed_routing: "strict"`. PUDL-generated targets require them.
+      - State which actions claim which sealed names (mu rejects
+        undeclared or unclaimed names at plan time).
 
     OBSERVATION OUTPUT (omit if no observe capability)
       Sketch the shape of the JSON the plugin returns. If you ship

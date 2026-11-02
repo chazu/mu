@@ -129,7 +129,6 @@ Target = {
   config:         map[any]            # plugin-specific configuration
   sealed_inputs:  map[name -> ref]    # secret references resolved at runtime
   sealed_outputs: map[name -> ref]    # secret capture destinations
-  sealed_routing: "strict" | unset    # explicit vs convenience action routing
   plan:           pith.#Program       # inline planning (optional, replaces plugin dispatch)
   transform:      pith.#Program       # inter-target data reshaping (optional)
 }
@@ -139,10 +138,10 @@ The coordinator resolves targets into a dependency-ordered list, asks each
 target's plugin to plan it, and merges the resulting action subgraphs into a
 single global DAG.
 
-Target sealed maps are capability availability, not secret values. In default
-mode the coordinator retains legacy inheritance conveniences. In strict mode,
-each action must explicitly claim exact declared refs/modes; all inputs must be
-used and every output must have one writer. Planning validates this routing
+Target sealed maps are capability availability, not secret values. Each action
+must explicitly claim exact declared refs/modes; all inputs must be used and
+every output must have one writer. The only implicit claim: a plan with exactly
+one action and no claims gets the target's maps. Planning validates this routing
 without resolving providers. Resolution happens only when an action executes.
 
 Targets can depend on other targets. When target A depends on target B, B's
