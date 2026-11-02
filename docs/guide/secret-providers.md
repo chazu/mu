@@ -193,5 +193,6 @@ SEE ALSO
   mu guide secrets              User-facing reference.
   mu guide secret-gen           secret-gen toolchain (calls store_secret).
   mu guide protocol             Wire format for resolve_secret / store_secret.
-  docs/secrets-write-policy.md  writable_refs allow-list.
-  docs/sealed-input-delivery-modes.md   env vs file delivery details.
+                                ('mu guide secrets' also covers the
+                                writable_refs allow-list and env vs
+                                file delivery.)

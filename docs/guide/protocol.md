@@ -194,6 +194,15 @@ CROSS-TARGET ARTIFACTS
   match). Two targets that read each other's outputs (directly or via
   "deps") are a cycle and fail planning.
 
+  Every output path has one producer. Two targets declaring the same
+  path (after cleaning) fail planning, naming both targets, both actions
+  and the path. Within one target, two actions may declare the same path
+  only when the plan orders them, through depends_on or an {action:id}
+  input, directly or transitively (for example a generate step followed
+  by an in-place rewrite); the last writer in that chain is the producer
+  other targets wire to. Writers of one path with no dependency between
+  them fail planning.
+
   Listing a target in "deps" also orders execution on its own: every
   action of the dependent with no predecessor in its own subgraph waits
   for every action of each dep with no successor in the dep's subgraph.

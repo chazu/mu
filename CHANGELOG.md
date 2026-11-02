@@ -50,6 +50,12 @@ All notable changes to mu are recorded here. The format follows
   input naming another target's declared output now links to that target
   even when the consumer sorts first and lists no `deps`. Targets that read
   each other's outputs are reported as a cycle at plan time.
+- **An output path has exactly one producer.** Two targets declaring the
+  same output path now fail planning, naming both targets, actions and the
+  path; previously the last one planned silently won, so consumers wired to
+  an arbitrary producer and the two actions raced on the file. Within one
+  target, actions may share a path only when depends_on or `{action:id}`
+  inputs order them; the last writer is the producer.
 
 ### Added
 

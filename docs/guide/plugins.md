@@ -401,8 +401,6 @@ OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
     mu/<plugin>      schemas authored by the plugin's authors
     anything else    third-party / user-defined
 
-  Full plugin-author guide: docs/plugin-output-schemas.md.
-
 CACHED VERSION SELECTION
 
   Project-based info/guide uses the configured plugin identity. Outside a
