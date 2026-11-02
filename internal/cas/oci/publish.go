@@ -53,6 +53,11 @@ type artifactConfig struct {
 // artifact (binary, archive, wasm). Layers are emitted in sorted output-name
 // order so the manifest is deterministic for a given set of outputs.
 func (s *OCIStore) PublishArtifact(ctx context.Context, meta ArtifactMeta, src cas.Store, tags []string) (ocispec.Descriptor, error) {
+	desc, err := s.publishArtifact(ctx, meta, src, tags)
+	return desc, s.authErr(err)
+}
+
+func (s *OCIStore) publishArtifact(ctx context.Context, meta ArtifactMeta, src cas.Store, tags []string) (ocispec.Descriptor, error) {
 	if len(meta.Outputs) == 0 {
 		return ocispec.Descriptor{}, fmt.Errorf("oci: publish %s: no outputs", meta.Target)
 	}
@@ -170,6 +175,11 @@ const mediaTypeEmptyConfig = "application/vnd.oci.empty.v1+json"
 // that advertises OCI-Subject serves it via the Referrers API; oras-go writes
 // the tag-schema fallback automatically otherwise. Returns the referrer digest.
 func (s *OCIStore) AttachReferrer(ctx context.Context, subject ocispec.Descriptor, artifactType, filename string, data []byte, created string) (godigest.Digest, error) {
+	dgst, err := s.attachReferrer(ctx, subject, artifactType, filename, data, created)
+	return dgst, s.authErr(err)
+}
+
+func (s *OCIStore) attachReferrer(ctx context.Context, subject ocispec.Descriptor, artifactType, filename string, data []byte, created string) (godigest.Digest, error) {
 	if artifactType == "" {
 		return "", fmt.Errorf("oci: attach %s: empty artifactType", filename)
 	}

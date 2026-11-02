@@ -12,7 +12,12 @@ import (
 	"time"
 )
 
-const LookupTimeout = 2 * time.Second
+// LookupTimeout bounds one remote-cache metadata lookup end to end. The first
+// lookup also pays for connection setup and the registry's token exchange,
+// which together routinely exceed a couple of seconds; each individual
+// request is separately bounded by the client's connect and response-header
+// timeouts (see NewClient).
+const LookupTimeout = 10 * time.Second
 
 var ErrOffline = errors.New("remote access disabled by --offline")
 

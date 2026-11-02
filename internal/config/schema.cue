@@ -20,10 +20,10 @@ package mu
 	...
 }
 
-// #PublishConfig describes the target of `mu build --publish`.
+// #PublishConfig describes the target of `mu build --publish`: repository is
+// the base reference "host/namespace" each target's slug is appended to.
 #PublishConfig: {
-	registry?:   string
-	repository?: string
+	repository?: string & !=""
 	...
 }
 
@@ -121,19 +121,13 @@ package mu
 	}
 }
 
-// #CachePush describes the target of `mu cache push`.
-#CachePush: {
-	registry?:   string
-	repository?: string
-	...
-}
-
 // #CacheConfig configures the build cache: local disk plus at most one
-// read-only remote ("host/namespace/repo"). push is used by `mu cache push`.
+// read-only remote ("host/namespace/repo"). push is the repository
+// ("host/namespace/repo") `mu cache push` writes to.
 #CacheConfig: {
 	path?:   string & !=""
 	remote?: string & !=""
-	push?:   #CachePush
+	push?:   string & !=""
 	...
 }
 

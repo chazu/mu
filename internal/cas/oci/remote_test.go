@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 func TestNewRemote_RejectsEmptyRef(t *testing.T) {
@@ -43,8 +44,8 @@ func TestIsLocalRegistry(t *testing.T) {
 		{"registry.example.com:5000/repo", false},
 	}
 	for _, c := range cases {
-		if got := isLocalRegistry(c.ref); got != c.want {
-			t.Errorf("isLocalRegistry(%q) = %v, want %v", c.ref, got, c.want)
+		if got := IsLocalRegistry(c.ref); got != c.want {
+			t.Errorf("IsLocalRegistry(%q) = %v, want %v", c.ref, got, c.want)
 		}
 	}
 }
@@ -58,6 +59,10 @@ func TestRemoteLookupHasOwnBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if store.lookupTimeout != registryhttp.LookupTimeout {
+		t.Fatalf("remote lookup bound = %s, want %s", store.lookupTimeout, registryhttp.LookupTimeout)
+	}
+	store.lookupTimeout = 500 * time.Millisecond // keep the test fast
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	start := time.Now()

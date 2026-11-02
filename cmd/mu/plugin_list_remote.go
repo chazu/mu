@@ -297,12 +297,7 @@ func resolveRemoteBackendRefs(c *cliContext) []string {
 	}
 	if c != nil && c.Config != nil && c.Config.Cache != nil {
 		add(c.Config.Cache.Remote)
-		if c.Config.Cache.Push != nil {
-			p := c.Config.Cache.Push
-			if p.Registry != "" && p.Repository != "" {
-				add(p.Registry + "/" + p.Repository)
-			}
-		}
+		add(c.Config.Cache.Push)
 	}
 	return out
 }

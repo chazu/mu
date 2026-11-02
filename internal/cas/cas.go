@@ -19,6 +19,11 @@ var ErrNotFound = errors.New("not found")
 // was requested or stored under.
 var ErrDigestMismatch = errors.New("digest mismatch")
 
+// ErrUnauthorized marks a remote store that refused mu's credentials. It is a
+// configuration problem the user must fix (log in), not an outage: the build
+// cache reports it as an error instead of quietly going local-only.
+var ErrUnauthorized = errors.New("unauthorized")
+
 // Digest identifies a blob by its hash algorithm and hex-encoded hash value.
 type Digest struct {
 	Algorithm string // "sha256"

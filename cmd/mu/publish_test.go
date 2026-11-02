@@ -50,7 +50,7 @@ func publishFixture(t *testing.T) (configPath string, registry *ocimem.Registry)
 		}}
 	}
 	cfg := map[string]any{
-		"publish": map[string]any{"registry": strings.TrimPrefix(server.URL, "http://"), "repository": "org"},
+		"publish": map[string]any{"repository": strings.TrimPrefix(server.URL, "http://") + "/org"},
 		"targets": []map[string]any{
 			shell("//pkg/a", `printf a > "$MU_OUT/a"`, []string{"a"}),
 			shell("//pkg/b", `printf b > "$MU_OUT/b"`, []string{"b"}),

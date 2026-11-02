@@ -91,11 +91,15 @@ CACHE CONFIG
   cache: {
       path:   "~/.mu/cache"              // optional; local store (default shown)
       remote: "ghcr.io/org/mu-cache"     // optional; read-only remote cache
-      push:   {registry: "ghcr.io", repository: "org/mu-cache"}   // mu cache push
+      push:   "ghcr.io/org/mu-cache"     // optional; mu cache push target
   }
+  publish: repository: "ghcr.io/org"     // mu build --publish base
 
   Local disk plus at most one read-only remote. The old cache.backends,
-  read_repair, and write_through fields are rejected. See `mu guide cache`.
+  read_repair, and write_through fields are rejected. Every registry
+  location is one "host/path" string with no scheme; the older split
+  {registry, repository} forms of cache.push and publish are rejected.
+  See `mu guide cache`.
 
 SEE ALSO
 

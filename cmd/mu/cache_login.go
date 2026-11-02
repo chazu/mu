@@ -9,9 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/chazu/mu/internal/registryhttp"
+	"github.com/chazu/mu/internal/cas/oci"
 	"golang.org/x/term"
-	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 )
@@ -22,8 +21,9 @@ import (
 // credential helper binary (e.g. `docker-credential-desktop`) which is not
 // installed on most hosts. Reads still fall back to the Docker chain, so
 // existing `docker login` / `oras login` sessions keep working.
-// The registry defaults to cache.push.registry from mu.cue; an explicit
-// positional argument overrides it.
+// The registry defaults to the host of mu.cue's cache.push (then
+// cache.remote, then publish.repository); an explicit positional argument
+// overrides it.
 func runCacheLogin(args []string) int {
 	fs := flag.NewFlagSet("cache login", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -45,13 +45,11 @@ func runCacheLogin(args []string) int {
 
 	registry := fs.Arg(0)
 	if registry == "" {
-		if c.Config != nil && c.Config.Cache != nil && c.Config.Cache.Push != nil {
-			registry = c.Config.Cache.Push.Registry
-		}
+		registry = configuredRegistryHost(c)
 	}
 	if registry == "" {
 		return c.fail(exitUsage,
-			`no registry given — pass one as an argument (mu cache login <host>) or set cache.push.registry in mu.cue`)
+			`no registry given — pass one as an argument (mu cache login <host>) or set cache.push in mu.cue`)
 	}
 
 	user, pass, code, ok := readCredentials(c, *username, *password, *passwordStdin)
@@ -61,17 +59,12 @@ func runCacheLogin(args []string) int {
 
 	ctx := c.networkContext(context.Background())
 
-	reg, err := remote.NewRegistry(registry)
+	reg, err := oci.NewRegistry(registry)
 	if err != nil {
-		return c.fail(exitFail, "parse registry %q: %v", registry, err)
-	}
-	if isLocalRegistryHost(registry) {
-		reg.PlainHTTP = true
+		return c.fail(exitFail, "%v", err)
 	}
 
-	reg.Client = &auth.Client{Client: registryhttp.NewClient(registryhttp.Options{}), Cache: auth.NewCache()}
-
-	store, err := openCredentialStore()
+	store, err := oci.CredentialStore()
 	if err != nil {
 		return c.fail(exitFail, "open credential store: %v", err)
 	}
@@ -104,15 +97,15 @@ func runCacheLogout(args []string) int {
 	}
 
 	registry := fs.Arg(0)
-	if registry == "" && c.Config != nil && c.Config.Cache != nil && c.Config.Cache.Push != nil {
-		registry = c.Config.Cache.Push.Registry
+	if registry == "" {
+		registry = configuredRegistryHost(c)
 	}
 	if registry == "" {
 		return c.fail(exitUsage,
-			`no registry given — pass one as an argument (mu cache logout <host>) or set cache.push.registry in mu.cue`)
+			`no registry given — pass one as an argument (mu cache logout <host>) or set cache.push in mu.cue`)
 	}
 
-	store, err := openCredentialStore()
+	store, err := oci.CredentialStore()
 	if err != nil {
 		return c.fail(exitFail, "open credential store: %v", err)
 	}
@@ -122,6 +115,27 @@ func runCacheLogout(args []string) int {
 
 	fmt.Printf("Logged out of %s\n", registry)
 	return exitOK
+}
+
+// configuredRegistryHost returns the registry host mu.cue points at: the host
+// of cache.push, else cache.remote, else publish.repository.
+func configuredRegistryHost(c *cliContext) string {
+	if c.Config == nil {
+		return ""
+	}
+	var refs []string
+	if cc := c.Config.Cache; cc != nil {
+		refs = append(refs, cc.Push, cc.Remote)
+	}
+	if p := c.Config.Publish; p != nil {
+		refs = append(refs, p.Repository)
+	}
+	for _, ref := range refs {
+		if ref != "" {
+			return oci.RegistryHost(ref)
+		}
+	}
+	return ""
 }
 
 func readCredentials(c *cliContext, flagUser, flagPass string, stdinPass bool) (string, string, int, bool) {

@@ -148,8 +148,9 @@ func TestCueDecoder_CacheConfig(t *testing.T) {
 	dir := writeMuCue(t, `cache: {
 	path:   "~/cache"
 	remote: "registry.example.com/acme/mu-cache"
-	push: {registry: "registry.example.com", repository: "acme/mu-cache"}
+	push:   "registry.example.com/acme/mu-cache"
 }
+publish: repository: "registry.example.com/acme"
 `)
 	cfg, err := cueDecoder{}.Decode(dir)
 	if err != nil {
@@ -157,8 +158,25 @@ func TestCueDecoder_CacheConfig(t *testing.T) {
 	}
 	c := cfg.Cache
 	if c == nil || c.Path != "~/cache" || c.Remote != "registry.example.com/acme/mu-cache" ||
-		c.Push == nil || c.Push.Registry != "registry.example.com" || c.Push.Repository != "acme/mu-cache" {
+		c.Push != "registry.example.com/acme/mu-cache" {
 		t.Fatalf("cache = %#v", c)
+	}
+	if cfg.Publish == nil || cfg.Publish.Repository != "registry.example.com/acme" {
+		t.Fatalf("publish = %#v", cfg.Publish)
+	}
+}
+
+// The split {registry, repository} form of cache.push and publish is gone:
+// every registry location is one "host/path" string.
+func TestCueDecoder_RejectsSplitRegistryReferences(t *testing.T) {
+	for _, src := range []string{
+		`cache: push: {registry: "r.example.com", repository: "acme/cache"}`,
+		`publish: {registry: "r.example.com", repository: "acme"}`,
+	} {
+		_, err := cueDecoder{}.Decode(writeMuCue(t, src+"\n"))
+		if err == nil || !strings.Contains(err.Error(), `"host/path"`) {
+			t.Errorf("%s: err = %v, want a single-reference hint", src, err)
+		}
 	}
 }
 

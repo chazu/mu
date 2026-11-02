@@ -33,6 +33,7 @@ import (
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 )
 
 const (
@@ -77,6 +78,8 @@ type OCIStore struct {
 	// lookupTimeout bounds small metadata lookups (Has, GetActionResult) so
 	// an unresponsive registry cannot stall a build. Zero means no bound.
 	lookupTimeout time.Duration
+	// host is the registry host, named in authentication-failure hints.
+	host string
 }
 
 // New creates an OCIStore backed by the given registry.
@@ -90,9 +93,14 @@ func New(repo Registry) *OCIStore {
 			remoteRepo.Client = &client
 		}
 		s.lookupTimeout = registryhttp.LookupTimeout
+		s.host = remoteRepo.Reference.Registry
 	}
 	return s
 }
+
+// authErr turns an authentication failure into an AuthError naming s's host
+// and the login command; other errors pass through.
+func (s *OCIStore) authErr(err error) error { return asAuthError(s.host, err) }
 
 // NewLocal opens the local disk cache at path, creating it if needed. It is a
 // convenience alias for cas.NewDiskStore kept for existing callers; the local
@@ -130,7 +138,7 @@ func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
 	}
 	ok, err := s.repo.Exists(ctx, desc)
 	if err != nil {
-		return false, fmt.Errorf("oci: check blob %s: %w", dgst, err)
+		return false, s.authErr(fmt.Errorf("oci: check blob %s: %w", dgst, err))
 	}
 	return ok, nil
 }
@@ -146,7 +154,7 @@ func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
 func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
 	rc, err := s.get(ctx, dgst)
 	if err != nil {
-		return nil, err
+		return nil, s.authErr(err)
 	}
 	return cas.VerifyReader(rc, dgst, nil), nil
 }
@@ -218,7 +226,8 @@ func remoteBlobGet(ctx context.Context, rr *remote.Repository, dgst godigest.Dig
 		return nil, fmt.Errorf("oci: fetch blob %s: %w", dgst, cas.ErrNotFound)
 	default:
 		resp.Body.Close()
-		return nil, fmt.Errorf("oci: fetch blob %s: %s", dgst, resp.Status)
+		return nil, fmt.Errorf("oci: fetch blob %s: %w", dgst,
+			&errcode.ErrorResponse{Method: req.Method, URL: req.URL, StatusCode: resp.StatusCode})
 	}
 }
 
@@ -262,7 +271,7 @@ func (s *OCIStore) Put(ctx context.Context, r io.Reader) (cas.Digest, error) {
 	if err := s.repo.Push(ctx, desc, f); err != nil {
 		// Already-exists is fine for content-addressed dedup.
 		if !isAlreadyExists(err) {
-			return cas.Digest{}, fmt.Errorf("oci: push blob: %w", err)
+			return cas.Digest{}, s.authErr(fmt.Errorf("oci: push blob: %w", err))
 		}
 	}
 
@@ -279,7 +288,7 @@ func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
 		Digest:    toOCIDigest(dgst),
 	}
 	if err := s.repo.Delete(ctx, desc); err != nil {
-		return fmt.Errorf("oci: delete blob %s: %w", dgst, err)
+		return s.authErr(fmt.Errorf("oci: delete blob %s: %w", dgst, err))
 	}
 	return nil
 }
@@ -288,7 +297,7 @@ func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
 // action key hash. Each output artifact becomes a layer descriptor, and the
 // result metadata is stored as the config blob.
 func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, result *cas.ActionResult) error {
-	return s.putActionResult(ctx, key, result, nil)
+	return s.authErr(s.putActionResult(ctx, key, result, nil))
 }
 
 // putActionResult is PutActionResult with known output blob sizes. Outputs
@@ -418,11 +427,11 @@ func (s *OCIStore) PushActionResult(ctx context.Context, local *cas.DiskStore, k
 		}
 		size, err := s.pushLocalBlob(ctx, local, out)
 		if err != nil {
-			return fmt.Errorf("oci: push output %q: %w", name, err)
+			return s.authErr(fmt.Errorf("oci: push output %q: %w", name, err))
 		}
 		sizes[toOCIDigest(out)] = size
 	}
-	return s.putActionResult(ctx, key, result, sizes)
+	return s.authErr(s.putActionResult(ctx, key, result, sizes))
 }
 
 // pushLocalBlob uploads one local blob unless the registry already has it,
@@ -461,6 +470,11 @@ func ActionTag(key cas.ActionKey) string { return actionKeyToTag(key) }
 // GetActionResult retrieves an action result by resolving the tag derived from
 // the action key. Returns (nil, nil) on a cache miss.
 func (s *OCIStore) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
+	result, err := s.getActionResult(ctx, key)
+	return result, s.authErr(err)
+}
+
+func (s *OCIStore) getActionResult(ctx context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
 	if err := key.Digest.Validate(); err != nil {
 		return nil, fmt.Errorf("oci: action key: %w", err)
 	}

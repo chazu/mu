@@ -444,8 +444,8 @@ Commands:
   size      Show total cache disk usage
   clean     Remove unreachable blobs (GC)
   push      Copy cached actions to the remote OCI registry (cache.push)
-  login     Log in to an OCI registry [host] (default: cache.push.registry; stored in ~/.mu/credentials.json)
-  logout    Remove stored credentials for an OCI registry [host] (default: cache.push.registry)`)
+  login     Log in to an OCI registry [host] (default: cache.push's host; stored in ~/.mu/credentials.json)
+  logout    Remove stored credentials for an OCI registry [host] (default: cache.push's host)`)
 		return code
 	}
 

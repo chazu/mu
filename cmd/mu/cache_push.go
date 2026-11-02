@@ -4,21 +4,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/http/httputil"
 	"os"
-	"strings"
 
 	"github.com/chazu/mu/internal/cas/oci"
-	"github.com/chazu/mu/internal/registryhttp"
 	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
 // runCachePush publishes every cached action result (and its output blobs)
-// from the local disk cache at ~/.mu/cache to the remote OCI registry
-// configured under cache.push in mu.cue. Each per-key local receipt becomes an
+// from the local disk cache at ~/.mu/cache to the remote OCI repository
+// configured as cache.push in mu.cue. Each per-key local receipt becomes an
 // OCI manifest tagged action-sha256-<key> on the remote, built at push time.
 // Blobs already present remotely are not uploaded again.
 func runCachePush(args []string) int {
@@ -72,7 +66,7 @@ func runCachePush(args []string) int {
 
 	ctx := c.networkContext(context.Background())
 
-	remoteRepo, err := newPushRepository(ref)
+	remoteRepo, err := oci.NewRepository(ref)
 	if err != nil {
 		return c.fail(exitFail, "%v", err)
 	}
@@ -102,97 +96,20 @@ func runCachePush(args []string) int {
 	return exitOK
 }
 
-// resolvePushRef returns the fully-qualified "<registry>/<repository>"
-// reference from the loaded config, or a user-actionable error explaining
-// which field is missing.
+// resolvePushRef returns cache.push ("host/namespace/repo") from the loaded
+// config, or a user-actionable error if it is missing.
 func resolvePushRef(c *cliContext) (string, int, bool) {
-	if c.Config == nil || c.Config.Cache == nil || c.Config.Cache.Push == nil {
+	if c.Config == nil || c.Config.Cache == nil || c.Config.Cache.Push == "" {
 		return "", c.fail(exitUsage,
 			`cache.push is not configured in mu.cue — add:
-  "cache": { "push": { "registry": "<host>", "repository": "<repo>" } }`), false
+  cache: { push: "<host>/<namespace>/<repo>" }`), false
 	}
-	p := c.Config.Cache.Push
-	if p.Registry == "" {
-		return "", c.fail(exitUsage,
-			`cache.push.registry is not set in mu.cue — set it to the OCI registry host (e.g. "registry.loosh.cloud")`), false
-	}
-	if p.Repository == "" {
-		return "", c.fail(exitUsage,
-			`cache.push.repository is not set in mu.cue — add it under cache.push (e.g. "repository": "mu-cache")`), false
-	}
-	return p.Registry + "/" + p.Repository, exitOK, true
+	return c.Config.Cache.Push, exitOK, true
 }
 
+// newPushRepository opens a registry repository through the shared
+// constructor. It remains only for the OCI plugin commands, which are being
+// removed (mu-x57.4); new code calls oci.NewRepository directly.
 func newPushRepository(ref string) (*remote.Repository, error) {
-	repo, err := remote.NewRepository(ref)
-	if err != nil {
-		return nil, fmt.Errorf("parse registry reference %q: %w", ref, err)
-	}
-	if isLocalRegistryHost(ref) {
-		repo.PlainHTTP = true
-	}
-
-	httpClient := registryhttp.NewClient(registryhttp.Options{})
-	client := &auth.Client{Cache: auth.NewCache(), Client: httpClient}
-	if credStore, err := openCredentialStore(); err == nil {
-		client.Credential = credentials.Credential(credStore)
-	}
-	if os.Getenv("MU_HTTP_TRACE") != "" {
-		httpClient.Transport = &tracingTransport{inner: httpClient.Transport}
-	}
-	repo.Client = client
-	return repo, nil
-}
-
-// tracingTransport dumps each request/response to stderr when MU_HTTP_TRACE
-// is set. Intended for debugging only.
-type tracingTransport struct {
-	inner http.RoundTripper
-}
-
-func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if dump, err := httputil.DumpRequestOut(redactedRequest(req), false); err == nil {
-		fmt.Fprintf(os.Stderr, "--> %s\n", dump)
-	}
-	resp, err := t.inner.RoundTrip(req)
-	if err != nil {
-		return resp, err
-	}
-	if dump, derr := httputil.DumpResponse(redactedResponse(resp), false); derr == nil {
-		fmt.Fprintf(os.Stderr, "<-- %s\n", dump)
-	}
-	return resp, err
-}
-
-// isLocalRegistryHost mirrors internal/cas/oci.isLocalRegistry for the push
-// path: localhost / 127.0.0.1 registries are served over plain HTTP.
-func isLocalRegistryHost(ref string) bool {
-	host := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		host = ref[:i]
-	}
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	return host == "localhost" || host == "127.0.0.1"
-}
-
-func redactedHeaders(header http.Header) http.Header {
-	copy := header.Clone()
-	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"} {
-		if copy.Get(name) != "" {
-			copy.Set(name, "[redacted]")
-		}
-	}
-	return copy
-}
-func redactedRequest(req *http.Request) *http.Request {
-	copy := req.Clone(req.Context())
-	copy.Header = redactedHeaders(req.Header)
-	return copy
-}
-func redactedResponse(resp *http.Response) *http.Response {
-	copy := *resp
-	copy.Header = redactedHeaders(resp.Header)
-	return &copy
+	return oci.NewRepository(ref)
 }

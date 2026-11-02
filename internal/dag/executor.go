@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -270,6 +271,11 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		key := ComputeActionKey(a)
 		if e.Store != nil {
 			cached, err := e.Store.GetActionResult(ctx, key)
+			if errors.Is(err, cas.ErrUnauthorized) {
+				// A registry refusing credentials needs the user to log in;
+				// building around it would hide the misconfiguration.
+				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: cache lookup: %w", a.ID, err)}
+			}
 			if err == nil && cached != nil {
 				// Cache hit — restore outputs from CAS.
 				if err := e.restoreOutputs(ctx, a, cached, workRoot); err == nil {

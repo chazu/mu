@@ -124,29 +124,22 @@ type PluginConfig struct {
 // one read-only remote. Path is the local store's directory (default
 // ~/.mu/cache; ~ and $VARS expand). Remote is an OCI repository reference
 // ("host/namespace/repo") consulted on local misses; whatever it serves is
-// digest-verified and copied into the local store. Push is used only by
-// `mu cache push`.
+// digest-verified and copied into the local store. Push is the repository
+// reference ("host/namespace/repo") `mu cache push` writes to.
+//
+// Every registry location in mu.cue is one such "host/path" string with no
+// scheme; the host is everything before the first "/".
 type CacheConfig struct {
-	Path   string     `json:"path,omitempty"`
-	Remote string     `json:"remote,omitempty"`
-	Push   *CachePush `json:"push,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	Push   string `json:"push,omitempty"`
 }
 
-// CachePush configures the target of `mu cache push`. Registry is the OCI
-// registry host (e.g. "registry.loosh.cloud"); Repository is the repository
-// path within that registry (e.g. "mu-cache"). Both must be set for push to
-// succeed.
-type CachePush struct {
-	Registry   string `json:"registry,omitempty"`
-	Repository string `json:"repository,omitempty"`
-}
-
-// PublishConfig configures `mu build --publish`. Registry is the OCI registry
-// host (e.g. "registry.platform.loosh.cloud"); Repository is the base repo path
-// the published artifact lands under, to which the target slug is appended
-// (e.g. "loosh-industries" → "loosh-industries/image/akashic"). The first
-// segment must be an org/user the pusher can push to.
+// PublishConfig configures `mu build --publish`. Repository is the base
+// reference ("host/namespace", e.g. "registry.platform.loosh.cloud/
+// loosh-industries") the target slug is appended to, so //image/akashic lands
+// at "<repository>/image/akashic". The namespace must be one the pusher can
+// push to.
 type PublishConfig struct {
-	Registry   string `json:"registry,omitempty"`
 	Repository string `json:"repository,omitempty"`
 }

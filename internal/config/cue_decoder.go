@@ -112,8 +112,13 @@ const cacheMigrationHint = `
   cache: {
     path?:   "~/.mu/cache"                // the old disk backend's path
     remote?: "<host>/<namespace>/<repo>"  // the old oci backend's registry; read-only
-    push?:   {registry: "<host>", repository: "<namespace>/<repo>"}  // mu cache push
+    push?:   "<host>/<namespace>/<repo>"  // mu cache push
   }`
+
+// registryRefHint explains the single registry-reference convention.
+const registryRefHint = `every registry location is one "host/path" string, e.g.
+  cache:   {push: "<host>/<namespace>/<repo>"}
+  publish: {repository: "<host>/<namespace>"}`
 
 // rejectRemovedFields fails the load when mu.cue still sets a field that mu
 // no longer supports. The schema is open, so without this check such a field
@@ -126,6 +131,12 @@ func rejectRemovedFields(val cue.Value, path string) error {
 		if val.LookupPath(cue.MakePath(cue.Str("cache"), cue.Str(field))).Exists() {
 			return fmt.Errorf("%s: cache.%s was removed; the cache is now local disk plus one optional read-only remote:%s", path, field, cacheMigrationHint)
 		}
+	}
+	if push := val.LookupPath(cue.ParsePath("cache.push")); push.Exists() && push.IncompleteKind() == cue.StructKind {
+		return fmt.Errorf("%s: cache.push is now a single repository reference, not {registry, repository}; %s", path, registryRefHint)
+	}
+	if val.LookupPath(cue.ParsePath("publish.registry")).Exists() {
+		return fmt.Errorf("%s: publish.registry was removed; put the host in publish.repository; %s", path, registryRefHint)
 	}
 	targets := val.LookupPath(cue.ParsePath("targets"))
 	if !targets.Exists() {
