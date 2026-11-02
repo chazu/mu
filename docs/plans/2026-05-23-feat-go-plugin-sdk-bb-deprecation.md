@@ -1,7 +1,7 @@
 ---
 title: "feat: Go plugin SDK and bb-runtime deprecation"
 type: feat
-status: in_progress
+status: complete
 date: 2026-05-23
 ---
 
@@ -26,6 +26,20 @@ date: 2026-05-23
 > plugin (bb and Go) was deleted as a duplicate of the built-in
 > `from: "scratch"` handling. `file`, `host`, `remote-exec` and
 > `remote-file` still run their bb entrypoints (mu-lx8.2, mu-lx8.3).
+>
+> **Status update (2026-11-02, mu-lx8.3):** `remote-exec` and
+> `remote-file` are flipped to Go and their `plugin.bb` deleted; the
+> shared SSH code lives in `plugins/internal/ssh`. remote-file's observe
+> handler was dropped. `file` (mu-lx8.2) is the last port to flip; `host`
+> is deleted with `mu observe` (mu-j11.9).
+>
+> **Status update (2026-11-02, mu-lx8.2): complete.** `file` is flipped
+> to Go and its `plugin.bb` deleted, so every planned port now runs as
+> its plugin's entrypoint (`scratch` was deleted instead, `host` goes with
+> `mu observe`). The plugins still on bb (`go`, `lint`, `docker`, `k8s`,
+> `sops`, `doppler`, `terraform`, `void`) were never in scope. Remaining
+> unchecked items below (examples cleanup, release cut, prebuilt release
+> artifacts) are not tracked by this plan any more.
 
 # Go Plugin SDK + bb Deprecation
 
@@ -188,14 +202,14 @@ bb is not deleted; it is no longer privileged.
 ### Tier 1 ports
 
 - [x] ~~Port `scratch` plugin to Go (`plugins/scratch/main.go`).~~ *Deleted along with the bb version (mu-lx8.4): the built-in `from: "scratch"` toolchain handling and `mu scratch` already cover it.*
-- [x] Port `file` plugin to Go (`plugins/file/main.go`). All 6 plan branches + capture branch verified equivalent.
+- [x] Port `file` plugin to Go (`plugins/file/main.go`). All 6 plan branches + capture branch verified equivalent. **Flipped (mu-lx8.2):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses, plus tests that execute the planned actions. Deliberate differences: paths in shell commands are escaped (bb wrapped them in bare quotes), the capture action's env is `PATH=/usr/bin:/bin` instead of `{}`, a missing `path` is an error response (bb threw and the process died), and discover lists capabilities.
 - [x] Port `host` plugin to Go (`plugins/host/main.go`); `gather.sh` embedded via `//go:embed`. *Live SSH acceptance against the Odroid HC2 is still useful to run.*
 
 ### Tier 2 ports
 
-- [ ] Factor `plugins/internal/ssh` helper. *Each port currently builds SSH commands inline; payoff is modest and the variant shapes (Go `[]string` argv vs. embedded bash heredoc) make a single helper awkward. Open for a follow-up.*
-- [x] Port `remote-exec` (`plugins/remote-exec/main.go`). SSH command construction matches bb byte-for-byte; sudo / env / work_dir / check-guard / sealed-output capture preserved.
-- [x] Port `remote-file` (`plugins/remote-file/main.go`). Plan + Observe handlers ported; record shape preserved for pudl ingestion.
+- [x] Factor `plugins/internal/ssh` helper (mu-lx8.3). Holds what the two remaining SSH plugins share: connection config (host/user/port and their config_schema entries), the fixed action env plus `HOME`/`SSH_AUTH_SOCK` passthrough, shell quoting, and the builder-wrapper fragments (sshpass-vs-BatchMode preamble, sudo-password export, `REMOTE_CMD`). `host` is not a user: it is deleted with `mu observe` (mu-j11.9).
+- [x] Port `remote-exec` (`plugins/remote-exec/main.go`). SSH command construction matches bb byte-for-byte; sudo / env / work_dir / check-guard / sealed-output capture preserved. **Flipped (mu-lx8.3):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses in `testdata/`, plus wrapper tests against a fake `ssh`/`sshpass` (`plugins/internal/plugintest`). Deliberate differences: a non-array `command` is rejected (bb split `"uptime"` into `u p t i m e`), and discover declares a config_schema.
+- [x] Port `remote-file` (`plugins/remote-file/main.go`). **Flipped (mu-lx8.3):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses. The observe handler was dropped, not ported (`mu observe` is being deleted, mu-j11.9), so the version is 0.2.0. The action now claims `sealed_input_modes` along with `sealed_inputs` (bb dropped the modes, which fails strict routing for a `file`-mode input), and discover declares a config_schema.
 - [x] Port `keypair-gen` (`plugins/keypair-gen/main.go`). ed25519 / ECDSA generation into sealed outputs; error messages match bb verbatim (incl. Clojure-style `#{}` set rendering). **Flipped (mu-lx8.1):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses in `testdata/`. Deliberate difference: the action env is `PATH=/usr/bin:/bin` instead of bb's `{}` (the SDK omits empty maps, and an absent env would let the impure action inherit mu's environment).
 - [x] Port `pass` (`plugins/pass/main.go`). Built on `SecretPlugin` helper — validates the secret-provider story. **Flipped (mu-lx8.1):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses (fake `pass` in `testdata/`), plus an end-to-end test that registers the plugin directory with `script:` and round-trips `pass:` refs through a strict sealed build. Deliberate difference: an empty `secret_value` is rejected like a missing one.
 
@@ -204,7 +218,7 @@ bb is not deleted; it is no longer privileged.
 - [x] Strip bb from the default README Quick Start; bb now appears only in the "Alternative" subsection alongside its scratch-toolchain block.
 - [x] Update README Quick Start to use a Go plugin.
 - [ ] Strip bb from `examples/*` configs (the `examples/` projects still reference bb plugins; not blocking, but should land before v0.2.0).
-- [ ] ~~Move bb plugin sources to `plugins/legacy/<name>/` for one release.~~ *Superseded: each flip deletes `plugin.bb` outright after a parity check against captured bb responses. Done for `pass` and `keypair-gen` (mu-lx8.1); `file` (mu-lx8.2) and `remote-exec`/`remote-file` (mu-lx8.3) remain. `host` has no ticket yet.*
+- [ ] ~~Move bb plugin sources to `plugins/legacy/<name>/` for one release.~~ *Superseded: each flip deletes `plugin.bb` outright after a parity check against captured bb responses. Done for `pass` and `keypair-gen` (mu-lx8.1), `remote-exec`/`remote-file` (mu-lx8.3) and `file` (mu-lx8.2). `host` is observe-only and is deleted, not flipped (mu-j11.9).*
 - [ ] Cut `v0.2.0` release: "Go SDK + bb-optional". *Gated on the legacy/ move and the entrypoint flip.*
 
 ### Distribution polish (parallel)

@@ -64,6 +64,13 @@
       ;; Context dir is always last
       true (conj context-dir))))
 
+(def passthrough-env
+  "Host variables the docker CLI needs (binary lookup, client config,
+   daemon/context selection). Sent as env_passthrough names: an \"env\": {}
+   would give these pure actions an empty environment in which `docker`
+   cannot even be found, and copying values would key the cache per machine."
+  ["PATH" "HOME" "DOCKER_HOST" "DOCKER_CONFIG" "DOCKER_CONTEXT" "DOCKER_CERT_PATH" "DOCKER_TLS_VERIFY"])
+
 (defn handle-plan [req]
   (let [target      (get req "target")
         tgt-name    (get target "name")
@@ -87,7 +94,7 @@
                   "inputs"     inputs
                   "outputs"    []
                   "depends_on" []
-                  "env"        {}
+                  "env_passthrough" passthrough-env
                   "network"    true}]
 
           ;; Optionally push after build
@@ -97,7 +104,7 @@
                  "inputs"     {}
                  "outputs"    []
                  "depends_on" ["docker-build"]
-                 "env"        {}
+                 "env_passthrough" passthrough-env
                  "network"    true}))]
 
     {"actions"          actions

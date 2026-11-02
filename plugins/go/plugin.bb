@@ -46,27 +46,22 @@
   [target-name]
   (last (str/split target-name #"[:/]")))
 
+(def passthrough-env
+  "Host variables the go actions read at execution time. They are sent as
+   env_passthrough (names only), never as values: values such as $HOME or
+   $PATH differ per machine and would otherwise enter the action key, so a
+   shared cache could never hit across machines. With HOME passed through,
+   Go derives its usual GOCACHE/GOPATH/GOMODCACHE defaults itself."
+  ["PATH" "HOME" "GOCACHE" "GOPATH" "GOMODCACHE"
+   "GOPROXY" "GOPRIVATE" "GONOPROXY" "GONOSUMDB" "GOTOOLCHAIN"])
+
 (defn build-env
-  "Build the environment map for go commands.
-   Sets GOCACHE and GOPATH explicitly since mu's executor runs with a
-   hermetic (stripped) environment — HOME is not available."
+  "Build the declared (keyed) environment for go commands: only values
+   chosen by the config, never copied from the planning machine."
   [config]
-  (let [home    (System/getProperty "user.home")
-        gocache (or (System/getenv "GOCACHE")
-                    (str home "/.cache/go-build"))
-        gopath  (or (System/getenv "GOPATH")
-                    (str home "/go"))
-        gomod   (or (System/getenv "GOMODCACHE")
-                    (str gopath "/pkg/mod"))
-        path    (System/getenv "PATH")]
-    (cond-> {"CGO_ENABLED" (if (get config "cgo" false) "1" "0")
-             "GOCACHE"     gocache
-             "GOPATH"      gopath
-             "GOMODCACHE"  gomod
-             "HOME"        home
-             "PATH"        path}
-      (get config "goos")   (assoc "GOOS"   (get config "goos"))
-      (get config "goarch") (assoc "GOARCH" (get config "goarch")))))
+  (cond-> {"CGO_ENABLED" (if (get config "cgo" false) "1" "0")}
+    (get config "goos")   (assoc "GOOS"   (get config "goos"))
+    (get config "goarch") (assoc "GOARCH" (get config "goarch"))))
 
 (defn build-command
   "Construct the go build command from config."
@@ -137,6 +132,7 @@
                          "outputs"    []
                          "depends_on" []
                          "env"        (assoc env "GOFLAGS" "-modcacherw")
+                         "env_passthrough" passthrough-env
                          "network"    true}
                   mod-dir (assoc "work_dir" mod-dir)))
 
@@ -148,6 +144,7 @@
                          "outputs"    [output-path]
                          "depends_on" (if has-mod ["mod-download"] [])
                          "env"        env
+                         "env_passthrough" passthrough-env
                          "network"    false}
                   mod-dir (assoc "work_dir" mod-dir))))]
 

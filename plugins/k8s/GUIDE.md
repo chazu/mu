@@ -77,7 +77,8 @@ ACTIONS GENERATED
                   (chmod 0600). Depends on apply. Only generated when
                   sealed_outputs is set.
 
-All actions are impure. Sealed inputs declared at target-level are
+All actions are impure and declare no env, so kubectl runs with mu's
+environment (PATH, HOME, KUBECONFIG, ...). Sealed inputs declared at target-level are
 forwarded to every action.
 
 SEALED INPUTS

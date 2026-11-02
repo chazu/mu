@@ -1,10 +1,6 @@
 // remote-file plugin: ensure a file on a remote host matches a local
-// source file's bytes, mode, and owner over SSH.
-//
-// Port of the original Babashka plugin (plugin.bb) to Go using sdk/muplugin.
-// Implements plan (converge) and observe (drift detection). Output bytes
-// match the bb version action-for-action so existing scenarios continue
-// to pass.
+// source file's bytes, mode, and owner over SSH. Implements discover and
+// plan; every build re-asserts the file.
 //
 // Config:
 //
@@ -23,15 +19,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"strconv"
 	"strings"
 
+	"github.com/chazu/mu/plugins/internal/ssh"
 	"github.com/chazu/mu/sdk/muplugin"
 )
 
@@ -61,276 +53,126 @@ fi
 sha256sum "$RF_PATH" | awk '{print $1}'
 `
 
-const observeScript = `set -eu
-if [ ! -e "$RF_PATH" ]; then
-  printf '{"exists":false}\n'
-  exit 0
-fi
-SHA=$(sha256sum "$RF_PATH" | awk '{print $1}')
-MODE=$(stat -c '%a' "$RF_PATH")
-OWNER=$(stat -c '%U' "$RF_PATH")
-GROUP=$(stat -c '%G' "$RF_PATH")
-printf '{"exists":true,"sha256":"%s","mode":"0%s","owner":"%s","group":"%s"}\n' \
-  "$SHA" "$MODE" "$OWNER" "$GROUP"
-`
-
 func main() {
-	(&muplugin.Plugin{
-		Name:        "remote-file",
-		Version:     "0.1.0",
-		Description: "Manage files on remote hosts over SSH with ownership and permissions",
-		Produces:    []string{"remote.file"},
-		Plan:        plan,
-		Observe:     observe,
-	}).Main()
+	newPlugin().Main()
 }
 
-// shellQuote single-quotes a string for safe inclusion in a bash command.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-func validateTarget(t muplugin.TargetInfo) error {
-	if len(t.Sources) != 1 {
-		return fmt.Errorf("remote-file requires exactly one source")
+// newPlugin builds the plugin value; tests drive it in-process.
+func newPlugin() *muplugin.Plugin {
+	schema := ssh.ConfigSchema()
+	schema["path"] = map[string]any{"type": "string", "required": true, "description": "Absolute path of the file on the remote host"}
+	schema["mode"] = map[string]any{"type": "string", "description": "File mode, e.g. \"0644\" (default 0644)"}
+	schema["owner"] = map[string]any{"type": "string", "description": "Owning user on the remote host"}
+	schema["group"] = map[string]any{"type": "string", "description": "Owning group on the remote host"}
+	schema["make_parents"] = map[string]any{"type": "boolean", "default": true, "description": "Create the parent directory if missing"}
+	return &muplugin.Plugin{
+		Name:         "remote-file",
+		Version:      "0.2.0",
+		Description:  "Manage files on remote hosts over SSH with ownership and permissions",
+		Produces:     []string{"remote.file"},
+		ConfigSchema: schema,
+		Plan:         plan,
 	}
-	if h, _ := t.Config["host"].(string); h == "" {
-		return fmt.Errorf("remote-file requires config.host")
+}
+
+func validateTarget(t muplugin.TargetInfo) (ssh.Conn, error) {
+	if len(t.Sources) != 1 {
+		return ssh.Conn{}, fmt.Errorf("remote-file requires exactly one source")
+	}
+	conn, err := ssh.ConnFromConfig("remote-file", t.Config)
+	if err != nil {
+		return ssh.Conn{}, err
 	}
 	if p, _ := t.Config["path"].(string); p == "" {
-		return fmt.Errorf("remote-file requires config.path")
+		return ssh.Conn{}, fmt.Errorf("remote-file requires config.path")
 	}
-	return nil
-}
-
-func portString(cfg map[string]any) string {
-	p, ok := cfg["port"]
-	if !ok {
-		return "22"
-	}
-	switch v := p.(type) {
-	case string:
-		if v != "" {
-			return v
-		}
-	case float64:
-		return strconv.Itoa(int(v))
-	case int:
-		return strconv.Itoa(v)
-	}
-	return "22"
+	return conn, nil
 }
 
 func boolDefault(cfg map[string]any, key string, def bool) bool {
-	v, ok := cfg[key]
-	if !ok {
-		return def
-	}
-	b, ok := v.(bool)
+	b, ok := cfg[key].(bool)
 	if !ok {
 		return def
 	}
 	return b
 }
 
-// buildExportLines mirrors plugin.bb's build-export-lines. RF_SUDO_PASS is
-// injected later at builder-wrapper time from $SSH_PASS when sudo:true, so
-// it is NOT included here.
+// buildExportLines renders the RF_* exports prepended to the remote
+// script. RF_SUDO_PASS is added later by the builder-side wrapper from
+// $SSH_PASS, so it never appears in the plan.
 func buildExportLines(cfg map[string]any) string {
 	path, _ := cfg["path"].(string)
 	var b strings.Builder
-	b.WriteString("export RF_PATH=" + shellQuote(path) + "\n")
+	b.WriteString("export RF_PATH=" + ssh.Quote(path) + "\n")
 	mp := "1"
 	if !boolDefault(cfg, "make_parents", true) {
 		mp = "0"
 	}
-	b.WriteString("export RF_MAKE_PARENTS=" + shellQuote(mp) + "\n")
+	b.WriteString("export RF_MAKE_PARENTS=" + ssh.Quote(mp) + "\n")
 	sudo := "0"
 	if boolDefault(cfg, "sudo", false) {
 		sudo = "1"
 	}
-	b.WriteString("export RF_SUDO=" + shellQuote(sudo) + "\n")
-	if mode, ok := cfg["mode"].(string); ok && mode != "" {
-		b.WriteString("export RF_MODE=" + shellQuote(mode) + "\n")
-	}
-	if owner, ok := cfg["owner"].(string); ok && owner != "" {
-		b.WriteString("export RF_OWNER=" + shellQuote(owner) + "\n")
-	}
-	if group, ok := cfg["group"].(string); ok && group != "" {
-		b.WriteString("export RF_GROUP=" + shellQuote(group) + "\n")
+	b.WriteString("export RF_SUDO=" + ssh.Quote(sudo) + "\n")
+	for _, k := range []string{"mode", "owner", "group"} {
+		if v, ok := cfg[k].(string); ok && v != "" {
+			b.WriteString("export RF_" + strings.ToUpper(k) + "=" + ssh.Quote(v) + "\n")
+		}
 	}
 	return b.String()
 }
 
-// buildWrapper constructs the builder-side bash wrapper that picks
-// sshpass-vs-BatchMode, builds a quoted remote script, and pipes the
-// source file's bytes to ssh's stdin. Byte-for-byte equivalent to the
-// bb plugin's build-wrapper.
-func buildWrapper(cfg map[string]any, srcPath, host, user, port string, sudo bool) string {
-	exports := buildExportLines(cfg)
-	remoteScript := exports + writeScriptBody
-	quotedScript := shellQuote(remoteScript)
+// buildWrapper constructs the builder-side bash wrapper: it picks
+// sshpass-vs-BatchMode, builds the quoted remote script, and pipes the
+// source file's bytes to ssh's stdin.
+func buildWrapper(cfg map[string]any, srcPath string, conn ssh.Conn, sudo bool) string {
+	remoteScript := buildExportLines(cfg) + writeScriptBody
 
 	var b strings.Builder
-	b.WriteString("set -eu\n")
-	b.WriteString("if [ -n \"${SSH_PASS:-}\" ]; then export SSHPASS=\"$SSH_PASS\"; fi\n")
-	b.WriteString("if [ -n \"${SSH_PASS:-}\" ]; then\n")
-	b.WriteString("  SSH_CMD=(sshpass -e ssh)\n")
-	b.WriteString("else\n")
-	b.WriteString("  SSH_CMD=(ssh -o BatchMode=yes)\n")
-	b.WriteString("fi\n")
-	b.WriteString("REMOTE_SCRIPT=" + quotedScript + "\n")
+	b.WriteString(ssh.WrapperPreamble)
+	b.WriteString("REMOTE_SCRIPT=" + ssh.Quote(remoteScript) + "\n")
 	if sudo {
-		b.WriteString("if [ -n \"${SSH_PASS:-}\" ]; then\n")
-		b.WriteString("  RF_SUDO_EXPORT=$(printf 'export RF_SUDO_PASS=%q\\n' \"$SSH_PASS\")\n")
-		b.WriteString("  REMOTE_SCRIPT=\"${RF_SUDO_EXPORT}\n${REMOTE_SCRIPT}\"\n")
-		b.WriteString("fi\n")
+		b.WriteString(ssh.SudoPassExport("RF"))
 	}
-	b.WriteString("REMOTE_CMD=\"bash -c $(printf %q \"$REMOTE_SCRIPT\")\"\n")
-	b.WriteString("cat " + shellQuote(srcPath) + " | \"${SSH_CMD[@]}\" ")
-	b.WriteString("-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 ")
-	b.WriteString("-p " + shellQuote(port) + " ")
-	b.WriteString(shellQuote(user+"@"+host) + " ")
+	b.WriteString(ssh.RemoteCmdLine)
+	b.WriteString("cat " + ssh.Quote(srcPath) + " | \"${SSH_CMD[@]}\" " + ssh.Options)
+	b.WriteString("-p " + ssh.Quote(conn.Port) + " ")
+	b.WriteString(ssh.Quote(conn.Dest()) + " ")
 	b.WriteString("\"$REMOTE_CMD\"\n")
 	return b.String()
 }
 
 func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
-	if err := validateTarget(req.Target); err != nil {
+	if req.Target.Config == nil {
+		req.Target.Config = map[string]any{}
+	}
+	conn, err := validateTarget(req.Target)
+	if err != nil {
 		return muplugin.PlanResponse{}, err
 	}
 	cfg := req.Target.Config
-	if cfg == nil {
-		cfg = map[string]any{}
-	}
 	src := req.Target.Sources[0]
-	host, _ := cfg["host"].(string)
-	user := "root"
-	if u, ok := cfg["user"].(string); ok && u != "" {
-		user = u
-	}
-	port := portString(cfg)
-	sudo := boolDefault(cfg, "sudo", false)
 	path, _ := cfg["path"].(string)
 
-	wrapper := buildWrapper(cfg, src, host, user, port, sudo)
-
-	env := map[string]string{
-		"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-	}
-	if v := os.Getenv("SSH_AUTH_SOCK"); v != "" {
-		env["SSH_AUTH_SOCK"] = v
-	}
-	if v := os.Getenv("HOME"); v != "" {
-		env["HOME"] = v
-	}
-
-	sealed := req.Target.SealedInputs
-
+	// The action claims exactly the target's sealed inputs and their
+	// delivery modes (strict sealed routing). remote-file produces no
+	// sealed outputs; a target declaring some fails routing validation.
 	action := muplugin.ActionSpec{
-		ID:           "push",
-		Command:      []string{"bash", "-c", wrapper},
-		Inputs:       map[string]string{"src": src},
-		Outputs:      []string{},
-		Env:          env,
-		SealedInputs: sealed,
-		Network:      true,
-		Impure:       true,
-		DependsOn:    []string{},
+		ID:               "push",
+		Command:          []string{"bash", "-c", buildWrapper(cfg, src, conn, boolDefault(cfg, "sudo", false))},
+		Inputs:           map[string]string{"src": src},
+		Outputs:          []string{},
+		Env:              ssh.ActionEnv(),
+		EnvPassthrough:   ssh.PassthroughNames(),
+		SealedInputs:     req.Target.SealedInputs,
+		SealedInputModes: req.Target.SealedInputModes,
+		Network:          true,
+		Impure:           true,
+		DependsOn:        []string{},
 	}
 
 	return muplugin.PlanResponse{
 		Actions: []muplugin.ActionSpec{action},
 		Outputs: map[string]string{"remote.file": path},
-	}, nil
-}
-
-// sshArgv builds the ssh argv (without a trailing remote command) from
-// config. When SSH_PASS is present, wraps with sshpass for password auth.
-// When absent, uses BatchMode=yes (agent-only). Mirrors plugin.bb's
-// ssh-argv exactly.
-func sshArgv(cfg map[string]any, hasPass bool) []string {
-	host, _ := cfg["host"].(string)
-	user := "root"
-	if u, ok := cfg["user"].(string); ok && u != "" {
-		user = u
-	}
-	port := portString(cfg)
-	opts := []string{
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "ConnectTimeout=10",
-		"-p", port,
-	}
-	if !hasPass {
-		opts = append(opts, "-o", "BatchMode=yes")
-	}
-	dest := user + "@" + host
-	var base []string
-	if hasPass {
-		base = []string{"sshpass", "-e", "ssh"}
-	} else {
-		base = []string{"ssh"}
-	}
-	out := append(base, opts...)
-	out = append(out, dest)
-	return out
-}
-
-func observe(ctx context.Context, req muplugin.ObserveRequest) (muplugin.ObserveResponse, error) {
-	if err := validateTarget(req.Target); err != nil {
-		return muplugin.ObserveResponse{Error: "observe failed: " + err.Error()}, nil
-	}
-	cfg := req.Target.Config
-	if cfg == nil {
-		cfg = map[string]any{}
-	}
-	path, _ := cfg["path"].(string)
-	host, _ := cfg["host"].(string)
-	pass := req.Secrets["SSH_PASS"]
-	hasPass := pass != ""
-
-	argv := sshArgv(cfg, hasPass)
-	argv = append(argv, "env", "RF_PATH="+path, "bash", "-s")
-
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Stdin = strings.NewReader(observeScript)
-	if hasPass {
-		cmd.Env = append(os.Environ(), "SSHPASS="+pass)
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		exitCode := -1
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		}
-		return muplugin.ObserveResponse{
-			Error: fmt.Sprintf("observe failed (exit %d): %s",
-				exitCode, strings.TrimSpace(stderr.String())),
-		}, nil
-	}
-
-	var state map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &state); err != nil {
-		return muplugin.ObserveResponse{
-			Error: "observe failed: " + err.Error(),
-		}, nil
-	}
-
-	record := map[string]any{
-		"_schema": "remote.file",
-		"host":    host,
-		"path":    path,
-	}
-	for k, v := range state {
-		record[k] = v
-	}
-
-	return muplugin.ObserveResponse{
-		Current: map[string]any{
-			"records": []any{record},
-		},
 	}, nil
 }

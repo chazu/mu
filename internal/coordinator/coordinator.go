@@ -198,6 +198,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			continue
 		}
 		info := mgr.DiscoverInfo(t.Toolchain)
+		warnMissingConfigSchema(t, info)
 		if info != nil && info.ConfigSchema != nil {
 			if err := ValidateTargetConfig(t, info.ConfigSchema); err != nil {
 				return nil, fmt.Errorf("coordinator: %w", err)

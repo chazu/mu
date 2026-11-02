@@ -1,15 +1,16 @@
 # remote-exec plugin
 
-> Implemented in Go using `sdk/muplugin`; the original Babashka version
-> at `plugin.bb` remains in-tree for one release cycle. See
-> `mu guide sdk`.
+> A Go plugin built on `sdk/muplugin` (see `mu guide sdk`). Build the
+> binary before use: `go build -trimpath -o plugins/remote-exec/plugin ./plugins/remote-exec`.
 
 Runs a command on a remote host via SSH. Optional `check` guard skips
 execution when a precondition is already met.
 
 ## Capabilities
 
-- `discover`
+- `discover` — declares a `config_schema`, so mistyped config fails at
+  plan time. In particular `command` must be an argv array:
+  `command: "uptime"` is rejected (write `command: ["uptime"]`).
 - `plan` — one action: ssh to host, optionally run `check`, run `command`,
   optionally fetch `sealed_output_files` back into `$MU_SEALED_OUT_DIR`.
 
@@ -29,6 +30,12 @@ No `observe`. A command isn't a resource with state.
 | `sudo` | bool | `false` | pipe SSH_PASS to `sudo -S` |
 | `impure` | bool | `true` | pass-through; set `false` to enable cache-on-deps |
 | `sealed_output_files` | map[string]string | (unset) | sealed_output NAME → absolute remote path; see Sealed outputs |
+
+## Environment
+
+The action's env is fixed (`PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`);
+`HOME` and `SSH_AUTH_SOCK` are passed through by name (`env_passthrough`) so
+ssh finds its config and agent without host values entering the cache key.
 
 ## Sealed inputs
 

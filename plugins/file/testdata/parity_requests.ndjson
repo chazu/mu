@@ -1,0 +1,10 @@
+{"method":"discover"}
+{"method":"plan","target":{"name":"//f/absent","toolchain":"file","config":{"path":"/tmp/x/gone","absent":true}}}
+{"method":"plan","target":{"name":"//f/link","toolchain":"file","config":{"path":"/tmp/x/link","symlink":"/tmp/x/target"}}}
+{"method":"plan","target":{"name":"//f/content","toolchain":"file","config":{"path":"/tmp/x/motd","content":"hello\nworld","mode":"0600","owner":"root","group":"wheel"}}}
+{"method":"plan","target":{"name":"//f/source","toolchain":"file","sources":["conf/a.conf"],"config":{"path":"/tmp/x/a.conf","source":"conf/a.conf","owner":"nobody"}}}
+{"method":"plan","target":{"name":"//f/sources","toolchain":"file","sources":["conf/b.conf","conf/c.conf"],"config":{"path":"/tmp/x/b.conf"}}}
+{"method":"plan","target":{"name":"//f/capture","toolchain":"file","config":{"sealed_output_files":{"CERT":"/tmp/x/cert.pem","KEY":"/tmp/x/it's.key"}},"sealed_outputs":{"CERT":"pass:bootstrap/cert","KEY":"pass:bootstrap/key"},"sealed_output_modes":{"KEY":"create_if_absent"}}}
+{"method":"plan","target":{"name":"//f/mismatch","toolchain":"file","config":{"sealed_output_files":{"B":"/b"}},"sealed_outputs":{"A":"pass:bootstrap/a"}}}
+{"method":"plan","target":{"name":"//f/exclusive","toolchain":"file","config":{"path":"/tmp/x/p","sealed_output_files":{"A":"/a"}},"sealed_outputs":{"A":"pass:bootstrap/a"}}}
+{"method":"plan","target":{"name":"//f/nothing","toolchain":"file","config":{"path":"/tmp/x/p"}}}
