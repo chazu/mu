@@ -1,7 +1,8 @@
 mu guide cache — content-addressed storage and action caching
 
 mu stores all build artifacts in a local content-addressed store (CAS).
-The default location is ~/.mu/cache/ (cache.path). One OCI registry may be
+The default location is ~/.mu/cache/ ($MU_HOME/cache when MU_HOME is set;
+cache.path overrides both). One OCI registry may be
 configured as a read-only remote cache (cache.remote); `mu cache push`
 publishes local results to a registry (cache.push).
 
@@ -72,6 +73,24 @@ HOW CACHING WORKS
   Builds write only to the local store. A local miss falls back to the
   remote cache, if one is configured (see REMOTE CACHE).
 
+STATE DIRECTORY (MU_HOME)
+
+  Everything mu keeps per user lives in one state directory, ~/.mu by
+  default. Set MU_HOME to relocate all of it: the cache (unless cache.path
+  is set), extracted plugins (plugins/), toolchain binaries (toolchains/),
+  registry credentials (credentials.json), staging leftovers, the sweep
+  stamp, and the cache lock. A leading ~ expands; a relative MU_HOME is
+  resolved against the working directory. With MU_HOME set, mu writes
+  nothing under ~/.mu, so CI jobs and agents can run real builds without
+  touching the user's state or changing HOME.
+
+  The cache directory is chosen in this order:
+    1. cache.path in mu.cue
+    2. $MU_HOME/cache
+    3. ~/.mu/cache
+
+    MU_HOME=$(mktemp -d) mu build //...
+
 LOCAL LAYOUT
 
   ~/.mu/cache/
@@ -130,7 +149,7 @@ INSPECTING THE CACHE
 
   Every command uses one cache directory: the cache.path of the project
   (named by --config, else found by walking up from the working directory),
-  else ~/.mu/cache. Builds, scratch toolchain downloads, and the cache
+  else $MU_HOME/cache, else ~/.mu/cache. Builds, scratch toolchain downloads, and the cache
   subcommands all read and write that same directory. Outside a project the
   default is used.
 
