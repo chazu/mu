@@ -56,13 +56,13 @@ type SealedInputResolver func(ctx context.Context, action *Action) (map[string]s
 
 // Executor runs a DAG of actions with parallel scheduling and CAS caching.
 type Executor struct {
-	NoCache         bool // skip action-result reads; retain CAS for dependencies and outputs
-	Store           cas.Store
-	Workers         int                          // 0 means runtime.NumCPU()
-	ResolvedSecrets map[string]map[string]string // actionID → envName → secret value (never persisted)
-	// SealedInputResolver is the production lazy-resolution path. The
-	// ResolvedSecrets map remains as a test/library compatibility seam; values
-	// returned by this callback take precedence for the scheduled action.
+	NoCache bool // skip action-result reads; retain CAS for dependencies and outputs
+	Store   cas.Store
+	Workers int // 0 means runtime.NumCPU()
+	// SealedInputResolver supplies an action's sealed-input values (env name
+	// → value, never persisted) just before it runs. It is called only for
+	// actions that declare sealed inputs; nil leaves those actions without
+	// values.
 	SealedInputResolver SealedInputResolver
 	// SubprocessStdout overrides where action stdout is written. Nil
 	// means os.Stdout. Set to os.Stderr when the caller is using
@@ -252,7 +252,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command", a.ID)}
 	}
 
-	secrets := e.ResolvedSecrets[a.ID]
+	var secrets map[string]string
 	if e.SealedInputResolver != nil && len(a.SealedInputs) > 0 {
 		resolved, err := e.SealedInputResolver(ctx, a)
 		if err != nil {
@@ -435,8 +435,8 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 }
 
 // runWithTimeoutAndRetry executes the action with optional per-attempt
-// timeout and optional retry. Retries apply only when Network is true;
-// Retries on a non-network action are silently ignored. Parent-context
+// timeout and optional retry. Retries apply only when Network is true
+// (planning rejects them on any other action). Parent-context
 // cancellation (SIGINT) returns immediately.
 //
 // Returns (exitCode, attempts, err). attempts is 1 on success without

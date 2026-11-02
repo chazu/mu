@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/plugin"
 	"github.com/chazu/mu/sdk/muplugin"
 )
 
@@ -62,4 +63,15 @@ func TestReadOnlyProviderHelperProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	os.Exit(0)
+}
+
+// A library caller may leave ToolchainRegistry nil. Starting a script-runtime
+// sealed provider must then report the missing bb toolchain, not panic.
+func TestSealedProviderManagerNilRegistry(t *testing.T) {
+	c := &Coordinator{ProjectRoot: t.TempDir(), Config: &config.ProjectConfig{}}
+	resolved := []ResolvedPlugin{{Def: plugin.PluginDef{Name: "pass", Script: "plugin.bb", Toolchain: "bb"}}}
+	_, err := c.startSealedProviderManager(context.Background(), resolved)
+	if err == nil || !strings.Contains(err.Error(), `no "bb" toolchain`) {
+		t.Fatalf("startSealedProviderManager error = %v, want missing bb toolchain", err)
+	}
 }

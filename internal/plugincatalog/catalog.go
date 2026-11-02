@@ -213,16 +213,6 @@ func DownloadAsset(ctx context.Context, p Plugin, destPath string) error {
 	return nil
 }
 
-// AssetDigest computes a SHA-256 digest for a local asset. It is useful for
-// tests and for callers that want an independent post-download assertion.
-func AssetDigest(r io.Reader) (string, error) {
-	h := sha256.New()
-	if _, err := io.Copy(h, r); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 func containsFold(values []string, query string) bool {
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), query) {

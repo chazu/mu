@@ -193,6 +193,9 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 		if spec.TimeoutS < 0 || spec.Retries < 0 || spec.RetryBackoffMs < 0 {
 			return nil, fmt.Errorf("action %q: timeout_s, retries, and retry_backoff_ms must be non-negative", spec.ID)
 		}
+		if spec.Retries > 0 && !spec.Network {
+			return nil, fmt.Errorf("action %q: retries apply only to network actions; set network: true or drop retries", spec.ID)
+		}
 
 		// Merge implicit cross-target DependsOn edges with any already
 		// declared by the plugin. Order is irrelevant for DAG correctness,

@@ -125,10 +125,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			planningPlugins = append(planningPlugins, definition)
 		}
 	}
-	registry := c.ToolchainRegistry
-	if registry == nil {
-		registry = NewToolchainRegistry(c.Store)
-	}
+	registry := c.toolchainRegistry()
 
 	// 2. Resolve plugins → CAS (hash local scripts or fetch remote ones).
 	pluginsDir, err := c.dir(c.PluginsDir, func(p paths.Paths) string { return p.PluginsDir })
@@ -284,9 +281,6 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			plan, err := mgr.Plan(ctx, t.Toolchain, ti, deps, registry.ArtifactsMap(t.Toolchain))
 			if err != nil {
 				return nil, fmt.Errorf("coordinator: planning target %q: %w", t.Name, err)
-			}
-			if plan.Error != "" {
-				return nil, fmt.Errorf("coordinator: plugin error for target %q: %s", t.Name, plan.Error)
 			}
 			planActions = plan.Actions
 			declaredOutputs = plan.Outputs
@@ -603,7 +597,7 @@ func (c *Coordinator) startSealedProviderManager(ctx context.Context, resolved [
 		}
 	}
 	if needsRuntime {
-		bbPath, err := c.resolveScriptRuntime(ctx, c.ToolchainRegistry)
+		bbPath, err := c.resolveScriptRuntime(ctx, c.toolchainRegistry())
 		if err != nil {
 			return nil, err
 		}
@@ -681,14 +675,14 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	return br, nil
 }
 
-// Build orchestrates the full build pipeline: Plan() + Execute() + bundle plugins.
+// Build orchestrates the full build pipeline: Plan() then Execute().
 func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
 	return c.BuildValidated(ctx, targetNames, nil)
 }
 
 // BuildValidated plans once, invokes validate before any execution boundary,
-// then executes and finalizes that exact PlanResult. A validation error stops
-// before sealed providers, actions, or plugin bundling are invoked.
+// then executes that exact PlanResult. A validation error stops before sealed
+// providers or actions are invoked.
 func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, validate func(*PlanResult) error) (*BuildResult, error) {
 	plan, err := c.Plan(ctx, targetNames)
 	if err != nil {
@@ -707,10 +701,6 @@ func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, 
 	return result, nil
 }
 
-// cloneStringMap returns a copy of m or nil when m is empty. Used to
-// snapshot per-target state (declared outputs, producer map) so that
-// downstream mutations by plugins or later planning iterations don't
-// reach back into earlier targets.
 // projectPathKey normalises a path to the project-relative form used to
 // match one action's outputs against another action's inputs. Outputs are
 // relative to the producing action's work_dir; inputs are relative to the
@@ -1000,6 +990,10 @@ func addDependsOn(actions []*dag.Action, ids, edges []string) {
 	}
 }
 
+// cloneStringMap returns a copy of m or nil when m is empty. Used to
+// snapshot per-target state (declared outputs, producer map) so that
+// downstream mutations by plugins or later planning iterations don't
+// reach back into earlier targets.
 func cloneStringMap(m map[string]string) map[string]string {
 	if len(m) == 0 {
 		return nil
@@ -1191,48 +1185,6 @@ func (c *Coordinator) resolveTargets(names []string) ([]config.Target, error) {
 	return result, nil
 }
 
-// needsScriptRuntime returns true if any plugin will need the bb runtime
-// toolchain. This is determined by checking plugin manifests (for directory
-// plugins) or inferring from file extensions (.bb → needs bb toolchain).
-func needsScriptRuntime(plugins []config.PluginDef, projectRoot string) bool {
-	for _, p := range plugins {
-		if len(p.Command) > 0 {
-			continue
-		}
-		if p.Script != "" {
-			scriptPath := p.Script
-			if !filepath.IsAbs(scriptPath) {
-				scriptPath = filepath.Join(projectRoot, scriptPath)
-			}
-			// Directory plugin: check manifest toolchain.
-			if info, err := os.Stat(scriptPath); err == nil && info.IsDir() {
-				if manifest, err := config.LoadPluginManifest(scriptPath); err == nil {
-					tc := manifest.Plugin.Toolchain
-					if tc == "" {
-						tc = inferPluginToolchain(manifest.Plugin.Entrypoint)
-					}
-					if tc == "bb" {
-						return true
-					}
-				}
-				continue
-			}
-			// Single-file plugin: infer from extension.
-			if inferPluginToolchain(p.Script) == "bb" {
-				return true
-			}
-		}
-		if p.URL != "" && inferPluginToolchain(p.URL) == "bb" {
-			return true
-		}
-		// Digest-only with no extension hint: assume bb for backward compat.
-		if p.Digest != "" {
-			return true
-		}
-	}
-	return false
-}
-
 // resolveScriptRuntime extracts the bb binary from the toolchain registry
 // and returns its filesystem path. The bb toolchain must be built from scratch first.
 func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *ToolchainRegistry) (string, error) {
@@ -1271,6 +1223,16 @@ func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *Toolch
 	}
 
 	return registry.ExtractBinary(ctx, "bb", artifact, baseDir)
+}
+
+// toolchainRegistry returns c.ToolchainRegistry, creating it on first use so
+// that Plan and a later Execute (which starts sealed providers that may need
+// the bb runtime) share one registry even when the caller left it nil.
+func (c *Coordinator) toolchainRegistry() *ToolchainRegistry {
+	if c.ToolchainRegistry == nil {
+		c.ToolchainRegistry = NewToolchainRegistry(c.Store)
+	}
+	return c.ToolchainRegistry
 }
 
 // dir returns configured when set, else the default location pick selects.

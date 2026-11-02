@@ -397,6 +397,36 @@ func TestProcessRejectsInvalidDiscoverCapabilities(t *testing.T) {
 	}
 }
 
+// startInlinePlugin starts a bash one-liner as a plugin.
+func startInlinePlugin(t *testing.T, script string) *plugin.Process {
+	t.Helper()
+	p, err := plugin.StartProcess("inline", []string{"bash", "-c", script}, ".", "")
+	if err != nil {
+		t.Fatalf("StartProcess: %v", err)
+	}
+	t.Cleanup(func() { p.Close() })
+	return p
+}
+
+// A plugin answering discover with an error envelope reports that error,
+// not a protocol version mismatch.
+func TestProcessDiscoverErrorEnvelope(t *testing.T) {
+	p := startInlinePlugin(t, `read -r line; echo '{"error":"missing GOROOT"}'`)
+	_, err := p.Discover(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "discover error: missing GOROOT") {
+		t.Fatalf("Discover error = %v, want the plugin's error", err)
+	}
+}
+
+// An oversized response line names the plugin and the limit.
+func TestProcessResponseLineTooLong(t *testing.T) {
+	p := startInlinePlugin(t, `read -r line; head -c 17000000 /dev/zero | tr '\0' x; echo`)
+	_, err := p.Discover(context.Background())
+	if err == nil || !strings.Contains(err.Error(), `plugin "inline": response line exceeds the 16 MiB limit`) {
+		t.Fatalf("Discover error = %v, want the line-limit error", err)
+	}
+}
+
 func TestProcessPlanError(t *testing.T) {
 	p := startTestPlugin(t, "mock_plan_error.sh")
 

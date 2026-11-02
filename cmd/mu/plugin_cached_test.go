@@ -54,6 +54,20 @@ func TestCachedPluginSelectionRequiresExplicitIdentity(t *testing.T) {
 	}
 }
 
+// Resolving an installed plugin holds the shared cache lock, so `mu cache
+// clean` cannot prune the plugins directory under plugin info or guide.
+func TestInstalledPluginLookupHoldsCacheLock(t *testing.T) {
+	root := t.TempDir()
+	cli := &cliContext{Name: "plugin info", stderr: os.Stderr}
+	cli.Paths.CacheDir = filepath.Join(root, "cache")
+	cli.Paths.PluginsDir = filepath.Join(root, "plugins")
+	defer cli.Close()
+	_, _, _, _ = resolveInfoTarget(context.Background(), cli, "absent", "")
+	if cli.cacheLock == nil {
+		t.Fatal("installed-plugin lookup did not take the cache lock")
+	}
+}
+
 func TestFullCachePublicationSupersedesLegacyPrefix(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

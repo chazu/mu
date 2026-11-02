@@ -30,7 +30,7 @@ type Action struct {
 	TimeoutS int
 
 	// Retries is the number of *additional* attempts on failure. Applies
-	// only when Network is true; silently ignored on pure actions.
+	// only when Network is true; planning rejects retries on any other action.
 	Retries int
 
 	// RetryBackoffMs is the sleep between attempts in milliseconds.

@@ -138,8 +138,8 @@ type ActionSpec struct {
 
 	// Retries is the number of additional attempts on failure. 0 = no
 	// retry (legacy). Retries ONLY apply when Network is true — pure
-	// actions are deterministic and retrying is meaningless. Non-network
-	// actions silently ignore Retries (with a one-time warning per build).
+	// actions are deterministic and retrying is meaningless. mu rejects a
+	// plan whose non-network action sets Retries.
 	Retries int `json:"retries,omitempty"`
 
 	// RetryBackoffMs is the sleep between attempts in milliseconds.

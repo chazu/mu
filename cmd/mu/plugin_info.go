@@ -153,6 +153,11 @@ func resolveInfoTarget(ctx context.Context, cli *cliContext, name string, reques
 		}
 	}
 
+	// Installed plugins live in the plugins directory, which `mu cache clean`
+	// prunes under the exclusive cache lock; hold it shared until cli.Close.
+	if err := cli.holdCache(); err != nil {
+		return "", plugin.PluginDef{}, cas.Digest{}, err
+	}
 	def, dgst, err := resolveCachedPlugin(cli.Paths.PluginsDir, name, requested)
 	if err != nil {
 		return "", plugin.PluginDef{}, cas.Digest{}, err
