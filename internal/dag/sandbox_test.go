@@ -230,7 +230,7 @@ func TestSandboxedSealedInputFileMode(t *testing.T) {
 	}
 	e := &dag.Executor{
 		Store: newStore(t), Workers: 1,
-		ResolvedSecrets: map[string]map[string]string{"sealed": {"TOKEN": "s3cret"}},
+		SealedInputResolver: staticSecrets(map[string]map[string]string{"sealed": {"TOKEN": "s3cret"}}),
 	}
 	requireSucceeded(t, runGraph(t, e, a))
 	if got, _ := os.ReadFile(filepath.Join(project, "value.txt")); string(got) != "s3cret" {

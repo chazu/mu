@@ -1,6 +1,7 @@
 package dag
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,9 @@ func TestImpureSealedInputKeepsInheritedEnv(t *testing.T) {
 	if err := graph.AddAction(a); err != nil {
 		t.Fatal(err)
 	}
-	exec := &Executor{Workers: 1, ResolvedSecrets: map[string]map[string]string{a.ID: {"TOK": "s3cret"}}}
+	exec := &Executor{Workers: 1, SealedInputResolver: func(context.Context, *Action) (map[string]string, error) {
+		return map[string]string{"TOK": "s3cret"}, nil
+	}}
 	result, err := exec.Execute(t.Context(), graph)
 	if err != nil {
 		t.Fatal(err)

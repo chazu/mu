@@ -182,9 +182,9 @@ func TestSealedInputsInjectedIntoEnv(t *testing.T) {
 	exec := &dag.Executor{
 		Store:   newStore(t),
 		Workers: 1,
-		ResolvedSecrets: map[string]map[string]string{
+		SealedInputResolver: staticSecrets(map[string]map[string]string{
 			"deploy": {"SECRET_TOKEN": "s3cr3t-value"},
-		},
+		}),
 	}
 
 	res, err := exec.Execute(context.Background(), g)
@@ -224,9 +224,9 @@ func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	exec1 := &dag.Executor{
 		Store:   store,
 		Workers: 1,
-		ResolvedSecrets: map[string]map[string]string{
+		SealedInputResolver: staticSecrets(map[string]map[string]string{
 			"A": {"TOKEN": "value-one"},
-		},
+		}),
 	}
 	res1, err := exec1.Execute(context.Background(), g1)
 	if err != nil {
@@ -255,9 +255,9 @@ func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	exec2 := &dag.Executor{
 		Store:   store,
 		Workers: 1,
-		ResolvedSecrets: map[string]map[string]string{
+		SealedInputResolver: staticSecrets(map[string]map[string]string{
 			"A": {"TOKEN": "value-two-different"},
-		},
+		}),
 	}
 	res2, err := exec2.Execute(context.Background(), g2)
 	if err != nil {
@@ -303,9 +303,9 @@ func TestSealedInputsFileMode(t *testing.T) {
 	exec := &dag.Executor{
 		Store:   newStore(t),
 		Workers: 1,
-		ResolvedSecrets: map[string]map[string]string{
+		SealedInputResolver: staticSecrets(map[string]map[string]string{
 			"deploy": {"SECRET_KEY": "-----BEGIN OPENSSH PRIVATE KEY-----\nstuff\n-----END OPENSSH PRIVATE KEY-----"},
-		},
+		}),
 	}
 
 	res, err := exec.Execute(context.Background(), g)
@@ -358,9 +358,9 @@ func TestSealedInputsFileModeDirCleanup(t *testing.T) {
 	exec := &dag.Executor{
 		Store:   newStore(t),
 		Workers: 1,
-		ResolvedSecrets: map[string]map[string]string{
+		SealedInputResolver: staticSecrets(map[string]map[string]string{
 			"deploy": {"KEY": "secret-bytes"},
-		},
+		}),
 	}
 
 	if _, err := exec.Execute(context.Background(), g); err != nil {
@@ -394,9 +394,9 @@ func TestSealedInputsUnknownModeFails(t *testing.T) {
 	})
 
 	exec := &dag.Executor{
-		Store:           newStore(t),
-		Workers:         1,
-		ResolvedSecrets: map[string]map[string]string{"x": {"K": "v"}},
+		Store:               newStore(t),
+		Workers:             1,
+		SealedInputResolver: staticSecrets(map[string]map[string]string{"x": {"K": "v"}}),
 	}
 
 	res, err := exec.Execute(context.Background(), g)
@@ -430,9 +430,9 @@ func TestSealedInputsEnvModeStillWorks(t *testing.T) {
 	})
 
 	exec := &dag.Executor{
-		Store:           newStore(t),
-		Workers:         1,
-		ResolvedSecrets: map[string]map[string]string{"deploy": {"T": "abc123"}},
+		Store:               newStore(t),
+		Workers:             1,
+		SealedInputResolver: staticSecrets(map[string]map[string]string{"deploy": {"T": "abc123"}}),
 	}
 
 	if _, err := exec.Execute(context.Background(), g); err != nil {
@@ -635,7 +635,7 @@ func TestSealedOutputsRefAffectsActionKey(t *testing.T) {
 	}
 }
 
-func TestSealedInputsNoResolvedSecretsIsNoOp(t *testing.T) {
+func TestSealedInputsNoResolverIsNoOp(t *testing.T) {
 	workDir := t.TempDir()
 
 	g := dag.NewGraph()
@@ -646,7 +646,7 @@ func TestSealedInputsNoResolvedSecretsIsNoOp(t *testing.T) {
 		WorkDir: workDir,
 	})
 
-	// No ResolvedSecrets set — should work fine for actions without sealed inputs.
+	// No SealedInputResolver set — should work fine for actions without sealed inputs.
 	exec := &dag.Executor{Store: newStore(t), Workers: 1}
 	res, err := exec.Execute(context.Background(), g)
 	if err != nil {
@@ -756,5 +756,12 @@ func TestCachedRelativeExecutableKeepsPermissions(t *testing.T) {
 	info, err = os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0o751 {
 		t.Fatalf("restored permissions: %v, %v", info, err)
+	}
+}
+
+// staticSecrets returns a resolver serving fixed sealed-input values per action ID.
+func staticSecrets(values map[string]map[string]string) dag.SealedInputResolver {
+	return func(_ context.Context, a *dag.Action) (map[string]string, error) {
+		return values[a.ID], nil
 	}
 }
