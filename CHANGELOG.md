@@ -5,6 +5,8 @@ All notable changes to mu are recorded here. The format follows
 
 ## [Unreleased]
 
+## [v0.4.0] — 2026-11-01
+
 ### Changed
 
 - **`config_schema` is a real JSON Schema, and unknown config fields fail.**

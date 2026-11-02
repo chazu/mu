@@ -12,7 +12,7 @@ import (
 )
 
 // muVersion is the CLI version string, kept in sync with the release tag.
-const muVersion = "v0.3.5"
+const muVersion = "v0.4.0"
 
 func main() {
 	if sandbox.IsSandboxInit() {
