@@ -1,0 +1,2 @@
+testdata/errors/unknown_field/mu.cue: unifying with #ProjectConfig:
+  secrets.writable_ref: unknown field; did you mean "writable_refs"? at mu.cue:4:10

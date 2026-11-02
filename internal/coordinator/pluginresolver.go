@@ -267,28 +267,6 @@ func (r *PluginResolver) resolveLocalDir(ctx context.Context, p config.PluginDef
 			}
 		}
 	}
-	// Expand any declared schema directories into individual file entries
-	// so they ride along in the deterministic bundle. Only meaningful when
-	// an explicit Files list is set; otherwise everything under the plugin
-	// dir is included already.
-	if len(files) > 0 && len(manifest.Plugin.Schemas) > 0 {
-		seen := make(map[string]bool, len(files))
-		for _, f := range files {
-			seen[f] = true
-		}
-		for _, decl := range manifest.Plugin.Schemas {
-			schemaFiles, err := walkSchemaDir(dirPath, decl.Path)
-			if err != nil {
-				return nil, fmt.Errorf("plugin schema %s@%s: %w", decl.Module, decl.Version, err)
-			}
-			for _, sf := range schemaFiles {
-				if !seen[sf] {
-					files = append(files, sf)
-					seen[sf] = true
-				}
-			}
-		}
-	}
 	dgst, err := r.bundleDir(ctx, dirPath, files)
 	if err != nil {
 		return nil, fmt.Errorf("bundle plugin directory: %w", err)
@@ -443,6 +421,11 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 	if err := archive.ExtractTar(ctx, rc, staging, archive.Policy{Limits: archive.Plugin}); err != nil {
 		return "", fmt.Errorf("extract plugin bundle: %w", err)
 	}
+	// The tar reader may stop before EOF; drain so the store's digest check
+	// runs before the staged bundle is published.
+	if _, err := io.Copy(io.Discard, rc); err != nil {
+		return "", fmt.Errorf("verify plugin bundle: %w", err)
+	}
 	if entries, err := os.ReadDir(staging); err != nil {
 		return "", err
 	} else if len(entries) == 0 {
@@ -570,13 +553,11 @@ func (r *PluginResolver) ExtractFile(ctx context.Context, name string, dgst cas.
 		return "", err
 	}
 	defer os.Remove(tmp.Name())
-	actual, copyErr := cas.ComputeDigest(io.TeeReader(cas.ContextReader(ctx, rc), tmp))
+	// Store.Get verifies the digest at EOF, which io.Copy reads to.
+	_, copyErr := io.Copy(tmp, cas.ContextReader(ctx, rc))
 	readCloseErr := rc.Close()
 	if copyErr == nil {
 		copyErr = readCloseErr
-	}
-	if copyErr == nil && actual != dgst {
-		copyErr = fmt.Errorf("plugin content digest %s does not match %s", actual, dgst)
 	}
 	if copyErr == nil {
 		copyErr = tmp.Chmod(0o755)
@@ -606,46 +587,6 @@ func inferPluginToolchain(path string) string {
 		return "bb"
 	}
 	return ""
-}
-
-// walkSchemaDir returns the .cue files under pluginDir/schemaPath as
-// paths relative to pluginDir, sorted lexicographically. Errors if
-// schemaPath is not a directory or contains no .cue files.
-func walkSchemaDir(pluginDir, schemaPath string) ([]string, error) {
-	abs := filepath.Join(pluginDir, schemaPath)
-	info, err := os.Stat(abs)
-	if err != nil {
-		return nil, fmt.Errorf("stat schema dir %q: %w", schemaPath, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("schema path %q is not a directory", schemaPath)
-	}
-	var rels []string
-	err = filepath.Walk(abs, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(info.Name(), ".cue") {
-			return nil
-		}
-		rel, err := filepath.Rel(pluginDir, path)
-		if err != nil {
-			return err
-		}
-		rels = append(rels, rel)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(rels) == 0 {
-		return nil, fmt.Errorf("schema dir %q contains no .cue files", schemaPath)
-	}
-	sort.Strings(rels)
-	return rels, nil
 }
 
 // Consult complete full-digest publications before CAS probes. Directory

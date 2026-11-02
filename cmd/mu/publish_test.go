@@ -45,12 +45,14 @@ func publishFixture(t *testing.T) (configPath string, registry *ocimem.Registry)
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
 	shell := func(name, command string, outputs []string) map[string]any {
-		return map[string]any{"target": name, "toolchain": "shell", "config": map[string]any{
-			"impure": false, "command": []string{"sh", "-c", command}, "outputs": outputs,
-		}}
+		config := map[string]any{"impure": false, "command": []string{"sh", "-c", command}}
+		if outputs != nil {
+			config["outputs"] = outputs // the closed shell schema rejects outputs: null
+		}
+		return map[string]any{"target": name, "toolchain": "shell", "config": config}
 	}
 	cfg := map[string]any{
-		"publish": map[string]any{"registry": strings.TrimPrefix(server.URL, "http://"), "repository": "org"},
+		"publish": map[string]any{"repository": strings.TrimPrefix(server.URL, "http://") + "/org"},
 		"targets": []map[string]any{
 			shell("//pkg/a", `printf a > "$MU_OUT/a"`, []string{"a"}),
 			shell("//pkg/b", `printf b > "$MU_OUT/b"`, []string{"b"}),

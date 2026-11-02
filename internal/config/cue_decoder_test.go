@@ -65,6 +65,24 @@ func TestCueDecoder_DecodePluginRejectsNoPluginKey(t *testing.T) {
 	}
 }
 
+// TestCueDecoder_DecodePluginRejectsRemovedSchemas: vendored plugin output
+// schemas were removed, so a manifest that still declares them fails to
+// load instead of silently dropping the files from the bundle.
+func TestCueDecoder_DecodePluginRejectsRemovedSchemas(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mu.cue"), []byte(`plugin: {
+	entrypoint: "plugin.bb"
+	schemas: [{module: "mu/x", version: "v1", path: "schemas/mu/x"}]
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cueDecoder{}.DecodePlugin(dir)
+	if err == nil || !strings.Contains(err.Error(), "plugin.schemas was removed") {
+		t.Fatalf("DecodePlugin error = %v, want \"plugin.schemas was removed\"", err)
+	}
+}
+
 // TestCueDecoder_RejectsInvalid exercises a few schema-violation cases.
 // Each fixture is a directory under testdata/ containing a single
 // mu.cue that violates #ProjectConfig.
@@ -148,8 +166,9 @@ func TestCueDecoder_CacheConfig(t *testing.T) {
 	dir := writeMuCue(t, `cache: {
 	path:   "~/cache"
 	remote: "registry.example.com/acme/mu-cache"
-	push: {registry: "registry.example.com", repository: "acme/mu-cache"}
+	push:   "registry.example.com/acme/mu-cache"
 }
+publish: repository: "registry.example.com/acme"
 `)
 	cfg, err := cueDecoder{}.Decode(dir)
 	if err != nil {
@@ -157,8 +176,25 @@ func TestCueDecoder_CacheConfig(t *testing.T) {
 	}
 	c := cfg.Cache
 	if c == nil || c.Path != "~/cache" || c.Remote != "registry.example.com/acme/mu-cache" ||
-		c.Push == nil || c.Push.Registry != "registry.example.com" || c.Push.Repository != "acme/mu-cache" {
+		c.Push != "registry.example.com/acme/mu-cache" {
 		t.Fatalf("cache = %#v", c)
+	}
+	if cfg.Publish == nil || cfg.Publish.Repository != "registry.example.com/acme" {
+		t.Fatalf("publish = %#v", cfg.Publish)
+	}
+}
+
+// The split {registry, repository} form of cache.push and publish is gone:
+// every registry location is one "host/path" string.
+func TestCueDecoder_RejectsSplitRegistryReferences(t *testing.T) {
+	for _, src := range []string{
+		`cache: push: {registry: "r.example.com", repository: "acme/cache"}`,
+		`publish: {registry: "r.example.com", repository: "acme"}`,
+	} {
+		_, err := cueDecoder{}.Decode(writeMuCue(t, src+"\n"))
+		if err == nil || !strings.Contains(err.Error(), `"host/path"`) {
+			t.Errorf("%s: err = %v, want a single-reference hint", src, err)
+		}
 	}
 }
 

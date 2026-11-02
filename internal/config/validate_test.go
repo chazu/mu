@@ -269,11 +269,23 @@ func TestValidate_ValidCacheConfig(t *testing.T) {
 		Cache: &CacheConfig{
 			Path:   "/tmp/cache",
 			Remote: "ghcr.io/example/mu-cache",
-			Push:   &CachePush{Registry: "ghcr.io", Repository: "example/mu-cache"},
+			Push:   "ghcr.io/example/mu-cache",
 		},
+		Publish: &PublishConfig{Repository: "ghcr.io/example"},
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("expected valid cache config, got: %v", err)
+	}
+}
+
+func TestValidate_PushAndPublishMustBeRegistryReferences(t *testing.T) {
+	for field, cfg := range map[string]*ProjectConfig{
+		"cache.push":         {Cache: &CacheConfig{Push: "ghcr.io"}},
+		"publish.repository": {Publish: &PublishConfig{Repository: "https://ghcr.io/acme"}},
+	} {
+		if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), field) {
+			t.Errorf("%s: err = %v, want %s error", field, err, field)
+		}
 	}
 }
 

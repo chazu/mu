@@ -28,7 +28,10 @@ type Remote interface {
 //
 // The remote is optional. The first remote failure is reported once through
 // Warn and switches the Cache to local-only for the rest of the process; a
-// build never fails because the shared cache is down.
+// build never fails because the shared cache is down. An authentication
+// failure (an error matching ErrUnauthorized) is not an outage: it is
+// returned to the caller, carrying the remote's login hint, and does not
+// switch the remote off.
 type Cache struct {
 	Local  *DiskStore
 	Remote Remote // nil means local only
@@ -96,6 +99,9 @@ func (c *Cache) GetActionResult(ctx context.Context, key ActionKey) (*ActionResu
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if errors.Is(err, ErrUnauthorized) {
+			return nil, err
+		}
 		if errors.Is(err, ErrInvalidDigest) {
 			slog.Warn("remote cache: ignoring corrupt action result", "key", key.Digest.String(), "err", err)
 		} else {
@@ -120,6 +126,9 @@ func (c *Cache) GetActionResult(ctx context.Context, key ActionKey) (*ActionResu
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			if errors.Is(ferr, ErrUnauthorized) {
+				return nil, ferr
+			}
 			if c.remoteUp() {
 				slog.Warn("remote cache: ignoring action result with unusable output",
 					"key", key.Digest.String(), "output", name, "err", ferr)
@@ -136,8 +145,8 @@ func (c *Cache) GetActionResult(ctx context.Context, key ActionKey) (*ActionResu
 
 // fetchBlob copies one blob from the remote into the local store, verifying
 // its digest. A confirmed remote miss matches ErrNotFound and corrupt remote
-// content matches ErrDigestMismatch; neither is stored. Any other remote
-// failure latches the remote off (see remoteFailed) and is also returned as
+// content matches ErrDigestMismatch; neither is stored. An authentication
+// failure is returned as is (ErrUnauthorized). Any other remote failure latches the remote off (see remoteFailed) and is also returned as
 // an ErrNotFound-matching miss, so callers fall back to building locally.
 func (c *Cache) fetchBlob(ctx context.Context, dgst Digest) error {
 	rc, err := c.Remote.Get(ctx, dgst)
@@ -145,7 +154,7 @@ func (c *Cache) fetchBlob(ctx context.Context, dgst Digest) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidDigest) {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidDigest) || errors.Is(err, ErrUnauthorized) {
 			return err
 		}
 		return c.remoteFailed(err)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -16,6 +15,7 @@ import (
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/dag"
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/plugin"
 )
 
@@ -34,6 +34,11 @@ type Coordinator struct {
 	ToolchainRegistry *ToolchainRegistry
 	Builder           ToolchainBuilder // optional; set to enable toolchain scratch build
 	Workers           int              // 0 = runtime.NumCPU()
+
+	// PluginsDir and ToolchainsDir are where resolved plugins and extracted
+	// toolchain binaries live (paths.Paths); empty means the ~/.mu default.
+	PluginsDir    string
+	ToolchainsDir string
 
 	// Verbose increases coordinator-level log verbosity when true. Cache
 	// layer events (hit/miss/repair) are surfaced at info level instead
@@ -126,11 +131,14 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	}
 
 	// 2. Resolve plugins → CAS (hash local scripts or fetch remote ones).
-	home, _ := os.UserHomeDir()
+	pluginsDir, err := c.dir(c.PluginsDir, func(p paths.Paths) string { return p.PluginsDir })
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
 	resolver := &PluginResolver{
 		Store:       c.Store,
 		ProjectRoot: c.ProjectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+		CacheDir:    pluginsDir,
 	}
 	resolvedPlugins, err := resolver.Resolve(ctx, planningPlugins)
 	if err != nil {
@@ -195,6 +203,8 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	// 5. Validate target configs against plugin schemas.
 	for _, t := range targets {
 		if t.Toolchain == "shell" || t.Toolchain == "secret-gen" {
+			// Builtins have no discover schema; schema.cue checks their
+			// config at load time and the planners reject wrong types.
 			continue
 		}
 		info := mgr.DiscoverInfo(t.Toolchain)
@@ -695,225 +705,6 @@ func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, 
 	}
 
 	return result, nil
-}
-
-// ObserveResult holds the observation result for a single target.
-// The Current field contains the observed state as reported by the plugin.
-// Convergence decisions are made downstream (by pudl), not here.
-type ObserveResult struct {
-	Target  string         `json:"target"`
-	Current map[string]any `json:"current,omitempty"` // observed state from plugin
-	Error   string         `json:"error,omitempty"`   // non-empty if observation failed
-}
-
-// Observe checks the current state of the given targets by sending observe
-// requests to their plugins. Each plugin reports the observed state as
-// structured data. Convergence decisions are made downstream (by pudl),
-// not by mu.
-func (c *Coordinator) Observe(ctx context.Context, targetNames []string) ([]ObserveResult, error) {
-	// 1. Build toolchains from scratch.
-	registry := c.ToolchainRegistry
-	if registry == nil {
-		registry = NewToolchainRegistry(c.Store)
-	}
-
-	// 2. Resolve targets.
-	targets, err := c.resolveTargets(targetNames)
-	if err != nil {
-		return nil, fmt.Errorf("coordinator: %w", err)
-	}
-
-	// Collect which toolchains and secret schemes we need.
-	neededPlugins := make(map[string]bool)
-	for _, t := range targets {
-		if t.Toolchain != "shell" {
-			neededPlugins[t.Toolchain] = true
-		}
-		for _, ref := range t.SealedInputs {
-			scheme, _, ok := parseSecretRef(ref)
-			if ok {
-				neededPlugins[scheme] = true
-			}
-		}
-	}
-
-	// 3. Start plugins for needed toolchains and secret providers.
-	mgr := plugin.NewManager(c.ProjectRoot)
-
-	if len(neededPlugins) > 0 {
-
-		home, _ := os.UserHomeDir()
-		resolver := &PluginResolver{
-			Store:       c.Store,
-			ProjectRoot: c.ProjectRoot,
-			CacheDir:    filepath.Join(home, ".mu", "plugins"),
-		}
-		resolvedPlugins, err := resolver.Resolve(ctx, func() []config.PluginDef {
-			var selected []config.PluginDef
-			for _, p := range c.Config.Plugins {
-				if neededPlugins[p.Name] {
-					selected = append(selected, p)
-				}
-			}
-			return selected
-		}())
-		if err != nil {
-			return nil, fmt.Errorf("coordinator: %w", err)
-		}
-
-		if c.Builder != nil {
-			for _, rp := range resolvedPlugins {
-				if rp.Def.Toolchain != "" {
-					neededPlugins[rp.Def.Toolchain] = true
-				}
-			}
-			subset := *c.Config
-			subset.Toolchains = nil
-			for _, tc := range c.Config.Toolchains {
-				if neededPlugins[tc.Name] {
-					subset.Toolchains = append(subset.Toolchains, tc)
-				}
-			}
-			if len(subset.Toolchains) > 0 {
-				if err := c.Builder.Build(ctx, &subset); err != nil {
-					return nil, err
-				}
-			}
-		}
-		if resolvedNeedsRuntime(resolvedPlugins) {
-			bb, err := c.resolveScriptRuntime(ctx, registry)
-			if err != nil {
-				return nil, err
-			}
-			mgr.SetScriptRuntime(bb)
-		}
-
-		for _, rp := range resolvedPlugins {
-			if neededPlugins[rp.Def.Name] {
-				if err := mgr.Register(rp.Def); err != nil {
-					return nil, fmt.Errorf("coordinator: register plugin %q: %w", rp.Def.Name, err)
-				}
-			}
-		}
-		if err := mgr.Start(ctx); err != nil {
-			return nil, fmt.Errorf("coordinator: starting plugins: %w", err)
-		}
-		defer mgr.Close()
-	}
-
-	// 4. Resolve sealed inputs for all targets that declare them.
-	targetSecrets := make(map[string]map[string]string) // target name → env name → resolved value
-	for _, t := range targets {
-		if len(t.SealedInputs) == 0 {
-			continue
-		}
-		secrets := make(map[string]string, len(t.SealedInputs))
-		for envName, ref := range t.SealedInputs {
-			scheme, path, ok := parseSecretRef(ref)
-			if !ok {
-				return nil, fmt.Errorf("target %q: sealed input %q: invalid reference %q (expected scheme:path)", t.Name, envName, ref)
-			}
-			value, err := mgr.ResolveSecret(ctx, scheme, path)
-			if err != nil {
-				return nil, fmt.Errorf("target %q: sealed input %q: %w", t.Name, envName, err)
-			}
-			secrets[envName] = value
-		}
-		targetSecrets[t.Name] = secrets
-	}
-
-	// 5. Send observe request for each target.
-	var results []ObserveResult
-	for _, t := range targets {
-		if t.Toolchain == "shell" {
-			// Shell targets: check for observe_command in config.
-			if t.Config != nil {
-				if obsCmd, ok := t.Config["observe_command"]; ok {
-					if cmdSlice, ok := obsCmd.([]any); ok && len(cmdSlice) > 0 {
-						result := observeViaCommand(ctx, t, cmdSlice, c.ProjectRoot)
-						results = append(results, result)
-						continue
-					}
-				}
-			}
-			// Kit targets (shell with deps, no observe_command): aggregate
-			// dependency state for downstream consumption.
-			if len(t.Deps) > 0 {
-				results = append(results, aggregateKitState(t.Name, t.Deps, results))
-				continue
-			}
-			results = append(results, ObserveResult{Target: t.Name})
-			continue
-		}
-
-		ti := plugin.TargetInfo{
-			Name:      t.Name,
-			Toolchain: t.Toolchain,
-			Sources:   t.Sources,
-			Config:    t.Config,
-		}
-
-		resp, err := mgr.Observe(ctx, t.Toolchain, ti, registry.ArtifactsMap(t.Toolchain), targetSecrets[t.Name])
-		if err != nil {
-			return nil, fmt.Errorf("coordinator: observing target %q: %w", t.Name, err)
-		}
-
-		results = append(results, ObserveResult{
-			Target:  t.Name,
-			Current: resp.Current,
-		})
-	}
-
-	return results, nil
-}
-
-// observeViaCommand runs an observe_command for a shell target and returns
-// the result. The command's stdout is captured as the observed state.
-func observeViaCommand(ctx context.Context, t config.Target, cmdSlice []any, projectRoot string) ObserveResult {
-	args := make([]string, 0, len(cmdSlice))
-	for _, item := range cmdSlice {
-		if s, ok := item.(string); ok {
-			args = append(args, s)
-		}
-	}
-	if len(args) == 0 {
-		return ObserveResult{Target: t.Name}
-	}
-
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Dir = projectRoot
-	output, err := cmd.CombinedOutput()
-	current := map[string]any{
-		"output":    strings.TrimSpace(string(output)),
-		"exit_code": 0,
-	}
-	if err != nil {
-		exitCode := -1
-		if cmd.ProcessState != nil {
-			exitCode = cmd.ProcessState.ExitCode()
-		}
-		current["exit_code"] = exitCode
-	}
-	return ObserveResult{Target: t.Name, Current: current}
-}
-
-// aggregateKitState collects the observed state of a kit's dependencies
-// into a single result. The downstream consumer (pudl) decides convergence.
-func aggregateKitState(name string, deps []string, results []ObserveResult) ObserveResult {
-	depResults := make(map[string]any, len(deps))
-	resultIndex := make(map[string]ObserveResult, len(results))
-	for _, r := range results {
-		resultIndex[r.Target] = r
-	}
-	for _, dep := range deps {
-		if r, ok := resultIndex[dep]; ok {
-			depResults[dep] = r.Current
-		}
-	}
-	return ObserveResult{
-		Target:  name,
-		Current: map[string]any{"deps": depResults},
-	}
 }
 
 // cloneStringMap returns a copy of m or nil when m is empty. Used to
@@ -1474,13 +1265,24 @@ func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *Toolch
 		}
 	}
 
-	home, err := os.UserHomeDir()
+	baseDir, err := c.dir(c.ToolchainsDir, func(p paths.Paths) string { return p.ToolchainsDir })
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", err
 	}
-	baseDir := filepath.Join(home, ".mu", "toolchains")
 
 	return registry.ExtractBinary(ctx, "bb", artifact, baseDir)
+}
+
+// dir returns configured when set, else the default location pick selects.
+func (c *Coordinator) dir(configured string, pick func(paths.Paths) string) (string, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	p, err := paths.Default()
+	if err != nil {
+		return "", err
+	}
+	return pick(p), nil
 }
 
 func resolvedNeedsRuntime(plugins []ResolvedPlugin) bool {

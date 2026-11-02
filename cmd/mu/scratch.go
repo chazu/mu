@@ -15,6 +15,7 @@ func runScratch(args []string) int {
 	fs := flag.NewFlagSet("scratch", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("scratch", fs, useConfig, useOffline)
+	defer cli.Close()
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	if code, ok := parseFlags(fs, args, "scratch [flags]"); !ok {
 		return code

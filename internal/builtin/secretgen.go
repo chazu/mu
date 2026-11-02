@@ -114,9 +114,15 @@ func SecretGenPlan(target config.Target) ([]plugin.ActionSpec, map[string]string
 		return nil, nil, fmt.Errorf("secret-gen target %q: \"derivation\" is required and must be a non-empty array of strings", target.Name)
 	}
 
-	keepNewline := parseBool(cfg, "keep_trailing_newline", false)
+	keepNewline, err := parseBool(cfg, "keep_trailing_newline", false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("secret-gen target %q: %w", target.Name, err)
+	}
 
-	env := parseStringMap(cfg, "env")
+	env, err := parseStringMap(cfg, "env")
+	if err != nil {
+		return nil, nil, fmt.Errorf("secret-gen target %q: %w", target.Name, err)
+	}
 
 	// The action runs the derivation through bash so we can both redirect
 	// stdout into the side-channel file and (optionally) trim a single

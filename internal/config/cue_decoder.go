@@ -48,7 +48,8 @@ func (d cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := rejectRemovedFields(val, filepath.Join(projectRoot, "mu.cue")); err != nil {
+	path := filepath.Join(projectRoot, "mu.cue")
+	if err := rejectRemovedFields(val, path); err != nil {
 		return nil, err
 	}
 	_, projectDef, _, err := compileSchemaDefs(val.Context())
@@ -57,10 +58,10 @@ func (d cueDecoder) Decode(projectRoot string) (*ProjectConfig, error) {
 	}
 	unified := projectDef.Unify(val)
 	if err := unified.Err(); err != nil {
-		return nil, formatCueError("unifying mu.cue with #ProjectConfig", val, err)
+		return nil, formatCueError(path+": unifying with #ProjectConfig", val, unified, err)
 	}
 	if err := unified.Validate(cue.Concrete(true)); err != nil {
-		return nil, formatCueError("validating mu.cue against #ProjectConfig", val, err)
+		return nil, formatCueError(path+": validating against #ProjectConfig", val, unified, err)
 	}
 	var cfg ProjectConfig
 	if err := unified.Decode(&cfg); err != nil {
@@ -77,7 +78,8 @@ func (d cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := rejectRemovedFields(val, filepath.Join(pluginDir, "mu.cue")); err != nil {
+	path := filepath.Join(pluginDir, "mu.cue")
+	if err := rejectRemovedFields(val, path); err != nil {
 		return nil, err
 	}
 	_, _, pluginDef, err := compileSchemaDefs(val.Context())
@@ -86,16 +88,15 @@ func (d cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
 	}
 	unified := pluginDef.Unify(val)
 	if err := unified.Err(); err != nil {
-		return nil, formatCueError("unifying mu.cue with #PluginConfig", val, err)
+		return nil, formatCueError(path+": unifying with #PluginConfig", val, unified, err)
 	}
 	if err := unified.Validate(cue.Concrete(true)); err != nil {
-		return nil, formatCueError("validating mu.cue against #PluginConfig", val, err)
+		return nil, formatCueError(path+": validating against #PluginConfig", val, unified, err)
 	}
 	var cfg PluginConfig
 	if err := unified.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decoding mu.cue into PluginConfig: %w", err)
 	}
-	path := filepath.Join(pluginDir, "mu.cue")
 	if cfg.Plugin == nil {
 		return nil, fmt.Errorf("plugin manifest %s: missing \"plugin\" key", path)
 	}
@@ -112,12 +113,18 @@ const cacheMigrationHint = `
   cache: {
     path?:   "~/.mu/cache"                // the old disk backend's path
     remote?: "<host>/<namespace>/<repo>"  // the old oci backend's registry; read-only
-    push?:   {registry: "<host>", repository: "<namespace>/<repo>"}  // mu cache push
+    push?:   "<host>/<namespace>/<repo>"  // mu cache push
   }`
 
+// registryRefHint explains the single registry-reference convention.
+const registryRefHint = `every registry location is one "host/path" string, e.g.
+  cache:   {push: "<host>/<namespace>/<repo>"}
+  publish: {repository: "<host>/<namespace>"}`
+
 // rejectRemovedFields fails the load when mu.cue still sets a field that mu
-// no longer supports. The schema is open, so without this check such a field
-// would decode to nothing and be silently ignored.
+// no longer supports. The closed schema would reject such a field anyway;
+// this check runs first so the error says what replaced it instead of only
+// "unknown field".
 func rejectRemovedFields(val cue.Value, path string) error {
 	if val.LookupPath(cue.ParsePath("preprocessor")).Exists() {
 		return fmt.Errorf("%s: preprocessor was removed; write sub-directory configs as mu.cue", path)
@@ -126,6 +133,15 @@ func rejectRemovedFields(val cue.Value, path string) error {
 		if val.LookupPath(cue.MakePath(cue.Str("cache"), cue.Str(field))).Exists() {
 			return fmt.Errorf("%s: cache.%s was removed; the cache is now local disk plus one optional read-only remote:%s", path, field, cacheMigrationHint)
 		}
+	}
+	if push := val.LookupPath(cue.ParsePath("cache.push")); push.Exists() && push.IncompleteKind() == cue.StructKind {
+		return fmt.Errorf("%s: cache.push is now a single repository reference, not {registry, repository}; %s", path, registryRefHint)
+	}
+	if val.LookupPath(cue.ParsePath("publish.registry")).Exists() {
+		return fmt.Errorf("%s: publish.registry was removed; put the host in publish.repository; %s", path, registryRefHint)
+	}
+	if val.LookupPath(cue.ParsePath("plugin.schemas")).Exists() {
+		return fmt.Errorf("%s: plugin.schemas was removed; mu no longer ships plugin output schemas — delete the field", path)
 	}
 	if val.LookupPath(cue.ParsePath("advice")).Exists() {
 		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
@@ -161,6 +177,28 @@ func rejectRemovedFields(val cue.Value, path string) error {
 		if t.LookupPath(cue.ParsePath("sealed_routing")).Exists() {
 			name, _ := t.LookupPath(cue.ParsePath("target")).String()
 			return fmt.Errorf("%s: target %q: sealed_routing was removed; strict routing is always on — delete the field", path, name)
+		}
+		if tc, _ := t.LookupPath(cue.ParsePath("toolchain")).String(); tc == "shell" &&
+			t.LookupPath(cue.MakePath(cue.Str("config"), cue.Str("observe_command"))).Exists() {
+			name, _ := t.LookupPath(cue.ParsePath("target")).String()
+			return fmt.Errorf("%s: target %q: observe_command was removed; mu no longer does drift detection — delete the field", path, name)
+		}
+		if tc, _ := t.LookupPath(cue.ParsePath("toolchain")).String(); tc == "secret-gen" {
+			name, _ := t.LookupPath(cue.ParsePath("target")).String()
+			if v := t.LookupPath(cue.MakePath(cue.Str("config"), cue.Str("ref"))); v.Exists() {
+				ref, _ := v.String()
+				if ref == "" {
+					ref = "<ref>"
+				}
+				return fmt.Errorf("%s: target %q: secret-gen config.ref was removed; declare sealed_outputs: {VALUE: %q}", path, name, ref)
+			}
+			if v := t.LookupPath(cue.MakePath(cue.Str("config"), cue.Str("mode"))); v.Exists() {
+				mode, _ := v.String()
+				if mode == "" {
+					mode = "<mode>"
+				}
+				return fmt.Errorf("%s: target %q: secret-gen config.mode was removed; declare sealed_output_modes: {VALUE: %q}", path, name, mode)
+			}
 		}
 	}
 	return nil

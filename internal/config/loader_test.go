@@ -448,3 +448,14 @@ func TestLoad_RejectsRemovedSealedRouting(t *testing.T) {
 		t.Fatalf("Load error = %v, want \"sealed_routing was removed\"", err)
 	}
 }
+
+func TestLoad_RejectsRemovedShellObserveCommand(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+	writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+		`targets: [{target: "x", toolchain: "shell", sources: [], config: {command: ["true"], observe_command: ["true"]}}]`)
+	_, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "observe_command was removed") {
+		t.Fatalf("Load error = %v, want \"observe_command was removed\"", err)
+	}
+}

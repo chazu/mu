@@ -19,6 +19,11 @@ var ErrNotFound = errors.New("not found")
 // was requested or stored under.
 var ErrDigestMismatch = errors.New("digest mismatch")
 
+// ErrUnauthorized marks a remote store that refused mu's credentials. It is a
+// configuration problem the user must fix (log in), not an outage: the build
+// cache reports it as an error instead of quietly going local-only.
+var ErrUnauthorized = errors.New("unauthorized")
+
 // Digest identifies a blob by its hash algorithm and hex-encoded hash value.
 type Digest struct {
 	Algorithm string // "sha256"
@@ -127,6 +132,10 @@ type ActionResult struct {
 
 // Store is the interface for a content-addressable store that also supports
 // action-result caching.
+//
+// Get must return a digest-verified reader (wrap it with VerifyReader): a
+// caller that reads to EOF without error has received exactly the bytes named
+// by the digest. Callers rely on this and do not re-hash what they read.
 type Store interface {
 	Has(ctx context.Context, dgst Digest) (bool, error)
 	Get(ctx context.Context, dgst Digest) (io.ReadCloser, error)

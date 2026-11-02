@@ -4,195 +4,154 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/http/httputil"
 	"os"
-	"strings"
 
+	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/cas/oci"
-	"github.com/chazu/mu/internal/registryhttp"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
+	"github.com/chazu/mu/internal/dag"
 )
 
-// runCachePush publishes every cached action result (and its output blobs)
-// from the local disk cache at ~/.mu/cache to the remote OCI registry
-// configured under cache.push in mu.cue. Each per-key local receipt becomes an
-// OCI manifest tagged action-sha256-<key> on the remote, built at push time.
-// Blobs already present remotely are not uploaded again.
+// runCachePush publishes the local cache results of the named targets
+// (default //...) to the repository configured as cache.push in mu.cue.
+//
+// The targets are planned, not built, and only results for their actions are
+// pushed, so other projects sharing the local cache never leak into this
+// project's registry. A downstream action's key depends on its producers'
+// outputs, so keys are derived in dependency order from the local results
+// (dag.CachedResults); actions without a local result are reported and
+// skipped. Each result is pushed independently: entries the registry already
+// has are skipped, and a failed entry does not stop the rest. The exit status
+// is non-zero if any entry failed.
 func runCachePush(args []string) int {
 	fs := flag.NewFlagSet("cache push", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	c := newCLIContext("cache push", fs, useConfig, useVerbose, useOffline)
-	dryRun := fs.Bool("dry-run", false, "list action tags that would be pushed, without pushing")
-	if code, ok := parseFlags(fs, args, "cache push [flags]"); !ok {
+	defer c.Close()
+	dryRun := fs.Bool("dry-run", false, "list the action results that would be pushed, without pushing")
+	if code, ok := parseFlags(fs, args, "cache push [flags] [target...]"); !ok {
 		return code
 	}
-
-	if code, ok := c.Resolve(resolveOpts{NeedConfig: true}); !ok {
-		return code
+	targets := fs.Args()
+	if len(targets) == 0 {
+		targets = []string{"//..."}
 	}
 
+	if code, ok := c.Resolve(resolveOpts{NeedConfig: true, ValidateConfig: true, NeedStore: true}); !ok {
+		return code
+	}
 	ref, code, ok := resolvePushRef(c)
 	if !ok {
 		return code
 	}
-
-	cacheDir := c.CachePath()
-	local, err := openLocalCache(cacheDir)
-	if err != nil {
-		return c.fail(exitFail, "opening local cache %s: %v", cacheDir, err)
-	}
-	actions, err := readCachedActions(local, false)
-	if err != nil {
-		return c.fail(exitFail, "reading local cache: %v", err)
-	}
-	tags := make([]string, 0, len(actions))
-	for _, a := range actions {
-		tags = append(tags, a.Tag)
-	}
-
-	if len(tags) == 0 {
-		fmt.Println("No cached actions to push.")
-		return exitOK
-	}
-
-	if *dryRun {
-		fmt.Printf("Would push %d action(s) to %s:\n", len(tags), ref)
-		for _, t := range tags {
-			fmt.Printf("  %s\n", t)
-		}
-		return exitOK
-	}
-
-	if !c.requireRegistry() {
+	if !*dryRun && !c.requireRegistry() {
 		return exitUsage
+	}
+	local := localDiskStore(c.Store)
+	if local == nil {
+		return c.fail(exitFail, "no local cache store")
 	}
 
 	ctx := c.networkContext(context.Background())
-
-	remoteRepo, err := newPushRepository(ref)
+	plan, err := newCoordinator(c, coordinatorOpts{}).Plan(ctx, targets)
 	if err != nil {
 		return c.fail(exitFail, "%v", err)
 	}
-	remote := oci.New(remoteRepo)
+	found, missing, err := dag.CachedResults(ctx, plan.Graph, local.GetActionResult)
+	if err != nil {
+		return c.fail(exitFail, "%v", err)
+	}
+	found = uniqueResults(found)
+	if c.Verbose {
+		for _, id := range missing {
+			fmt.Fprintf(os.Stderr, "  %s: no local result\n", id)
+		}
+	}
 
-	var pushed, failed int
-	for _, a := range actions {
-		if err := remote.PushActionResult(ctx, local, a.Key, a.Result); err != nil {
-			fmt.Fprintf(os.Stderr, "  %s: %v\n", a.Tag, err)
+	if *dryRun {
+		fmt.Printf("Would push %d action result(s) to %s:\n", len(found), ref)
+		for _, r := range found {
+			fmt.Printf("  %s  %s\n", oci.ActionTag(r.Key), r.ActionID)
+		}
+		printNotBuilt(len(missing))
+		return exitOK
+	}
+
+	repo, err := oci.NewRepository(ref)
+	if err != nil {
+		return c.fail(exitFail, "%v", err)
+	}
+	remote := oci.New(repo)
+
+	var pushed, present, failed int
+	for _, r := range found {
+		tag := oci.ActionTag(r.Key)
+		exists, err := remote.HasActionResult(ctx, r.Key)
+		if err == nil && !exists {
+			err = remote.PushActionResult(ctx, local, r.Key, r.Result)
+		}
+		switch {
+		case ctx.Err() != nil:
+			return c.fail(exitFail, "%v", ctx.Err())
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "  %s (%s): %v\n", r.ActionID, tag, err)
 			failed++
-			break
+		case exists:
+			present++
+		default:
+			if c.Verbose {
+				fmt.Printf("  pushed %s (%s)\n", r.ActionID, tag)
+			}
+			pushed++
 		}
-		if c.Verbose {
-			fmt.Printf("  pushed %s\n", a.Tag)
-		}
-		pushed++
 	}
 
-	fmt.Printf("Pushed %d/%d action(s) to %s", pushed, len(tags), ref)
-	if failed > 0 {
-		fmt.Printf(" (%d failed)", failed)
-	}
-	fmt.Println()
+	fmt.Printf("Pushed %d, skipped %d (already present), failed %d of %d action result(s) to %s\n",
+		pushed, present, failed, len(found), ref)
+	printNotBuilt(len(missing))
 	if failed > 0 {
 		return exitFail
 	}
 	return exitOK
 }
 
-// resolvePushRef returns the fully-qualified "<registry>/<repository>"
-// reference from the loaded config, or a user-actionable error explaining
-// which field is missing.
-func resolvePushRef(c *cliContext) (string, int, bool) {
-	if c.Config == nil || c.Config.Cache == nil || c.Config.Cache.Push == nil {
-		return "", c.fail(exitUsage,
-			`cache.push is not configured in mu.cue — add:
-  "cache": { "push": { "registry": "<host>", "repository": "<repo>" } }`), false
+func printNotBuilt(n int) {
+	if n > 0 {
+		fmt.Printf("%d planned action(s) have no local result (not built here); not pushed\n", n)
 	}
-	p := c.Config.Cache.Push
-	if p.Registry == "" {
-		return "", c.fail(exitUsage,
-			`cache.push.registry is not set in mu.cue — set it to the OCI registry host (e.g. "registry.loosh.cloud")`), false
-	}
-	if p.Repository == "" {
-		return "", c.fail(exitUsage,
-			`cache.push.repository is not set in mu.cue — add it under cache.push (e.g. "repository": "mu-cache")`), false
-	}
-	return p.Registry + "/" + p.Repository, exitOK, true
 }
 
-func newPushRepository(ref string) (*remote.Repository, error) {
-	repo, err := remote.NewRepository(ref)
-	if err != nil {
-		return nil, fmt.Errorf("parse registry reference %q: %w", ref, err)
-	}
-	if isLocalRegistryHost(ref) {
-		repo.PlainHTTP = true
-	}
-
-	httpClient := registryhttp.NewClient(registryhttp.Options{})
-	client := &auth.Client{Cache: auth.NewCache(), Client: httpClient}
-	if credStore, err := openCredentialStore(); err == nil {
-		client.Credential = credentials.Credential(credStore)
-	}
-	if os.Getenv("MU_HTTP_TRACE") != "" {
-		httpClient.Transport = &tracingTransport{inner: httpClient.Transport}
-	}
-	repo.Client = client
-	return repo, nil
-}
-
-// tracingTransport dumps each request/response to stderr when MU_HTTP_TRACE
-// is set. Intended for debugging only.
-type tracingTransport struct {
-	inner http.RoundTripper
-}
-
-func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if dump, err := httputil.DumpRequestOut(redactedRequest(req), false); err == nil {
-		fmt.Fprintf(os.Stderr, "--> %s\n", dump)
-	}
-	resp, err := t.inner.RoundTrip(req)
-	if err != nil {
-		return resp, err
-	}
-	if dump, derr := httputil.DumpResponse(redactedResponse(resp), false); derr == nil {
-		fmt.Fprintf(os.Stderr, "<-- %s\n", dump)
-	}
-	return resp, err
-}
-
-// isLocalRegistryHost mirrors internal/cas/oci.isLocalRegistry for the push
-// path: localhost / 127.0.0.1 registries are served over plain HTTP.
-func isLocalRegistryHost(ref string) bool {
-	host := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		host = ref[:i]
-	}
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	return host == "localhost" || host == "127.0.0.1"
-}
-
-func redactedHeaders(header http.Header) http.Header {
-	copy := header.Clone()
-	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"} {
-		if copy.Get(name) != "" {
-			copy.Set(name, "[redacted]")
+// uniqueResults drops repeated action keys (identical actions planned twice),
+// keeping the first.
+func uniqueResults(found []dag.CachedResult) []dag.CachedResult {
+	seen := make(map[cas.ActionKey]bool, len(found))
+	out := found[:0]
+	for _, r := range found {
+		if !seen[r.Key] {
+			seen[r.Key] = true
+			out = append(out, r)
 		}
 	}
-	return copy
+	return out
 }
-func redactedRequest(req *http.Request) *http.Request {
-	copy := req.Clone(req.Context())
-	copy.Header = redactedHeaders(req.Header)
-	return copy
+
+// localDiskStore returns the local disk store behind the build cache.
+func localDiskStore(store cas.Store) *cas.DiskStore {
+	switch s := store.(type) {
+	case *cas.DiskStore:
+		return s
+	case *cas.Cache:
+		return s.Local
+	}
+	return nil
 }
-func redactedResponse(resp *http.Response) *http.Response {
-	copy := *resp
-	copy.Header = redactedHeaders(resp.Header)
-	return &copy
+
+// resolvePushRef returns cache.push ("host/namespace/repo") from the loaded
+// config, or a user-actionable error if it is missing.
+func resolvePushRef(c *cliContext) (string, int, bool) {
+	if c.Config == nil || c.Config.Cache == nil || c.Config.Cache.Push == "" {
+		return "", c.fail(exitUsage,
+			`cache.push is not configured in mu.cue — add:
+  cache: { push: "<host>/<namespace>/<repo>" }`), false
+	}
+	return c.Config.Cache.Push, exitOK, true
 }

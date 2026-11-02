@@ -2,10 +2,9 @@ mu guide overview — what mu is, in 60 seconds
 
 WHAT MU IS
 
-  mu is a build/convergence orchestrator. You declare targets in
-  mu.cue; mu resolves them into a DAG of actions, executes the DAG
-  with parallel scheduling and content-addressed caching, and
-  hands off observability to plugins.
+  mu is a build orchestrator. You declare targets in mu.cue; mu
+  resolves them into a DAG of actions and executes the DAG with
+  parallel scheduling and content-addressed caching.
 
   mu is not opinionated about what you build — Go binaries, OCI
   images, terraform-managed infrastructure, k8s manifests, secrets
@@ -21,7 +20,6 @@ THE MENTAL MODEL
   - the CAS          stores blobs and action results, keyed by sha256
   - sealed_inputs    resolve secrets for actions (read side)
   - sealed_outputs   capture secrets from actions (write side)
-  - observe          plugins report current state for drift detection
 
   Each piece is replaceable. Plugins are external processes speaking
   NDJSON over stdin/stdout (see 'mu guide protocol'). Two toolchains
@@ -31,8 +29,9 @@ THE DAY-TO-DAY VERBS
 
   mu build <target>...      Plan + execute the target's action DAG.
   mu build --plan <target>  Show the planned actions, don't run them.
-  mu observe <target>...    Ask each plugin to report current state.
   mu cache ls               List cached action results.
+  mu cache verify [--fix]   Check (and repair) local cache integrity.
+  mu login <host>           Store registry credentials (cache, publish).
   mu plugin list            Show project and installed plugins.
   mu plugin info <name>     Show capabilities/metadata for one plugin.
   mu targets                Show targets defined in this project.
@@ -43,7 +42,6 @@ WHAT TO READ NEXT
   Authoring a project:    mu guide mu.cue → mu guide build
   Writing a plugin:       mu guide plugins → mu guide protocol
   Working with secrets:   mu guide secrets → mu guide secret-gen
-  Drift detection:        mu guide observe
   Hermetic toolchains:    mu guide toolchains
   Caching/CAS internals:  mu guide cache
 

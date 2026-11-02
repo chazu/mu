@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/chazu/mu/internal/paths"
 )
 
 var now = time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
@@ -123,7 +125,7 @@ func TestSweepRemovesReadOnlyTrees(t *testing.T) {
 }
 
 func TestSweepIgnoresMissingDirs(t *testing.T) {
-	removed, err := Sweep(DefaultRules(filepath.Join(t.TempDir(), "nohome"), filepath.Join(t.TempDir(), "notmp")), MinAge, now, false)
+	removed, err := Sweep(DefaultRules(paths.Under(filepath.Join(t.TempDir(), "nohome", ".mu")), filepath.Join(t.TempDir(), "notmp")), MinAge, now, false)
 	if err != nil || len(removed) != 0 {
 		t.Fatalf("removed=%v err=%v", removed, err)
 	}
@@ -136,7 +138,7 @@ func TestMaybeSweepIsRateLimited(t *testing.T) {
 	mkfile(t, filepath.Join(first, "f"), 1, now.Add(-48*time.Hour))
 	age(t, first, now.Add(-48*time.Hour))
 
-	MaybeSweep(home, now)
+	MaybeSweep(paths.Under(filepath.Join(home, ".mu")), now)
 	if exists(first) {
 		t.Fatal("first sweep did not run")
 	}
@@ -144,11 +146,11 @@ func TestMaybeSweepIsRateLimited(t *testing.T) {
 	second := filepath.Join(extract, ".extract-b")
 	mkfile(t, filepath.Join(second, "f"), 1, now.Add(-48*time.Hour))
 	age(t, second, now.Add(-48*time.Hour))
-	MaybeSweep(home, now.Add(10*time.Minute))
+	MaybeSweep(paths.Under(filepath.Join(home, ".mu")), now.Add(10*time.Minute))
 	if !exists(second) {
 		t.Fatal("sweep ran again inside the rate-limit interval")
 	}
-	MaybeSweep(home, now.Add(Interval+time.Minute))
+	MaybeSweep(paths.Under(filepath.Join(home, ".mu")), now.Add(Interval+time.Minute))
 	if exists(second) {
 		t.Fatal("sweep did not run after the interval elapsed")
 	}

@@ -39,33 +39,16 @@ type Catalog struct {
 
 // Plugin describes one immutable source package in a Catalog.
 type Plugin struct {
-	Name         string        `json:"name"`
-	Version      string        `json:"version"`
-	Description  string        `json:"description,omitempty"`
-	AssetURL     string        `json:"asset_url"`
-	SHA256       string        `json:"sha256"`
-	Path         string        `json:"path"`
-	Entrypoint   string        `json:"entrypoint"`
-	Toolchain    string        `json:"toolchain,omitempty"`
-	Requirements []string      `json:"requirements,omitempty"`
-	Schemas      []Schema      `json:"schemas,omitempty"`
-	PUDLMappings []PUDLMapping `json:"pudl_mappings,omitempty"`
-	Build        *BuildSpec    `json:"build,omitempty"`
-}
-
-// Schema identifies a plugin-owned wire schema bundled with a package.
-type Schema struct {
-	Module  string `json:"module"`
-	Version string `json:"version"`
-	Path    string `json:"path"`
-}
-
-// PUDLMapping identifies the semantic schema a PUDL integration should use
-// for one resource type. mu preserves this metadata in the lockfile but does
-// not interpret it.
-type PUDLMapping struct {
-	ResourceType string `json:"resource_type"`
-	Schema       string `json:"schema"`
+	Name         string     `json:"name"`
+	Version      string     `json:"version"`
+	Description  string     `json:"description,omitempty"`
+	AssetURL     string     `json:"asset_url"`
+	SHA256       string     `json:"sha256"`
+	Path         string     `json:"path"`
+	Entrypoint   string     `json:"entrypoint"`
+	Toolchain    string     `json:"toolchain,omitempty"`
+	Requirements []string   `json:"requirements,omitempty"`
+	Build        *BuildSpec `json:"build,omitempty"`
 }
 
 // BuildSpec describes a source build needed before the package can be
@@ -167,14 +150,6 @@ func (c *Catalog) Validate() error {
 		}
 		if err := validateRelativePath(p.Entrypoint, "entrypoint"); err != nil {
 			return fmt.Errorf("catalog plugin %q: %w", p.Name, err)
-		}
-		for j, schema := range p.Schemas {
-			if schema.Module == "" || schema.Version == "" {
-				return fmt.Errorf("catalog plugin %q schema %d: module and version are required", p.Name, j)
-			}
-			if err := validateRelativePath(schema.Path, "path"); err != nil {
-				return fmt.Errorf("catalog plugin %q schema %d: %w", p.Name, j, err)
-			}
 		}
 		if p.Build != nil {
 			if len(p.Build.Command) == 0 || p.Build.Command[0] == "" {

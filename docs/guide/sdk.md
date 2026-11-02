@@ -31,25 +31,40 @@ MINIMAL PLUGIN (30 LINES)
       return muplugin.PlanResponse{
           Actions: []muplugin.ActionSpec{{
               ID:      "write",
-              Command: []string{"echo", "hello", ">", out},
+              Command: []string{"sh", "-c", "echo hello > " + out},
               Outputs: []string{out},
           }},
           Outputs: map[string]string{"text": out},
       }, nil
   }
 
+  An argv command runs without a shell, so a redirect such as ">" must
+  go through "sh -c"; passed as an argv element it is just an argument
+  to echo and the output file is never created.
+
   Build: go build -o hello . Reference it from mu.cue with
   plugins: [{name: "hello", command: ["./hello"]}].
 
   See examples/plugins/hello-go/ for the canonical version.
+
+CONSUMING DEPS
+
+  req.Deps has one DepInfo per target listed in the target's deps.
+  DepInfo.Artifacts is that dep's declared_outputs: artifact type ->
+  project-relative output PATH (not a digest). Use the path as an input:
+
+    for _, d := range req.Deps {
+        if lib, ok := d.Artifacts["go_library"]; ok {
+            inputs["lib"] = lib   // mu wires it to the producing action
+        }
+    }
 
 CAPABILITY DERIVATION
 
   You don't list capabilities. The SDK derives them from which function
   fields are non-nil on Plugin:
 
-    Plan           adds "plan" (required for build/convergence plugins)
-    Observe        adds "observe"
+    Plan           adds "plan" (required for build plugins)
     ResolveSecret  adds "resolve_secret"
     StoreSecret    adds "store_secret"
 
@@ -63,13 +78,10 @@ THE PLUGIN STRUCT
       Name, Version, Description string
       Consumes, Produces         []string
       ConfigSchema               map[string]any
-      OutputSchema               *SchemaRef
-      OutputSchemas              []SchemaRef
 
-      Plan          func(ctx, PlanRequest) (PlanResponse, error)        // optional
-      Observe       func(ctx, ObserveRequest) (ObserveResponse, error)  // optional
-      ResolveSecret func(ctx, ref string) (string, error)               // optional
-      StoreSecret   func(ctx, StoreSecretRequest) error                 // optional
+      Plan          func(ctx, PlanRequest) (PlanResponse, error)  // optional
+      ResolveSecret func(ctx, ref string) (string, error)         // optional
+      StoreSecret   func(ctx, StoreSecretRequest) error           // optional
   }
 
   Methods:
@@ -136,7 +148,6 @@ PORTING A BB PLUGIN
     (case (get req "method") ...)              SDK dispatch
     (defn discover-response [] {...})          Plugin{Name, Version, ...}
     (defn plan-response [req] {...})           Plan: func(ctx, req) {...}
-    (defn observe-response [req] {...})        Observe: func(ctx, req) {...}
     (json/generate-string)                     handled by SDK
     (read-line) loop                           handled by SDK
 

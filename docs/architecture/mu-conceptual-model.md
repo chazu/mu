@@ -84,10 +84,10 @@ mu learns what actions to run. A plugin implements these methods:
 -> {"method": "discover"}
 <- {"name": "go", "version": "0.1.0", "protocol_version": 1,
     "consumes": ["go_source"], "produces": ["executable"],
-    "capabilities": ["discover", "plan", "observe"]}
+    "capabilities": ["discover", "plan"]}
 ```
 
-**plan** (optional; required for build/convergence plugins) — "given this
+**plan** (optional; required for build plugins) — "given this
 target, what actions should I run?"
 ```json
 -> {"method": "plan",
@@ -99,10 +99,11 @@ target, what actions should I run?"
     "declared_outputs": {"executable": "server"}}
 ```
 
-**observe** (optional) — report current state for drift detection
 **resolve_secret** (optional) — resolve a secret reference to its value
 **store_secret** (optional) — write a value to a secret backend
-**advise** (optional) — lifecycle observer, called after build phases complete
+
+There are no other methods: the former `observe` (drift detection) and
+`advise` (lifecycle observer) methods were removed.
 
 A plugin can be written in any language. It reads JSON lines from stdin,
 dispatches on `method`, and writes JSON responses to stdout. That's the
@@ -330,7 +331,6 @@ Step 6: Nothing to execute
 │  Scratch environment       (fetch/extract/store) │
 │  Sandbox execution         (hermetic rootfs)     │
 │  Sealed inputs/outputs     (secret lifecycle)    │
-│  Advice protocol           (lifecycle observers) │
 │                                                  │
 ├─────────────────────────────────────────────────┤
 │              Comes from plugins                  │
@@ -420,9 +420,9 @@ the cached binary to run plugin scripts. This means:
 
 - Plugins are distributed as plain `.bb` files (no compilation needed)
 - The bb runtime is hermetic and version-pinned
-- Plugin authors implement `discover`, plus `plan` when the plugin builds or
-  converges targets, and may add optional methods
-  (`observe`, `resolve_secret`, `store_secret`, `advise`)
+- Plugin authors implement `discover`, plus `plan` when the plugin builds
+  targets, and may add optional methods
+  (`resolve_secret`, `store_secret`)
 - Plugins can also be compiled binaries (Go, Rust, etc.) — any language works
 - Plugin directories are deterministically bundled and stored in CAS for
   distribution via digest references

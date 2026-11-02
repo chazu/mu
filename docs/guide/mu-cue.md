@@ -52,6 +52,17 @@ TARGET FIELDS
                        "create_if_absent"} — store mode per output
                        (optional, default overwrite).
 
+UNKNOWN FIELDS
+
+  The schema is closed: a field mu does not know is a load error naming
+  the file, the path and the field, with a did-you-mean for a near miss
+  (secrets.writable_ref: unknown field; did you mean "writable_refs"?).
+  A plugin target's config is the exception — it is free-form here and
+  the plugin validates it against the config_schema it reports. The
+  built-in shell and secret-gen toolchains have no plugin, so their
+  config is checked at load time ('mu guide shell', 'mu guide
+  secret-gen'), wrong types included.
+
 TARGET NAMING
 
   Targets are named "//path/name". Subdirectory targets are auto-prefixed:
@@ -106,11 +117,15 @@ CACHE CONFIG
   cache: {
       path:   "~/.mu/cache"              // optional; local store (default shown)
       remote: "ghcr.io/org/mu-cache"     // optional; read-only remote cache
-      push:   {registry: "ghcr.io", repository: "org/mu-cache"}   // mu cache push
+      push:   "ghcr.io/org/mu-cache"     // optional; mu cache push target
   }
+  publish: repository: "ghcr.io/org"     // mu build --publish base
 
   Local disk plus at most one read-only remote. The old cache.backends,
-  read_repair, and write_through fields are rejected. See `mu guide cache`.
+  read_repair, and write_through fields are rejected. Every registry
+  location is one "host/path" string with no scheme; the older split
+  {registry, repository} forms of cache.push and publish are rejected.
+  See `mu guide cache`.
 
 SEE ALSO
 

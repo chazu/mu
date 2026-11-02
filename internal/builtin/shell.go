@@ -22,7 +22,6 @@ import (
 //   - outputs:         []string (optional) — declared output files
 //   - host_paths:      []string (optional) — absolute host paths granted
 //     read+exec inside the sandbox (pure actions; see ActionSpec.HostPaths)
-//   - observe_command: []string (optional) — command for drift detection
 func ShellPlan(target config.Target) ([]plugin.ActionSpec, map[string]string, error) {
 	cfg := target.Config
 	if cfg == nil {
@@ -38,15 +37,24 @@ func ShellPlan(target config.Target) ([]plugin.ActionSpec, map[string]string, er
 		return nil, nil, fmt.Errorf("shell target %q: \"command\" is required and must be a non-empty array of strings", target.Name)
 	}
 
-	// Parse optional env.
-	env := parseStringMap(cfg, "env")
-
-	// Parse optional flags.
-	network := parseBool(cfg, "network", false)
-	impure := parseBool(cfg, "impure", true) // shell targets default impure
-
-	// Parse optional outputs.
-	outputs, _ := parseStringSlice(cfg, "outputs")
+	// The schema already checked these at load time; a wrong type here
+	// means config built outside mu.cue, and is still an error.
+	env, err := parseStringMap(cfg, "env")
+	if err != nil {
+		return nil, nil, fmt.Errorf("shell target %q: %w", target.Name, err)
+	}
+	network, err := parseBool(cfg, "network", false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("shell target %q: %w", target.Name, err)
+	}
+	impure, err := parseBool(cfg, "impure", true) // shell targets default impure
+	if err != nil {
+		return nil, nil, fmt.Errorf("shell target %q: %w", target.Name, err)
+	}
+	outputs, err := parseStringSlice(cfg, "outputs")
+	if err != nil {
+		return nil, nil, fmt.Errorf("shell target %q: %w", target.Name, err)
+	}
 	hostPaths, err := parseStringSlice(cfg, "host_paths")
 	if err != nil {
 		return nil, nil, fmt.Errorf("shell target %q: %w", target.Name, err)
@@ -94,34 +102,38 @@ func parseStringSlice(cfg map[string]any, key string) ([]string, error) {
 	return result, nil
 }
 
-// parseStringMap extracts a map[string]string from a config map.
-func parseStringMap(cfg map[string]any, key string) map[string]string {
+// parseStringMap extracts a map[string]string from a config map. A missing
+// key is nil; a non-map value or a non-string entry is an error.
+func parseStringMap(cfg map[string]any, key string) (map[string]string, error) {
 	v, ok := cfg[key]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	m, ok := v.(map[string]any)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("%q must be a map of strings, got %T", key, v)
 	}
 	result := make(map[string]string, len(m))
 	for k, val := range m {
-		if s, ok := val.(string); ok {
-			result[k] = s
+		s, ok := val.(string)
+		if !ok {
+			return nil, fmt.Errorf("%q entry %q must be a string, got %T", key, k, val)
 		}
+		result[k] = s
 	}
-	return result
+	return result, nil
 }
 
-// parseBool extracts a bool from a config map with a default value.
-func parseBool(cfg map[string]any, key string, defaultVal bool) bool {
+// parseBool extracts a bool from a config map, returning defaultVal when the
+// key is missing. A non-bool value is an error.
+func parseBool(cfg map[string]any, key string, defaultVal bool) (bool, error) {
 	v, ok := cfg[key]
 	if !ok {
-		return defaultVal
+		return defaultVal, nil
 	}
 	b, ok := v.(bool)
 	if !ok {
-		return defaultVal
+		return false, fmt.Errorf("%q must be a bool, got %T", key, v)
 	}
-	return b
+	return b, nil
 }

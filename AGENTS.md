@@ -72,6 +72,7 @@ mu build --emit-manifest //...  # build and print a JSON manifest (for CI)
 mu targets                      # targets defined in this project (--json)
 mu targets --deps //target      # dependency chain (--rdeps, --dot, --json)
 mu plugin list                  # registered plugins; `mu plugin info <name>`
-mu cache ls                     # cached action results; also size, clean, push
+mu cache ls                     # cached action results; also size, clean, verify, push
+mu login <host>                 # registry credentials for remote cache/publish
 mu guide <topic>                # reference topics; `mu guide` lists them
 ```

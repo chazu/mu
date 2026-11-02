@@ -14,7 +14,6 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/chazu/mu/internal/cas"
-	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
 	"github.com/chazu/mu/internal/plugin"
@@ -26,7 +25,8 @@ import (
 //  1. If a project mu.cue declares a plugin with this name, resolve it the
 //     same way a build would (via PluginResolver) — fetching/extracting from
 //     CAS or local sources as needed.
-//  2. Otherwise, fall back to ~/.mu/plugins/<name>/, which works outside of
+//  2. Otherwise, fall back to the installed versions under the plugins
+//     directory (~/.mu/plugins/<name>/), which works outside of
 //     any project for plugins previously seen by this user.
 //
 // The project is the one named by --config, else the one discovered from
@@ -38,6 +38,7 @@ func runPluginInfo(args []string) int {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin info", fs, useConfig, useJSON, useOffline)
+	defer cli.Close()
 	digest := fs.String("digest", "", "select a cached plugin by full SHA-256 digest")
 	if code, ok := parseFlags(fs, args, "plugin info [flags] <name>"); !ok {
 		return code
@@ -55,7 +56,7 @@ func runPluginInfo(args []string) int {
 		return code
 	}
 
-	source, def, dgst, err := resolveInfoTarget(cli.networkContext(context.Background()), cli.ProjectRoot, cli.Config, name, *digest)
+	source, def, dgst, err := resolveInfoTarget(cli.networkContext(context.Background()), cli, name, *digest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu plugin info: %v\n", err)
 		return 1
@@ -63,7 +64,7 @@ func runPluginInfo(args []string) int {
 
 	mgr := plugin.NewManager(cli.ProjectRoot)
 	if def.Toolchain == "bb" {
-		bb := resolveBbPath()
+		bb := resolveBbPath(cli.Paths.ToolchainsDir)
 		if bb == "" {
 			fmt.Fprintln(os.Stderr, "mu plugin info: bb toolchain not found; run mu build to bootstrap it")
 			return 1
@@ -100,8 +101,6 @@ func runPluginInfo(args []string) int {
 		Consumes:        info.Consumes,
 		Produces:        info.Produces,
 		ConfigSchema:    info.ConfigSchema,
-		OutputSchema:    info.OutputSchema,
-		OutputSchemas:   info.OutputSchemas,
 		Toolchain:       def.Toolchain,
 		Path:            def.Script,
 	}
@@ -122,36 +121,31 @@ func runPluginInfo(args []string) int {
 }
 
 type pluginInfoOutput struct {
-	Name            string             `json:"name"`
-	Description     string             `json:"description,omitempty"`
-	Version         string             `json:"version,omitempty"`
-	ProtocolVersion int                `json:"protocol_version,omitempty"`
-	Source          string             `json:"source"` // "project" | "cache"
-	Digest          string             `json:"digest,omitempty"`
-	Toolchain       string             `json:"toolchain,omitempty"`
-	Path            string             `json:"path,omitempty"`
-	Capabilities    []string           `json:"capabilities,omitempty"`
-	Consumes        []string           `json:"consumes,omitempty"`
-	Produces        []string           `json:"produces,omitempty"`
-	ConfigSchema    map[string]any     `json:"config_schema,omitempty"`
-	OutputSchema    *plugin.SchemaRef  `json:"output_schema,omitempty"`
-	OutputSchemas   []plugin.SchemaRef `json:"output_schemas,omitempty"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description,omitempty"`
+	Version         string         `json:"version,omitempty"`
+	ProtocolVersion int            `json:"protocol_version,omitempty"`
+	Source          string         `json:"source"` // "project" | "cache"
+	Digest          string         `json:"digest,omitempty"`
+	Toolchain       string         `json:"toolchain,omitempty"`
+	Path            string         `json:"path,omitempty"`
+	Capabilities    []string       `json:"capabilities,omitempty"`
+	Consumes        []string       `json:"consumes,omitempty"`
+	Produces        []string       `json:"produces,omitempty"`
+	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
 }
 
 // resolveInfoTarget locates the plugin by name. Returns the source label
 // ("project" or "cache"), a ready-to-Register PluginDef, and the CAS digest
 // when known.
-func resolveInfoTarget(ctx context.Context, projectRoot string, cfg *config.ProjectConfig, name string, selection ...string) (string, plugin.PluginDef, cas.Digest, error) {
-	requested := ""
-	if len(selection) > 0 {
-		requested = selection[0]
-	}
-	if cfg != nil && requested == "" {
-		for _, p := range cfg.Plugins {
+// cli supplies the project (ProjectRoot/Config, both optional) and Paths.
+func resolveInfoTarget(ctx context.Context, cli *cliContext, name string, requested string) (string, plugin.PluginDef, cas.Digest, error) {
+	if cli.Config != nil && requested == "" {
+		for _, p := range cli.Config.Plugins {
 			if p.Name != name {
 				continue
 			}
-			def, dgst, err := resolveProjectPlugin(ctx, projectRoot, p)
+			def, dgst, err := resolveProjectPlugin(ctx, cli, p)
 			if err != nil {
 				return "", plugin.PluginDef{}, cas.Digest{}, err
 			}
@@ -159,7 +153,7 @@ func resolveInfoTarget(ctx context.Context, projectRoot string, cfg *config.Proj
 		}
 	}
 
-	def, dgst, err := resolveCachedPlugin(name, requested)
+	def, dgst, err := resolveCachedPlugin(cli.Paths.PluginsDir, name, requested)
 	if err != nil {
 		return "", plugin.PluginDef{}, cas.Digest{}, err
 	}
@@ -169,23 +163,18 @@ func resolveInfoTarget(ctx context.Context, projectRoot string, cfg *config.Proj
 // resolveProjectPlugin runs the same resolver the coordinator uses, so a
 // configured plugin (digest, url, local path, or command) is materialized
 // to disk and ready to spawn.
-func resolveProjectPlugin(ctx context.Context, projectRoot string, p config.PluginDef) (plugin.PluginDef, cas.Digest, error) {
+func resolveProjectPlugin(ctx context.Context, cli *cliContext, p config.PluginDef) (plugin.PluginDef, cas.Digest, error) {
 	if len(p.Command) > 0 && p.Script == "" && p.Digest == "" && p.URL == "" {
 		return plugin.PluginDef{Name: p.Name, Command: p.Command}, cas.Digest{}, nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return plugin.PluginDef{}, cas.Digest{}, err
-	}
-	cachePath := filepath.Join(home, ".mu", "cache")
-	store, err := oci.NewLocal(cachePath)
+	store, err := cli.openStore()
 	if err != nil {
 		return plugin.PluginDef{}, cas.Digest{}, err
 	}
 	resolver := &coordinator.PluginResolver{
 		Store:       store,
-		ProjectRoot: projectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+		ProjectRoot: cli.ProjectRoot,
+		CacheDir:    cli.Paths.PluginsDir,
 	}
 	resolved, err := resolver.Resolve(ctx, []config.PluginDef{p})
 	if err != nil {
@@ -322,39 +311,6 @@ func printPluginInfo(o pluginInfoOutput) {
 
 	fmt.Println(label.Render("Consumes") + bright.Render(joinOrDash(o.Consumes)))
 	fmt.Println(label.Render("Produces") + bright.Render(joinOrDash(o.Produces)))
-
-	if o.OutputSchema != nil {
-		fmt.Println()
-		fmt.Println(accent.Bold(true).Render("Output Schema"))
-		if o.OutputSchema.Description != "" {
-			fmt.Println("  " + dim.Italic(true).Render(o.OutputSchema.Description))
-		}
-		fmt.Println(dim.Render("  module") + "  " + bright.Render(o.OutputSchema.Module+"@"+o.OutputSchema.Version))
-		if o.OutputSchema.Definition != "" {
-			fmt.Println(dim.Render("  def") + "     " + accent.Render(o.OutputSchema.Definition))
-		}
-		if o.OutputSchema.Source != "" {
-			fmt.Println(dim.Render("  source") + "  " + bright.Render(o.OutputSchema.Source))
-		}
-	}
-	if len(o.OutputSchemas) > 0 {
-		fmt.Println()
-		fmt.Println(accent.Bold(true).Render("Output Schemas"))
-		for _, schema := range o.OutputSchemas {
-			label := schema.ResourceType
-			if label == "" {
-				label = "default"
-			}
-			fmt.Println("  " + bright.Render(label))
-			fmt.Println(dim.Render("    module") + "  " + bright.Render(schema.Module+"@"+schema.Version))
-			if schema.Definition != "" {
-				fmt.Println(dim.Render("    def") + "     " + accent.Render(schema.Definition))
-			}
-			if schema.Source != "" {
-				fmt.Println(dim.Render("    source") + "  " + bright.Render(schema.Source))
-			}
-		}
-	}
 
 	if len(o.ConfigSchema) > 0 {
 		fmt.Println()

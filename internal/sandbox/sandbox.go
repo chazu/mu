@@ -208,6 +208,8 @@ func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Diges
 	}
 	defer rc.Close()
 
+	// The store's reader verifies the digest at EOF, which io.Copy reads to.
+	// The recorded mode is applied with Chmod below.
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err

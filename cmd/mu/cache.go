@@ -12,11 +12,6 @@ import (
 	"github.com/chazu/mu/internal/cas/oci"
 )
 
-func cachePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".mu", "cache")
-}
-
 // cachedAction is one action result in the local disk cache.
 type cachedAction struct {
 	Tag    string // action-sha256-<key>: the tag `mu cache push` publishes it under
@@ -454,10 +449,11 @@ Commands:
   ls        List cached action results and toolchains
   inspect   Show details of a cached item
   size      Show total cache disk usage
-  clean     Remove unreachable blobs (GC)
-  push      Copy cached actions to the remote OCI registry (cache.push)
-  login     Log in to an OCI registry [host] (default: cache.push.registry; stored in ~/.mu/credentials.json)
-  logout    Remove stored credentials for an OCI registry [host] (default: cache.push.registry)`)
+  clean     Remove unreachable blobs (GC) and stale plugin versions
+  verify    Re-hash blobs and check action results (--fix repairs)
+  push      Push the cached results of [targets] (default //...) to cache.push
+
+Registry credentials: mu login <host> / mu logout <host>.`)
 		return code
 	}
 
@@ -470,12 +466,12 @@ Commands:
 		return runCacheSize(args[1:])
 	case "clean":
 		return runCacheClean(args[1:])
+	case "verify":
+		return runCacheVerify(args[1:])
 	case "push":
 		return runCachePush(args[1:])
-	case "login":
-		return runCacheLogin(args[1:])
-	case "logout":
-		return runCacheLogout(args[1:])
+	case "login", "logout":
+		return runCacheLoginMoved(args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "mu cache: unknown command %q\n", args[0])
 		return 2

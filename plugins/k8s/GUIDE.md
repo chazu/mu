@@ -1,6 +1,7 @@
 mu guide plugin k8s — Kubernetes convergence plugin
 
-Applies Kubernetes manifests and detects drift between desired and live state.
+Applies Kubernetes manifests with kubectl and can capture cluster Secret
+values into a secret backend.
 
 USAGE IN mu.cue
 
@@ -23,13 +24,6 @@ CONFIG FIELDS
   server_side           Use server-side apply (default: true).
   prune                 Prune resources not in manifest (default: false).
   dry_run               Run kubectl --dry-run=server (default: false).
-  ignore_paths          List of dot-separated field paths to ignore in drift
-                        detection (e.g. ["metadata.annotations.kubectl"]).
-  inventory             Optional live-cluster inventory mode. Set `kinds` to a
-                        non-empty list of kubectl resource kinds; use
-                        `namespace` for one namespace or `all_namespaces: true`
-                        for cluster-wide inventory. Inventory mode does not
-                        require source manifests.
   sealed_output_secrets Capture-mode map: sealed_output NAME ->
                         {namespace, secret, key}. See "Sealed outputs" below.
 
@@ -43,30 +37,6 @@ EXAMPLES
 
   Dry-run only:
     {"namespace": "staging", "dry_run": true}
-
-  Inventory namespaced workloads:
-    {"inventory": {"kinds": ["pods", "deployments"], "namespace": "production"}}
-
-  Inventory cluster-wide services:
-    {"inventory": {"kinds": ["services"], "all_namespaces": true}}
-
-OBSERVATION (DRIFT DETECTION)
-
-  mu observe //deploy/myapp
-
-  The plugin compares desired state (from source manifests) against live
-  state (from kubectl get). It strips server-managed fields like:
-  - metadata.managedFields, resourceVersion, uid, creationTimestamp
-  - generation, selfLink, status
-
-  It projects live state down to only the keys present in the desired
-  state, then reports differences as dotted-path diffs.
-
-  Manifest drift records describe the desired resource comparison. Inventory
-  records contain the live Kubernetes object and include _schema
-  "k8s.resource" so PUDL can route them to its open Kubernetes resource
-  envelope. The object kind remains in the `kind` field, allowing a project to
-  add a stricter kind-specific CUE schema later.
 
 ACTIONS GENERATED
 
@@ -146,4 +116,4 @@ SEALED OUTPUTS (cluster Secret -> secret backend)
 
 CAPABILITIES
 
-  discover, plan, observe
+  discover, plan

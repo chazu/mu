@@ -46,7 +46,7 @@ cat hello.txt
 - One struct literal + one `Main()` call = a complete plugin.
 - No NDJSON loop, no JSON encode/decode, no capabilities array — the
   SDK handles those. Capabilities are auto-derived from which optional
-  handlers (`Observe`, `ResolveSecret`, `StoreSecret`) are
+  handlers (`Plan`, `ResolveSecret`, `StoreSecret`) are
   non-nil on the `Plugin` struct.
 - The plugin can be unit-tested without spawning a subprocess via
   `muplugin.Exchange` / `muplugin.ExchangeInto`.

@@ -16,7 +16,7 @@ The name means "emptiness" in Japanese. The build system has no built-in semanti
                           │
                    ┌──────┼──────┐
                    ▼      ▼      ▼
-                 go.bb  rust.bb  any.exe
+                 go.bb   pass   any.exe
 ```
 
 Plugins decide what to build and how. mu executes.
@@ -37,7 +37,7 @@ Plugins decide what to build and how. mu executes.
 - **Content-addressed everything.** Universal caching across all languages.
 - **OCI as the shared cache layer.** Remote caches are plain OCI registries; the
   local cache keeps OCI-style blobs plus one atomic file per action result.
-- **Minimal and composable.** ~7,500 LOC of Go. Plugins in any language.
+- **Minimal and composable.** One Go binary; plugins in any language.
 
 See [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) for the full mental model.
 
@@ -108,8 +108,8 @@ mu build //hello
 ```
 
 That's the whole loop — no toolchain bootstrap needed for Go plugins. The
-SDK derives capabilities from which handlers (Plan, Observe,
-ResolveSecret, StoreSecret) are non-nil. Full SDK reference:
+SDK derives capabilities from which handlers (Plan, ResolveSecret,
+StoreSecret) are non-nil. Full SDK reference:
 `mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
 
 ### Alternative: Babashka (or any other language)
@@ -137,16 +137,18 @@ Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventio
 ## Commands
 
 ```
-mu build      Build targets
-mu scratch    Build toolchains from scratch
-mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
-mu targets    List targets; --deps/--rdeps show dependency chains (tree/DOT/JSON)
-mu plugin     List, inspect, and install plugins
-mu observe    Ask plugins to report current state
-mu verify     Validate CAS integrity
-mu guide      Quick-reference help topics
-mu version
+build (b)  Build one or more targets
+scratch    Build toolchains from scratch
+cache      Inspect the local CAS cache (ls, inspect, size, clean, verify, push)
+login      Store OCI registry credentials for a host (mu logout <host> removes them)
+targets    List targets and their dependency chains (alias t; --deps/--rdeps, --dot, --json)
+plugin (p) List and inspect plugins (list, info, install)
+guide      Quick-reference guides for mu features
+version    Print the mu version
+help       Show help for mu or a command (mu help <command> [<subcommand>])
 ```
+
+These are the commands `mu --help` lists.
 
 Common flags, on the commands that use them: `--config PATH`, `--json`,
 `--verbose`, `--offline`. Run `mu <command> -h` for a command's flags.
@@ -159,7 +161,7 @@ Use `--catalog URL` or `MU_PLUGIN_CATALOG` for a catalog mirror or local test
 server.
 
 Run `mu guide` for the topic index. Each topic has its own page:
-`overview`, `mu.cue`, `plugins`, `build`, `observe`, `cache`,
+`overview`, `mu.cue`, `plugins`, `build`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
 `secret-providers`, `sandbox`, `sdk`.
 
@@ -169,8 +171,10 @@ Run `mu guide` for the topic index. Each topic has its own page:
 |-------|-------|
 | Conceptual model, primitives, hermeticity | [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) |
 | CUE config reference | [`docs/cue-conventions.md`](docs/cue-conventions.md) · `mu guide mu.cue` |
+| Building targets, flags, manifests | `mu guide build` |
 | Plugin protocol (NDJSON) | `mu guide protocol` |
-| Writing plugins | `mu guide plugins` |
+| Writing plugins | `mu guide plugins` · `mu guide sdk` |
+| Built-in shell toolchain | `mu guide shell` |
 | Sealed inputs/outputs (secrets) | `mu guide secrets` · `mu guide secret-providers` |
 | Secret-gen toolchain | `mu guide secret-gen` |
 | Sandbox model | `mu guide sandbox` |
@@ -179,34 +183,40 @@ Run `mu guide` for the topic index. Each topic has its own page:
 
 ## Bundled Plugins
 
-| Plugin | Description |
-|--------|-------------|
-| `aws` | AWS resource observer (EC2, VPC, subnets) via AWS CLI |
-| `docker` | Docker image builder |
-| `doppler` | Read-only secret provider over the [Doppler](https://doppler.com) CLI |
-| `file` | File convergence (write/copy/symlink/delete) + sealed-output capture |
-| `go` | Go binaries (cross-compile, tags, ldflags, race) |
-| `host` | Remote host observer over SSH |
-| `k8s` | Kubernetes convergence + drift + Secret capture |
-| `keypair-gen` | ed25519/ECDSA keypair generator → sealed outputs |
-| `lint` | Linter wrapper (check; fix only with `fix: true`) |
-| `pass` | Bidirectional secret provider over [pass](https://passwordstore.org) |
-| `remote-exec` | Run commands over SSH with sealed-output fetch |
-| `remote-file` | Converge a file on a remote host over SSH |
-| `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
-| `terraform` | Infra provisioning + drift + sensitive-output capture |
+Generated from `plugins/*/mu.cue` (runtime) and each plugin's `GUIDE.md`
+summary; `mu guide plugin <name>` shows the full guide.
+
+| Plugin | Runtime | Description |
+|--------|---------|-------------|
+| `docker` | bb | Docker image builder: builds Docker/OCI images from Dockerfiles |
+| `doppler` | bb | Read-only secret provider over the [Doppler](https://doppler.com) CLI |
+| `file` | Go | File convergence: write content, set permissions, create symlinks, or delete files |
+| `go` | bb | Compiles Go packages into executables, archives, or shared libraries |
+| `k8s` | bb | Applies Kubernetes manifests with kubectl; can capture cluster Secret values into a secret backend |
+| `keypair-gen` | Go | Generates an ed25519 or ECDSA keypair and routes both halves through `sealed_outputs` |
+| `lint` | bb | Language-agnostic linter wrapper (check; rewrites sources only with `fix: true`) |
+| `pass` | Go | Read/write secret provider over [password-store](https://www.passwordstore.org) |
+| `remote-exec` | Go | Runs a command on a remote host over SSH, with an optional `check` guard |
+| `remote-file` | Go | Makes a file on a remote host match a local file's bytes, mode, and owner (SSH) |
+| `sops` | bb | Read/write secret provider over [SOPS](https://github.com/getsops/sops)-encrypted files |
+| `terraform` | bb | Terraform init, plan, and apply |
+
+bb plugins run on the Babashka toolchain (declare it as shown above). Go
+plugins run as prebuilt binaries, which are not committed; build one into
+its directory before a project references it with `script: "plugins/<name>"`:
+
+```bash
+go build -trimpath -o plugins/<name>/plugin ./plugins/<name>
+```
+
+`mu plugin install <name>` builds a catalog package that needs it (Go must be installed).
 
 ## Project Status
 
-v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
-
-### Roadmap
-
-- CLI polish: color output, consistent `--json`
-- GOCACHEPROG bridge
-- 1Password / OPA / buildpack / ko plugins
-- Remote execution (worker pools)
-- Protocol extensions (streaming progress, async planning)
+`mu version` prints the version; each release is a tag, and
+[`CHANGELOG.md`](CHANGELOG.md) records what changed in it. Open and planned
+work lives in the repository's beads tracker: run `br list` (or `br ready`
+for unblocked work) rather than looking for a roadmap here.
 
 ## License
 

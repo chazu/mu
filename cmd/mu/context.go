@@ -11,6 +11,7 @@ import (
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/registryhttp"
 	"github.com/chazu/mu/internal/scratch"
 )
@@ -39,14 +40,16 @@ type cliContext struct {
 	// Resolved values (populated by Resolve).
 	ProjectRoot string
 	Config      *config.ProjectConfig
-	Store       cas.Store
+	Paths       paths.Paths // ~/.mu locations, with Config's cache.path applied
+	Store       cas.Store   // opened at most once per process (openStore)
 
 	// Convenience accessors populated from flags by Resolve.
 	JSON    bool
 	Verbose bool
 	Offline bool
 
-	stderr io.Writer // injectable for tests
+	cacheLock *cas.CacheLock // shared lock held while Store is open
+	stderr    io.Writer      // injectable for tests
 }
 
 // sharedFlag names one of the flags newCLIContext can register. A command
@@ -62,12 +65,12 @@ const (
 )
 
 // resolveOpts selects which heavy resources Resolve should materialize.
-// Light subcommands (e.g. mu cache, mu verify) skip project-root / config
+// Light subcommands (e.g. the mu cache inspection commands) skip project-root / config
 // entirely.
 type resolveOpts struct {
 	NeedProjectRoot bool
 	NeedConfig      bool // implies NeedProjectRoot
-	NeedStore       bool // opens ~/.mu/cache (honors cfg.Cache if NeedConfig)
+	NeedStore       bool // opens Paths.CacheDir (honors cfg.Cache if NeedConfig)
 	ValidateConfig  bool // run config.Validate after load
 }
 
@@ -136,16 +139,14 @@ func (c *cliContext) Resolve(opts resolveOpts) (int, bool) {
 		c.Config = cfg
 	}
 
+	if code, ok := c.resolvePaths(); !ok {
+		return code, false
+	}
+
 	if opts.NeedStore {
-		var cacheCfg *config.CacheConfig
-		if c.Config != nil {
-			cacheCfg = c.Config.Cache
-		}
-		store, err := buildCacheStore(cacheCfg, c.Verbose, c.Offline)
-		if err != nil {
+		if _, err := c.openStore(); err != nil {
 			return c.fail(exitUsage, "creating cache store: %v", err), false
 		}
-		c.Store = store
 	}
 
 	return exitOK, true
@@ -180,15 +181,49 @@ func (c *cliContext) fail(code int, format string, args ...any) int {
 	return code
 }
 
-// CachePath returns the default on-disk cache directory (~/.mu/cache).
-// Light subcommands that don't load config but need the cache directory
-// directly (mu cache, mu verify) use this instead of opening a Store.
-func (c *cliContext) CachePath() string {
-	home, err := os.UserHomeDir()
+// resolvePaths sets Paths from the loaded config (or the defaults when no
+// project is loaded).
+func (c *cliContext) resolvePaths() (int, bool) {
+	p, err := config.ResolvePaths(c.Config)
 	if err != nil {
-		return ""
+		return c.fail(exitUsage, "%v", err), false
 	}
-	return filepath.Join(home, ".mu", "cache")
+	c.Paths = p
+	return exitOK, true
+}
+
+// openStore returns the build cache store, opening it on first use. Every
+// consumer in a process shares this one store.
+func (c *cliContext) openStore() (cas.Store, error) {
+	if c.Store != nil {
+		return c.Store, nil
+	}
+	var cacheCfg *config.CacheConfig
+	if c.Config != nil {
+		cacheCfg = c.Config.Cache
+	}
+	store, err := buildCacheStore(c.Paths.CacheDir, cacheCfg, c.Offline)
+	if err != nil {
+		return nil, err
+	}
+	// Hold the cache shared while the store is in use so `mu cache clean`
+	// (exclusive) cannot collect blobs this process has not yet recorded.
+	lock, err := cas.LockShared(c.Paths.CacheDir, func() {
+		fmt.Fprintf(c.stderr, "mu %s: waiting for `mu cache clean` to finish...\n", c.Name)
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.cacheLock = lock
+	c.Store = store
+	return store, nil
+}
+
+// Close releases what Resolve/openStore acquired (the shared cache lock).
+// Exiting the process releases it as well.
+func (c *cliContext) Close() {
+	c.cacheLock.Release()
+	c.cacheLock = nil
 }
 
 func (c *cliContext) networkContext(ctx context.Context) context.Context {
@@ -206,23 +241,13 @@ func (c *cliContext) requireRegistry() bool {
 }
 
 // localCacheDir returns the local disk cache directory for the cache
-// inspection subcommands: the cache.path of the mu.cue named by --config
-// when one is given and sets it, else the default ~/.mu/cache.
+// subcommands: the cache.path of the project named by --config or
+// discovered from the working directory, else $MU_HOME/cache or ~/.mu/cache.
 func (c *cliContext) localCacheDir() (string, int, bool) {
-	if c.configPath() == "" {
-		return cachePath(), exitOK, true
-	}
-	if code, ok := c.Resolve(resolveOpts{NeedConfig: true}); !ok {
+	if code, ok := c.resolveOptionalProject(); !ok {
 		return "", code, false
 	}
-	if c.Config.Cache == nil || c.Config.Cache.Path == "" {
-		return cachePath(), exitOK, true
-	}
-	dir, err := cas.ExpandPath(c.Config.Cache.Path)
-	if err != nil {
-		return "", c.fail(exitUsage, "cache.path: %v", err), false
-	}
-	return dir, exitOK, true
+	return c.Paths.CacheDir, exitOK, true
 }
 
 // coordinatorOpts are the per-command settings of newCoordinator.
@@ -244,6 +269,8 @@ func newCoordinator(cli *cliContext, opts coordinatorOpts) *coordinator.Coordina
 		Store:             cli.Store,
 		ToolchainRegistry: registry,
 		Workers:           opts.Workers,
+		PluginsDir:        cli.Paths.PluginsDir,
+		ToolchainsDir:     cli.Paths.ToolchainsDir,
 		Verbose:           cli.Verbose,
 		SubprocessStdout:  opts.SubprocessStdout,
 	}
@@ -255,11 +282,10 @@ func newCoordinator(cli *cliContext, opts coordinatorOpts) *coordinator.Coordina
 
 // newScratchBuilder builds the toolchain scratch builder over cli's store.
 func newScratchBuilder(cli *cliContext, registry *coordinator.ToolchainRegistry, noCache bool) *scratch.Builder {
-	home, _ := os.UserHomeDir()
 	return &scratch.Builder{
 		NoCache:  noCache,
 		Store:    cli.Store,
 		Registry: registry,
-		CacheDir: filepath.Join(home, ".mu", "cache"),
+		CacheDir: cli.Paths.CacheDir,
 	}
 }

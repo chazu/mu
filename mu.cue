@@ -3,23 +3,17 @@ package mu
 // Remote build cache lives on the loosh platform registry (akashic), under the
 // shared loosh-industries/mu-cache repo — the same content-addressed action
 // cache the akashic project pushes to. akashic requires a namespace/name repo,
-// so a bare "mu" is rejected. Auth: `mu cache login registry.platform.loosh.cloud`
+// so a bare "mu" is rejected. Auth: `mu login registry.platform.loosh.cloud`
 // with a push-capable snk_ PAT.
 cache: {
 	remote: "registry.platform.loosh.cloud/loosh-industries/mu-cache"
-	push: {
-		registry:   "registry.platform.loosh.cloud"
-		repository: "loosh-industries/mu-cache"
-	}
+	push:   "registry.platform.loosh.cloud/loosh-industries/mu-cache"
 }
 
 // `mu build --publish <target>` pushes that target's outputs to the platform
 // registry (akashic) as a first-class artifact under loosh-industries/<slug>,
 // tagged by git sha + latest. Same auth as the cache push.
-publish: {
-	registry:   "registry.platform.loosh.cloud"
-	repository: "loosh-industries"
-}
+publish: repository: "registry.platform.loosh.cloud/loosh-industries"
 toolchains: [{
 	toolchain: "bb"
 	from:      "scratch"

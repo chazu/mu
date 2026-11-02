@@ -28,7 +28,9 @@ func TestRegistryOutageHelper(t *testing.T) {
 func outageBuild(t *testing.T, root string, args ...string) (int, []byte) {
 	t.Helper()
 	encoded, _ := json.Marshal(append([]string{"--config", filepath.Join(root, "mu.cue")}, args...))
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	// A silent registry costs one response-header timeout (5s) before the
+	// remote is switched off; leave headroom above it.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRegistryOutageHelper$")
 	child.Env = append(os.Environ(), "MU_OUTAGE_BUILD_ARGS="+string(encoded), "HOME="+filepath.Join(root, "home"))
@@ -99,6 +101,26 @@ func TestColdLocalBuildSurvivesSilentRegistryOnceForDependentActions(t *testing.
 	}
 	if requests.Load() != 0 {
 		t.Fatal("warm build contacted registry")
+	}
+}
+
+// A registry that refuses credentials is not an outage: the build fails and
+// says how to log in, instead of quietly rebuilding without the cache.
+func TestRemoteCacheAuthFailureFailsBuildWithLoginHint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+	defer server.Close()
+	host := strings.TrimPrefix(server.URL, "http://")
+	target := map[string]any{"target": "//t", "toolchain": "shell", "config": map[string]any{"impure": false, "command": []string{"sh", "-c", `printf x > "$MU_OUT/out"`}, "outputs": []string{"out"}}}
+	root := outageFixture(t, host+"/cache", false, []map[string]any{target}, nil)
+	code, output := outageBuild(t, root, "//t")
+	if code == 0 {
+		t.Fatalf("build succeeded despite registry auth failure:\n%s", output)
+	}
+	if !strings.Contains(string(output), "run: mu login "+host) {
+		t.Fatalf("output lacks login hint:\n%s", output)
+	}
+	if strings.Contains(string(output), "remote cache unavailable") {
+		t.Fatalf("auth failure reported as an outage:\n%s", output)
 	}
 }
 

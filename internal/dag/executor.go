@@ -3,6 +3,7 @@ package dag
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -231,6 +232,11 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		key := ComputeActionKey(a)
 		if e.Store != nil {
 			cached, err := e.Store.GetActionResult(ctx, key)
+			if errors.Is(err, cas.ErrUnauthorized) {
+				// A registry refusing credentials needs the user to log in;
+				// building around it would hide the misconfiguration.
+				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: cache lookup: %w", a.ID, err)}
+			}
 			if err == nil && cached != nil {
 				// Cache hit — restore outputs from CAS.
 				if err := e.restoreOutputs(ctx, a, cached, workRoot); err == nil {
@@ -608,11 +614,12 @@ func (e *Executor) restoreOutputs(ctx context.Context, a *Action, result *cas.Ac
 		if !filepath.IsAbs(destination) && root == nil {
 			destination = filepath.Join(a.WorkDir, destination)
 		}
+		// Store.Get verifies the digest at EOF, which stageFile reads to.
 		rc, err := e.Store.Get(ctx, dgst)
 		if err != nil {
 			return err
 		}
-		staging, err := stageFile(ctx, destination, rc, os.FileMode(mode), dgst, root)
+		staging, err := stageFile(ctx, destination, rc, os.FileMode(mode), root)
 		closeErr := rc.Close()
 		if staging != "" {
 			files = append(files, replacement{staging, destination, outputRoot(root, destination)})
@@ -644,7 +651,7 @@ func writeFile(ctx context.Context, path string, src *os.File, root *os.Root) er
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("output %q is not a regular file", path)
 	}
-	staging, err := stageFile(ctx, path, src, info.Mode().Perm(), cas.Digest{}, root)
+	staging, err := stageFile(ctx, path, src, info.Mode().Perm(), root)
 	if err != nil {
 		return err
 	}
@@ -655,9 +662,10 @@ func writeFile(ctx context.Context, path string, src *os.File, root *os.Root) er
 	return outputRename(outputRoot(root, path), staging, path)
 }
 
-// stageFile creates a private sibling and publishes nothing until reads,
-// optional digest verification, chmod, and close have all succeeded.
-func stageFile(ctx context.Context, path string, r io.Reader, mode os.FileMode, expected cas.Digest, root *os.Root) (string, error) {
+// stageFile creates a private sibling and publishes nothing until reads
+// (including a store reader's digest check at EOF), chmod, and close have all
+// succeeded.
+func stageFile(ctx context.Context, path string, r io.Reader, mode os.FileMode, root *os.Root) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -691,17 +699,7 @@ func stageFile(ctx context.Context, path string, r io.Reader, mode os.FileMode, 
 			outputRemove(root, name)
 		}
 	}()
-	r = cas.ContextReader(ctx, r)
-	if expected.IsZero() {
-		_, err = io.Copy(f, r)
-	} else {
-		var actual cas.Digest
-		actual, err = cas.ComputeDigest(io.TeeReader(r, f))
-		if err == nil && actual != expected {
-			err = fmt.Errorf("cached output digest %s does not match %s", actual, expected)
-		}
-	}
-	if err != nil {
+	if _, err = io.Copy(f, cas.ContextReader(ctx, r)); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {

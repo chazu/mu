@@ -140,5 +140,5 @@ CONTINUOUS QUALIFICATION
   nor written. They skip under copy isolation.
 
   Host-shell unit tests explicitly use copy isolation. They are environment
-  tests, not evidence of kernel enforcement. Babashka qualification and real
-  PUDL integration remain separate from this Go/native matrix.
+  tests, not evidence of kernel enforcement. Babashka qualification remains
+  separate from this Go/native matrix.

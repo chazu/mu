@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/sandbox"
 	"github.com/chazu/mu/internal/staging"
 )
@@ -48,6 +49,10 @@ func run(cmd string, args []string) int {
 		return runScratch(args)
 	case "cache":
 		return runCache(args)
+	case "login":
+		return runLogin(args)
+	case "logout":
+		return runLogout(args)
 	case "targets", "t":
 		return runTargets(args)
 	case "target", "graph":
@@ -56,9 +61,10 @@ func run(cmd string, args []string) int {
 	case "plugin", "p":
 		return runPlugin(args)
 	case "observe":
-		return runObserve(args)
+		fmt.Fprintln(os.Stderr, `mu: "observe" was removed; mu is a build tool and no longer does drift detection`)
+		return exitUsage
 	case "verify":
-		return runVerify(args)
+		return runVerifyMoved()
 	case "guide":
 		return runGuide(args)
 	case "version":
@@ -80,11 +86,11 @@ func startStagingSweep() {
 	if os.Getenv("MU_NO_STAGING_SWEEP") == "1" {
 		return
 	}
-	home, err := os.UserHomeDir()
+	p, err := paths.Default()
 	if err != nil {
 		return
 	}
-	staging.MaybeSweep(home, time.Now())
+	staging.MaybeSweep(p, time.Now())
 }
 
 func usage(w io.Writer) {
@@ -94,13 +100,13 @@ Commands:
   build (b)  Build one or more targets
   scratch    Build toolchains from scratch
   cache      Inspect the local CAS cache
+  login      Store credentials for an OCI registry host (mu logout <host> removes them)
   targets    List targets and their dependency chains (alias t)
   plugin (p) List and inspect plugins
-  observe    Check current state of targets (drift detection)
-  verify     Re-hash CAS blobs, check schema namespace conventions, report issues
   guide      Quick-reference guides for mu features
   version    Print the mu version
   help       Show help for mu or a command (mu help <command> [<subcommand>])
 
-Flags may come before or after positional arguments; "--" ends flags.`)
+Flags may come before or after positional arguments; "--" ends flags.
+MU_HOME relocates mu's state directory (default ~/.mu; see mu guide cache).`)
 }

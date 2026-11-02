@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,6 +105,10 @@ func (s *DiskStore) Has(_ context.Context, dgst Digest) (bool, error) {
 }
 
 // Get opens the blob. A missing blob yields an error matching fs.ErrNotExist.
+// The reader is digest-verified (see VerifyReader): if the file on disk no
+// longer hashes to dgst (bit-rot, tampering), reading it to EOF fails with
+// ErrDigestMismatch and the corrupt file is removed, so the next lookup is a
+// miss that re-fetches or rebuilds rather than serving bad bytes again.
 func (s *DiskStore) Get(_ context.Context, dgst Digest) (io.ReadCloser, error) {
 	p, err := s.BlobPath(dgst)
 	if err != nil {
@@ -113,7 +118,10 @@ func (s *DiskStore) Get(_ context.Context, dgst Digest) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cas: get blob %s: %w", dgst, err)
 	}
-	return f, nil
+	return VerifyReader(f, dgst, func() {
+		slog.Warn("cas: removing corrupt local blob", "digest", dgst.String())
+		_ = os.Remove(p)
+	}), nil
 }
 
 // Put streams r into a temporary file while hashing it, fsyncs it, and renames

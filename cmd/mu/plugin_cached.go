@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,19 +20,40 @@ type cachedPluginVersion struct {
 	path   string
 	digest cas.Digest
 	bundle bool
-	legacy bool
 }
 
-func cachedPluginVersions(name string) ([]cachedPluginVersion, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+// pluginEntryHash parses an entry of a plugin's directory under the plugins
+// dir: bundle-<hex>/ (a bundle) or plugin-<hex>[.ext] (a standalone file).
+// It returns the hex as written, of any length; 64 characters is a full
+// sha256 identity, anything shorter is a legacy entry from releases that
+// named versions by a 12-hex prefix. ok is false for anything else
+// (including in-flight .bundle-*/.plugin-* staging).
+func pluginEntryHash(entry fs.DirEntry) (hash string, bundle, ok bool) {
+	bundle = strings.HasPrefix(entry.Name(), "bundle-") && entry.IsDir()
+	single := strings.HasPrefix(entry.Name(), "plugin-") && entry.Type().IsRegular()
+	if !bundle && !single {
+		return "", false, false
 	}
-	return cachedPluginVersionsIn(filepath.Join(home, ".mu", "plugins"), name)
+	prefix := "plugin-"
+	if bundle {
+		prefix = "bundle-"
+	}
+	hash = strings.TrimPrefix(entry.Name(), prefix)
+	if single {
+		hash = strings.TrimSuffix(hash, filepath.Ext(hash))
+	}
+	if len(hash) == 0 || len(hash) > 64 {
+		return "", false, false
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return "", false, false
+	}
+	return hash, bundle, true
 }
 
 // cachedPluginVersionsIn lists the versions of plugin name materialized
-// under pluginsDir (normally ~/.mu/plugins).
+// under pluginsDir (normally ~/.mu/plugins). Legacy short-hash entries are
+// not versions: nothing can select them, and `mu cache clean` removes them.
 func cachedPluginVersionsIn(pluginsDir, name string) ([]cachedPluginVersion, error) {
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
 		return nil, fmt.Errorf("invalid plugin cache name %q", name)
@@ -44,43 +66,13 @@ func cachedPluginVersionsIn(pluginsDir, name string) ([]cachedPluginVersion, err
 	if err != nil {
 		return nil, err
 	}
-	var versions []cachedPluginVersion
-	for _, entry := range entries {
-		bundle := strings.HasPrefix(entry.Name(), "bundle-") && entry.IsDir()
-		single := strings.HasPrefix(entry.Name(), "plugin-") && entry.Type().IsRegular()
-		if !bundle && !single {
-			continue
-		}
-		prefix := "plugin-"
-		if bundle {
-			prefix = "bundle-"
-		}
-		hash := strings.TrimPrefix(entry.Name(), prefix)
-		if single {
-			hash = strings.TrimSuffix(hash, filepath.Ext(hash))
-		}
-		if len(hash) == 0 || len(hash) > 64 {
-			continue
-		}
-		if _, err := hex.DecodeString(hash); err != nil {
-			continue
-		}
-		versions = append(versions, cachedPluginVersion{path: filepath.Join(dir, entry.Name()), digest: cas.NewSHA256(hash), bundle: bundle, legacy: len(hash) != 64})
-	}
-	// Ignore short legacy aliases when a full-digest publication supersedes
-	// them. Old partial extraction paths must not displace complete versions.
 	var out []cachedPluginVersion
-	for _, v := range versions {
-		superseded := false
-		for _, other := range versions {
-			if v.legacy && !other.legacy && v.bundle == other.bundle && strings.HasPrefix(other.digest.Hash, v.digest.Hash) {
-				superseded = true
-				break
-			}
+	for _, entry := range entries {
+		hash, bundle, ok := pluginEntryHash(entry)
+		if !ok || len(hash) != 64 {
+			continue
 		}
-		if !superseded {
-			out = append(out, v)
-		}
+		out = append(out, cachedPluginVersion{path: filepath.Join(dir, entry.Name()), digest: cas.NewSHA256(hash), bundle: bundle})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].digest.String() == out[j].digest.String() {
@@ -96,14 +88,10 @@ func cachedPluginVersionsIn(pluginsDir, name string) ([]cachedPluginVersion, err
 
 // A single cached identity remains convenient. Multiple versions require an
 // explicit full digest; directory order is never a version-selection policy.
-func resolveCachedPlugin(name string, selection ...string) (plugin.PluginDef, cas.Digest, error) {
-	versions, err := cachedPluginVersions(name)
+func resolveCachedPlugin(pluginsDir, name, requested string) (plugin.PluginDef, cas.Digest, error) {
+	versions, err := cachedPluginVersionsIn(pluginsDir, name)
 	if err != nil {
 		return plugin.PluginDef{}, cas.Digest{}, err
-	}
-	requested := ""
-	if len(selection) > 0 {
-		requested = selection[0]
 	}
 	if requested != "" {
 		digest, err := cas.ParseFullDigest(requested)
@@ -112,7 +100,7 @@ func resolveCachedPlugin(name string, selection ...string) (plugin.PluginDef, ca
 		}
 		var matches []cachedPluginVersion
 		for _, v := range versions {
-			if !v.legacy && v.digest == digest {
+			if v.digest == digest {
 				matches = append(matches, v)
 			}
 		}
