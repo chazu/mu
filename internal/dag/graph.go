@@ -27,6 +27,11 @@ type Action struct {
 	ProjectRoot string // coordinator scope; empty for intentionally unrestricted direct library actions
 	Impure      bool   // skip CAS cache when true
 
+	// EnvPassthrough names host environment variables copied into the action
+	// environment at execution time (when set on the host). Names are part of
+	// the cache key; values are not, so they never bake into the plan.
+	EnvPassthrough []string
+
 	// Per-attempt wall-clock timeout in seconds. 0 = no timeout.
 	TimeoutS int
 

@@ -160,6 +160,7 @@ type ActionSpec struct {
 	Outputs           []string          `json:"outputs"`              // declared output file paths
 	DependsOn         []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
 	Env               map[string]string `json:"env,omitempty"`
+	EnvPassthrough    []string          `json:"env_passthrough,omitempty"`     // host env var names copied in at execution; names (not values) are in the cache key
 	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`       // name -> secret reference (e.g. "pass:deploy/token")
 	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name -> delivery mode: "env" (default) or "file"
 	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name -> secret reference; written via $MU_SEALED_OUT_DIR

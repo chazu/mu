@@ -204,6 +204,7 @@ type planAction struct {
 	Outputs           []string          `json:"outputs"`
 	DependsOn         []string          `json:"depends_on"`
 	Env               map[string]string `json:"env,omitempty"`
+	EnvPassthrough    []string          `json:"env_passthrough,omitempty"`
 	SealedInputs      map[string]string `json:"sealed_inputs,omitempty"`
 	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`
 	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`
@@ -255,7 +256,7 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 		out = append(out, planAction{
 			ID: a.ID, ActionKey: dag.ComputeActionKey(a).Digest.String(),
 			Command: a.Command, Body: a.Body, EweDigest: eweDigest,
-			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env,
+			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env, EnvPassthrough: a.EnvPassthrough,
 			SealedInputs: a.SealedInputs, SealedInputModes: a.SealedInputModes,
 			SealedOutputs: a.SealedOutputs, SealedOutputModes: a.SealedOutputModes,
 			Network: a.Network, WorkDir: a.WorkDir, ProjectRoot: a.ProjectRoot, Impure: a.Impure,

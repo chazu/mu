@@ -11,6 +11,7 @@ HOW CACHING WORKS
   - Sorted input digests (sha256 of each input file)
   - Declared environment variables (sorted); pure defaults are clean, while
     impure bare commands may inherit
+  - Sorted env_passthrough names (never their host values)
   - Sorted toolchain artifact paths and digests, including bare vs sandbox mode
   - Sorted declared output paths and sandbox source paths
   - Network flag

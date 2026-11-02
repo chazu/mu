@@ -81,6 +81,11 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 
 		env = dag.ActionEnvironment(env, spec.Impure || len(spec.SealedOutputs) > 0)
 
+		passthrough, err := resolveEnvPassthrough(spec)
+		if err != nil {
+			return nil, err
+		}
+
 		workDir := projectRoot
 		if spec.WorkDir != "" {
 			workDir = filepath.Join(projectRoot, spec.WorkDir)
@@ -207,6 +212,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			Outputs:           spec.Outputs,
 			DependsOn:         dependsOn,
 			Env:               env,
+			EnvPassthrough:    passthrough,
 			SealedInputs:      sealedInputs,
 			SealedInputModes:  sealedInputModes,
 			SealedOutputs:     sealedOutputs,
@@ -222,6 +228,25 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 	}
 
 	return actions, nil
+}
+
+// resolveEnvPassthrough validates and copies an action's env_passthrough names.
+// Duplicates are rejected so the key-hashed name set has one spelling.
+func resolveEnvPassthrough(spec plugin.ActionSpec) ([]string, error) {
+	if len(spec.EnvPassthrough) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(spec.EnvPassthrough))
+	for _, name := range spec.EnvPassthrough {
+		if name == "" || strings.ContainsAny(name, "=\x00") {
+			return nil, fmt.Errorf("action %q env_passthrough: invalid variable name %q", spec.ID, name)
+		}
+		if _, dup := seen[name]; dup {
+			return nil, fmt.Errorf("action %q env_passthrough: duplicate variable name %q", spec.ID, name)
+		}
+		seen[name] = struct{}{}
+	}
+	return append([]string(nil), spec.EnvPassthrough...), nil
 }
 
 // openProjectFile allows project-relative paths and absolute paths lexically

@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-func TestBuildEnvNil(t *testing.T) {
-	// nil env map = inherit parent environment (backward compat).
+func TestBuildEnvNilIsClean(t *testing.T) {
+	// Host inheritance is decided by actionEnv, never by a nil os/exec Env.
 	got := buildEnv(nil)
-	if got != nil {
-		t.Errorf("buildEnv(nil) = %v, want nil", got)
+	if got == nil || len(got) != 0 {
+		t.Errorf("buildEnv(nil) = %#v, want non-nil empty slice", got)
 	}
 }
 
