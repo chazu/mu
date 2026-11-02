@@ -134,7 +134,7 @@ func TestActionKey_EnvOrderIndependent(t *testing.T) {
 }
 
 // TestActionKey_ConfigFormatInvariant verifies the claim made in
-// docs/scout-cue-migration.md §"Cache-key verification": the action cache key
+// docs/archive/scout-cue-migration.md §"Cache-key verification": the action cache key
 // is a pure function of the resolved Action struct, independent of the source
 // config format (mu.json, mu.cue) and its serialization (whitespace, key
 // order, etc.). As long as two config files decode to semantically-equivalent

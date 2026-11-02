@@ -9,7 +9,7 @@ This document describes how to use `secret-gen` to declaratively mint
 secrets and persist them through a `store_secret`-capable provider
 plugin (today: `pass`). For the underlying protocol design, see the
 brainstorm at
-[`brainstorms/2026-04-29-writable-secrets.md`](brainstorms/2026-04-29-writable-secrets.md).
+[`archive/history/2026-04-29-writable-secrets.md`](archive/history/2026-04-29-writable-secrets.md).
 
 ---
 

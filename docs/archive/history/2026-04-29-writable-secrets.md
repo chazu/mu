@@ -291,7 +291,7 @@ values) — changing either invalidates the cache, which previously
 it didn't. `stdin` mode was scoped out of v1: the load-bearing case
 (multi-line keys, kubeconfigs) is covered by `file`, and `stdin`
 would require a sandbox plumbing change for parity. Full user guide
-at [`docs/sealed-input-delivery-modes.md`](../sealed-input-delivery-modes.md).
+at [`docs/sealed-input-delivery-modes.md`](../../sealed-input-delivery-modes.md).
 
 **Phase 5 — writable-ref allow-list.** A new top-level `secrets`
 block in `mu.cue` (`#SecretsConfig` in the schema) carrying an
@@ -307,7 +307,7 @@ shared across all schemes — `pass` and a hypothetical future
 `vault` would draw from the same list. Read operations
 (`sealed_inputs` / `resolve_secret`) are unaffected; the policy
 gates writes only. Full user guide at
-[`docs/secrets-write-policy.md`](../secrets-write-policy.md).
+[`docs/secrets-write-policy.md`](../../secrets-write-policy.md).
 
 **Deferred to future phases.**
 - `stdin` delivery mode for `sealed_inputs` (would require sandbox
