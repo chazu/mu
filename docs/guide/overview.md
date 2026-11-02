@@ -35,7 +35,8 @@ THE DAY-TO-DAY VERBS
   mu cache ls               List cached action results.
   mu plugin list            Show registered plugins.
   mu plugin info <name>     Show capabilities/metadata for one plugin.
-  mu target list            Show targets defined in this project.
+  mu targets                Show targets defined in this project.
+  mu targets --deps <t>     Show a target's dependency chain.
 
 WHAT TO READ NEXT
 

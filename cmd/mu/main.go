@@ -48,10 +48,11 @@ func run(cmd string, args []string) int {
 		return runScratch(args)
 	case "cache":
 		return runCache(args)
-	case "target", "t":
-		return runTarget(args)
-	case "graph":
-		return runGraph(args)
+	case "targets", "t":
+		return runTargets(args)
+	case "target", "graph":
+		fmt.Fprintf(os.Stderr, "mu: %q was replaced by \"mu targets\" (list: mu targets; dependency chain: mu targets --deps/--rdeps <target>)\n", cmd)
+		return exitUsage
 	case "plugin", "p":
 		return runPlugin(args)
 	case "observe":
@@ -93,8 +94,7 @@ Commands:
   build (b)  Build one or more targets
   scratch    Build toolchains from scratch (override with MU_SCRATCH)
   cache      Inspect the local CAS cache
-  target (t) List and inspect targets
-  graph      Show the dependency chain of a target
+  targets    List targets and their dependency chains (alias t)
   plugin (p) List and inspect plugins
   observe    Check current state of targets (drift detection)
   verify     Re-hash CAS blobs, check schema namespace conventions, report issues

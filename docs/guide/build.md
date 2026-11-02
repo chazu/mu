@@ -88,8 +88,11 @@ ACTION CACHING
 
 OTHER COMMANDS
 
-  mu target list                List all targets in the project.
-  mu target list --json         List targets as JSON.
+  mu targets [pattern...]       List targets (all, or those matching).
+  mu targets --json             List targets as JSON.
+  mu targets --deps <target>    Show what a target depends on (tree).
+  mu targets --rdeps <target>   Show what depends on a target.
+  mu targets --dot [...]        Emit Graphviz DOT (exclusive with --json).
 
 ACTION ENVIRONMENT AND WORK DIRECTORY
 
