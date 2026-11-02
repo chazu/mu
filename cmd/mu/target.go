@@ -8,12 +8,13 @@ import (
 )
 
 func runTarget(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, `usage: mu target <command>
+	if len(args) == 0 || isHelpArg(args[0]) {
+		w, code := dispatcherUsage(args)
+		fmt.Fprintln(w, `usage: mu target <command>
 
 Commands:
   list      List targets defined in mu.cue`)
-		return exitUsage
+		return code
 	}
 
 	switch args[0] {
@@ -29,8 +30,8 @@ func runTargetList(args []string) int {
 	fs := flag.NewFlagSet("target list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	ctx := newCLIContext("target list", fs)
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "target list [flags]"); !ok {
+		return code
 	}
 	if code, ok := ctx.Resolve(resolveOpts{NeedConfig: true}); !ok {
 		return code

@@ -27,8 +27,8 @@ func runPluginPush(args []string) int {
 	c := newCLIContext("plugin push", fs)
 	var attach stringSliceFlag
 	fs.Var(&attach, "attach", "attach a file to the pushed plugin as a referrer: <artifactType>=<path> (repeatable)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin push [flags] <name>"); !ok {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin push [--attach <artifactType>=<path>] <name>")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -19,38 +20,53 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		usage(os.Stderr)
+		os.Exit(exitUsage)
 	}
 	switch os.Args[1] {
-	case "version", "guide", "help", "-h", "--help":
+	case "version", "guide", "help", "-h", "-help", "--help":
 	default:
 		startStagingSweep()
 	}
-	switch os.Args[1] {
+	os.Exit(run(os.Args[1], os.Args[2:]))
+}
+
+// run dispatches one mu command and returns its exit code. "help <command>
+// [<subcommand>]" re-dispatches with -h appended, so a command's help is the
+// same usage text its own -h prints.
+func run(cmd string, args []string) int {
+	switch cmd {
+	case "help", "-h", "-help", "--help":
+		if len(args) > 0 && !isHelpArg(args[0]) {
+			return run(args[0], append(append([]string(nil), args[1:]...), "-h"))
+		}
+		usage(os.Stdout)
+		return exitOK
 	case "build", "b":
-		os.Exit(runBuild(os.Args[2:]))
+		return runBuild(args)
 	case "scratch":
-		os.Exit(runScratch(os.Args[2:]))
+		return runScratch(args)
 	case "cache":
-		os.Exit(runCache(os.Args[2:]))
+		return runCache(args)
 	case "target", "t":
-		os.Exit(runTarget(os.Args[2:]))
+		return runTarget(args)
 	case "graph":
-		os.Exit(runGraph(os.Args[2:]))
+		return runGraph(args)
 	case "plugin", "p":
-		os.Exit(runPlugin(os.Args[2:]))
+		return runPlugin(args)
 	case "observe":
-		os.Exit(runObserve(os.Args[2:]))
+		return runObserve(args)
 	case "verify":
-		os.Exit(runVerify(os.Args[2:]))
+		return runVerify(args)
 	case "guide":
-		os.Exit(runGuide(os.Args[2:]))
+		return runGuide(args)
 	case "version":
 		fmt.Println("mu " + muVersion)
+		return exitOK
 	default:
-		usage()
-		os.Exit(2)
+		fmt.Fprintf(os.Stderr, "mu: unknown command %q\n\n", cmd)
+		usage(os.Stderr)
+		return exitUsage
 	}
 }
 
@@ -70,8 +86,8 @@ func startStagingSweep() {
 	staging.MaybeSweep(home, time.Now())
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, `usage: mu <command> [arguments]
+func usage(w io.Writer) {
+	fmt.Fprintln(w, `usage: mu <command> [arguments]
 
 Commands:
   build (b)  Build one or more targets
@@ -83,5 +99,8 @@ Commands:
   observe    Check current state of targets (drift detection)
   verify     Re-hash CAS blobs, check schema namespace conventions, report issues
   guide      Quick-reference guides for mu features
-  version    Print the mu version`)
+  version    Print the mu version
+  help       Show help for mu or a command (mu help <command> [<subcommand>])
+
+Flags may come before or after positional arguments; "--" ends flags.`)
 }

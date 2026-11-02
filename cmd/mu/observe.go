@@ -19,8 +19,8 @@ func runObserve(args []string) int {
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("observe", fs)
 	ndjsonOut := fs.Bool("ndjson", false, "output current.records as NDJSON (one record per line)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "observe [flags] <target>..."); !ok {
+		return code
 	}
 
 	targets := fs.Args()

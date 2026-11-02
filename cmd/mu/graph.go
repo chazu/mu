@@ -16,8 +16,8 @@ func runGraph(args []string) int {
 	cli := newCLIContext("graph", fs)
 	reverse := fs.Bool("reverse", false, "show what depends on the target instead of what it depends on")
 	dot := fs.Bool("dot", false, "emit Graphviz DOT format")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "graph [flags] <target>"); !ok {
+		return code
 	}
 
 	rest := fs.Args()

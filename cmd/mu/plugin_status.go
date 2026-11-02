@@ -21,8 +21,8 @@ func runPluginStatus(args []string) int {
 	fs := flag.NewFlagSet("plugin status", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin status", fs)
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin status [flags]"); !ok {
+		return code
 	}
 	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true}); !ok {
 		return code

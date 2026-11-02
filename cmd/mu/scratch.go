@@ -18,8 +18,8 @@ func runScratch(args []string) int {
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("scratch", fs)
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "scratch [flags]"); !ok {
+		return code
 	}
 	if code, ok := cli.Resolve(resolveOpts{
 		NeedConfig:     true,

@@ -26,8 +26,8 @@ func runPluginTest(args []string) int {
 	scenarioFilter := fs.String("scenario", "", "run only scenarios whose name matches (substring)")
 	update := fs.Bool("update", false, "rewrite golden files from the actual response")
 	bundled := fs.Bool("bundled", true, "include mu's built-in generic scenarios")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin test [flags] <plugin-path>"); !ok {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin test <plugin-path>")

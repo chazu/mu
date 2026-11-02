@@ -21,8 +21,8 @@ func runCacheClean(args []string) int {
 	fs.SetOutput(os.Stderr)
 	dryRun := fs.Bool("dry-run", false, "show what would be removed without deleting")
 	jsonOut := fs.Bool("json", false, "output as JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseFlags(fs, args, "cache clean [flags]"); !ok {
+		return code
 	}
 
 	cacheDir := cachePath()
