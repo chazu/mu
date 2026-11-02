@@ -7,6 +7,10 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **mu warns about unvalidated plugin config.** When a plan-capable plugin
+  declares no `config_schema` and a target passes it config, `mu build`
+  prints one warning per plugin. Every in-tree plan-capable plugin now
+  declares a schema (remote-exec and remote-file were the last).
 - **The `file` plugin runs its Go implementation.** `plugin.bb` is gone;
   build the binary with `go build -trimpath -o plugins/file/plugin ./plugins/file`.
   Paths in its shell commands are now escaped, so a path containing `'` no

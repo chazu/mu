@@ -44,6 +44,14 @@ METHODS
     Plugins must declare every supported method in `capabilities`.
     `plan` is required only for build/convergence plugins.
 
+    Plan-capable plugins should declare `config_schema` (field name ->
+    {"type", "description", "default", "required"}): mu validates each
+    target's config against it before planning, so a typo or wrong type
+    fails early. When a plan-capable plugin declares none and a target
+    passes it config, mu prints one warning per plugin per run. Plugins
+    that do not plan (secret providers, advisers) take no target config
+    and need no schema.
+
   plan (optional; required for build/convergence plugins)
     Request:  {
       "method": "plan",

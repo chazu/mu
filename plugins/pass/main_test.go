@@ -246,3 +246,41 @@ func TestCopierHelperProcess(t *testing.T) {
 	}
 	os.Exit(0)
 }
+
+// TestPassHelperProcess serves the pass plugin over stdio when launched by
+// TestTargetConfigForPassRejectedAtPlan.
+func TestPassHelperProcess(t *testing.T) {
+	if os.Getenv("MU_PASS_PLUGIN_HELPER") != "1" {
+		return
+	}
+	newPlugin().Main()
+	os.Exit(0)
+}
+
+// pass is a secret provider: it takes no target config and cannot plan,
+// so it declares no config_schema (mu warns about a missing schema only
+// for plan-capable plugins). A target that names it as its toolchain and
+// passes config is rejected at plan time rather than silently accepted.
+func TestTargetConfigForPassRejectedAtPlan(t *testing.T) {
+	useFakePass(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MU_PASS_PLUGIN_HELPER", "1")
+	cs, err := oci.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &coordinator.Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Plugins: []config.PluginDef{{Name: "pass", Command: []string{os.Args[0], "-test.run=^TestPassHelperProcess$"}}},
+			Targets: []config.Target{{Name: "//p", Toolchain: "pass", Config: map[string]any{"store_dir": 5}}},
+		},
+		Store:           cs,
+		Workers:         1,
+		NoDiscoverCache: true,
+	}
+	_, err = c.Plan(context.Background(), []string{"//p"})
+	if err == nil || !strings.Contains(err.Error(), "plan: capability not supported") {
+		t.Fatalf("Plan err = %v, want plan-capability rejection", err)
+	}
+}
