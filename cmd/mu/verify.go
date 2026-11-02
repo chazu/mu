@@ -19,8 +19,8 @@ func runVerify(args []string) int {
 	fs.SetOutput(os.Stderr)
 	ctx := newCLIContext("verify", fs)
 	fix := fs.Bool("fix", false, "delete corrupt blobs")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "verify [flags]"); !ok {
+		return code
 	}
 	if code, ok := ctx.Resolve(resolveOpts{}); !ok {
 		return code

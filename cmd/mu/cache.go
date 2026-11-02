@@ -140,8 +140,8 @@ func runCacheLs(args []string) int {
 	fs.SetOutput(os.Stderr)
 	toolchains := fs.Bool("toolchains", false, "show only toolchain manifests")
 	jsonOut := fs.Bool("json", false, "output as JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseFlags(fs, args, "cache ls [flags]"); !ok {
+		return code
 	}
 
 	cacheDir := cachePath()
@@ -318,8 +318,8 @@ func runCacheInspect(args []string) int {
 	fs := flag.NewFlagSet("cache inspect", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	jsonOut := fs.Bool("json", false, "output as JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseFlags(fs, args, "cache inspect [flags] <ref>"); !ok {
+		return code
 	}
 
 	ref := fs.Arg(0)
@@ -483,8 +483,8 @@ func runCacheSize(args []string) int {
 	fs := flag.NewFlagSet("cache size", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	jsonOut := fs.Bool("json", false, "output as JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseFlags(fs, args, "cache size [flags]"); !ok {
+		return code
 	}
 
 	cacheDir := cachePath()
@@ -534,8 +534,9 @@ func runCacheSize(args []string) int {
 // --- mu cache (dispatcher) ---
 
 func runCache(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, `usage: mu cache <command>
+	if len(args) == 0 || isHelpArg(args[0]) {
+		w, code := dispatcherUsage(args)
+		fmt.Fprintln(w, `usage: mu cache <command>
 
 Commands:
   ls        List cached action results and toolchains
@@ -545,7 +546,7 @@ Commands:
   push      Copy cached actions to the remote OCI registry (cache.push)
   login     Log in to an OCI registry [host] (default: cache.push.registry; stored in ~/.mu/credentials.json)
   logout    Remove stored credentials for an OCI registry [host] (default: cache.push.registry)`)
-		return 2
+		return code
 	}
 
 	switch args[0] {

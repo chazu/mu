@@ -36,8 +36,8 @@ func runPluginInfo(args []string) int {
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin info", fs)
 	digest := fs.String("digest", "", "select a cached plugin by full SHA-256 digest")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin info [flags] <name>"); !ok {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin info <name>")

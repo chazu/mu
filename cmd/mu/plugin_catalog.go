@@ -30,8 +30,8 @@ func runPluginSearch(args []string) int {
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin search", fs)
 	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin search [flags] [query]"); !ok {
+		return code
 	}
 	if fs.NArg() > 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin search [--catalog URL] [query]")
@@ -77,8 +77,8 @@ func runPluginInstall(args []string) int {
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin install", fs)
 	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin install [flags] <name[@version]>"); !ok {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin install [--catalog URL] <name[@version]>")
@@ -115,8 +115,8 @@ func runPluginUpdate(args []string) int {
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin update", fs)
 	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin update [flags] [name]"); !ok {
+		return code
 	}
 	if fs.NArg() > 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin update [--catalog URL] [name]")
@@ -171,8 +171,8 @@ func runPluginLock(args []string) int {
 	fs := flag.NewFlagSet("plugin lock", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin lock", fs)
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin lock [flags]"); !ok {
+		return code
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin lock [--config path] [--json]")

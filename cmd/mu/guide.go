@@ -15,7 +15,7 @@ import (
 )
 
 func runGuide(args []string) int {
-	if len(args) == 0 {
+	if len(args) == 0 || isHelpArg(args[0]) {
 		printGuideIndex()
 		return 0
 	}
@@ -60,8 +60,8 @@ func runGuide(args []string) int {
 		fs.SetOutput(os.Stderr)
 		digest := fs.String("digest", "", "select a cached guide by full SHA-256 digest")
 		offline := fs.Bool("offline", false, "use cached/local guides without downloads")
-		if err := fs.Parse(args[1:]); err != nil {
-			return exitUsage
+		if code, ok := parseFlags(fs, args[1:], "guide plugin [flags] <name>"); !ok {
+			return code
 		}
 		if fs.NArg() != 1 {
 			fmt.Fprintln(os.Stderr, "usage: mu guide plugin [--digest sha256:...] <name>")

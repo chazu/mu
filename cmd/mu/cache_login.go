@@ -31,8 +31,8 @@ func runCacheLogin(args []string) int {
 	username := fs.String("username", "", "registry username")
 	password := fs.String("password", "", "registry password (prefer --password-stdin)")
 	passwordStdin := fs.Bool("password-stdin", false, "read password from stdin")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "cache login [flags] [host]"); !ok {
+		return code
 	}
 
 	if !c.requireRegistry() {
@@ -95,8 +95,8 @@ func runCacheLogout(args []string) int {
 	fs := flag.NewFlagSet("cache logout", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	c := newCLIContext("cache logout", fs)
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "cache logout [flags] [host]"); !ok {
+		return code
 	}
 
 	if code, ok := c.Resolve(resolveOpts{NeedConfig: true}); !ok {

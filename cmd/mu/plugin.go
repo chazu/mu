@@ -27,8 +27,9 @@ import (
 )
 
 func runPlugin(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, `usage: mu plugin <command>
+	if len(args) == 0 || isHelpArg(args[0]) {
+		w, code := dispatcherUsage(args)
+		fmt.Fprintln(w, `usage: mu plugin <command>
 
 Commands:
   list      List registered plugins
@@ -41,7 +42,7 @@ Commands:
   push      Publish a plugin to the configured OCI cache
   status    Reconcile declared plugins against the local cache
   test      Run scenarios against a plugin (bundled + testdata/*.yaml)`)
-		return 2
+		return code
 	}
 
 	switch args[0] {
@@ -75,8 +76,8 @@ func runPluginAdd(args []string) int {
 	fs := flag.NewFlagSet("plugin add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin add", fs)
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin add [flags] <name>"); !ok {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: mu plugin add <name>")
@@ -138,8 +139,8 @@ func runPluginList(args []string) int {
 	discover := fs.Bool("discover", false, "start plugins and run discover to show capabilities")
 	cached := fs.Bool("cached", false, "show all //plugins/* targets with their CAS digests")
 	remote := fs.Bool("remote", false, "list plugins available in configured remote OCI caches")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "plugin list [flags]"); !ok {
+		return code
 	}
 
 	cli.JSON = *cli.flagJSON
