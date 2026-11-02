@@ -1,14 +1,4 @@
-// Package archivelimit is mu's shared extraction budget. Every path that
-// expands an archive (scratch toolchains, catalog source archives, plugin CAS
-// bundles) counts entries and expanded bytes against one policy, so a small
-// compressed input cannot expand into unbounded disk use or inode churn.
-//
-// Limits are enforced on the bytes actually written, not only on sizes the
-// archive declares, and entries are counted whether they are extracted or
-// skipped. Defaults are sized from real toolchains with generous headroom;
-// operators can override them with environment variables when a legitimate
-// archive is larger.
-package archivelimit
+package archive
 
 import (
 	"errors"
@@ -21,12 +11,10 @@ import (
 // ErrExceeded marks an archive rejected for exceeding an extraction limit.
 var ErrExceeded = errors.New("archive exceeds extraction limit")
 
-// Environment overrides, applied to every profile when set.
-const (
-	EnvMaxEntries    = "MU_EXTRACT_MAX_ENTRIES"
-	EnvMaxFileBytes  = "MU_EXTRACT_MAX_FILE_BYTES"
-	EnvMaxTotalBytes = "MU_EXTRACT_MAX_TOTAL_BYTES"
-)
+// EnvMaxBytes, when set to a positive integer, replaces both the per-file and
+// the total expanded-byte limit of every profile. Entry counts have no
+// override; the defaults are far above any real archive.
+const EnvMaxBytes = "MU_ARCHIVE_MAX_BYTES"
 
 // Limits bounds one extraction. Every field must be positive.
 type Limits struct {
@@ -55,20 +43,20 @@ type Budget struct {
 	total   int64
 }
 
-// New returns a budget for base with any environment overrides applied.
-// A malformed override is an error rather than a silently ignored limit.
-func New(base Limits) (*Budget, error) {
+// NewBudget returns a budget for base with any MU_ARCHIVE_MAX_BYTES override
+// applied. A malformed override is an error rather than an ignored limit.
+func NewBudget(base Limits) (*Budget, error) {
 	l, err := withEnv(base, os.LookupEnv)
 	if err != nil {
 		return nil, err
 	}
-	return NewWithLimits(l)
+	return NewBudgetWithLimits(l)
 }
 
-// NewWithLimits returns a budget for exactly l, ignoring the environment.
-func NewWithLimits(l Limits) (*Budget, error) {
+// NewBudgetWithLimits returns a budget for exactly l, ignoring the environment.
+func NewBudgetWithLimits(l Limits) (*Budget, error) {
 	if l.MaxEntries <= 0 || l.MaxFileBytes <= 0 || l.MaxTotalBytes <= 0 {
-		return nil, fmt.Errorf("archivelimit: limits must be positive: %+v", l)
+		return nil, fmt.Errorf("archive: limits must be positive: %+v", l)
 	}
 	return &Budget{limits: l}, nil
 }
@@ -81,7 +69,7 @@ func (b *Budget) Limits() Limits { return b.limits }
 func (b *Budget) Entry(name string) error {
 	b.entries++
 	if b.entries > b.limits.MaxEntries {
-		return fmt.Errorf("%w: more than %d entries at %q (raise with %s)", ErrExceeded, b.limits.MaxEntries, name, EnvMaxEntries)
+		return fmt.Errorf("%w: more than %d entries at %q", ErrExceeded, b.limits.MaxEntries, name)
 	}
 	return nil
 }
@@ -93,10 +81,10 @@ func (b *Budget) Declared(name string, size int64) error {
 		return nil
 	}
 	if size > b.limits.MaxFileBytes {
-		return fmt.Errorf("%w: %q declares %d bytes, over the %d-byte file limit (raise with %s)", ErrExceeded, name, size, b.limits.MaxFileBytes, EnvMaxFileBytes)
+		return fmt.Errorf("%w: %q declares %d bytes, over the %d-byte file limit (raise with %s)", ErrExceeded, name, size, b.limits.MaxFileBytes, EnvMaxBytes)
 	}
 	if size > b.limits.MaxTotalBytes-b.total {
-		return fmt.Errorf("%w: %q would expand the archive past %d bytes (raise with %s)", ErrExceeded, name, b.limits.MaxTotalBytes, EnvMaxTotalBytes)
+		return fmt.Errorf("%w: %q would expand the archive past %d bytes (raise with %s)", ErrExceeded, name, b.limits.MaxTotalBytes, EnvMaxBytes)
 	}
 	return nil
 }
@@ -119,43 +107,24 @@ func (b *Budget) Copy(dst io.Writer, src io.Reader, name string) (int64, error) 
 	var probe [1]byte
 	if m, _ := io.ReadFull(src, probe[:]); m > 0 {
 		if fileLimited {
-			return n, fmt.Errorf("%w: %q expands past the %d-byte file limit (raise with %s)", ErrExceeded, name, b.limits.MaxFileBytes, EnvMaxFileBytes)
+			return n, fmt.Errorf("%w: %q expands past the %d-byte file limit (raise with %s)", ErrExceeded, name, b.limits.MaxFileBytes, EnvMaxBytes)
 		}
-		return n, fmt.Errorf("%w: %q expands the archive past %d bytes (raise with %s)", ErrExceeded, name, b.limits.MaxTotalBytes, EnvMaxTotalBytes)
+		return n, fmt.Errorf("%w: %q expands the archive past %d bytes (raise with %s)", ErrExceeded, name, b.limits.MaxTotalBytes, EnvMaxBytes)
 	}
 	return n, nil
 }
 
 func withEnv(base Limits, lookup func(string) (string, bool)) (Limits, error) {
+	raw, ok := lookup(EnvMaxBytes)
+	if !ok || raw == "" {
+		return base, nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v <= 0 {
+		return Limits{}, fmt.Errorf("archive: %s must be a positive integer, got %q", EnvMaxBytes, raw)
+	}
 	l := base
-	parse := func(key string) (int64, bool, error) {
-		raw, ok := lookup(key)
-		if !ok || raw == "" {
-			return 0, false, nil
-		}
-		v, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || v <= 0 {
-			return 0, false, fmt.Errorf("archivelimit: %s must be a positive integer, got %q", key, raw)
-		}
-		return v, true, nil
-	}
-	if v, ok, err := parse(EnvMaxEntries); err != nil {
-		return Limits{}, err
-	} else if ok {
-		if v > int64(^uint(0)>>1) {
-			return Limits{}, fmt.Errorf("archivelimit: %s is too large", EnvMaxEntries)
-		}
-		l.MaxEntries = int(v)
-	}
-	if v, ok, err := parse(EnvMaxFileBytes); err != nil {
-		return Limits{}, err
-	} else if ok {
-		l.MaxFileBytes = v
-	}
-	if v, ok, err := parse(EnvMaxTotalBytes); err != nil {
-		return Limits{}, err
-	} else if ok {
-		l.MaxTotalBytes = v
-	}
+	l.MaxFileBytes = v
+	l.MaxTotalBytes = v
 	return l, nil
 }

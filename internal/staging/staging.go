@@ -15,7 +15,7 @@
 //
 // Disk capacity policy. mu does not preflight free space. The expanded size
 // of a compressed tar stream is unknown until it is read, free-space checks
-// race with every other writer, and the extraction budget (archivelimit)
+// race with every other writer, and the extraction budget (internal/archive)
 // already bounds the worst case. Instead every writer removes its partial
 // output on failure (including ENOSPC), and this sweeper reclaims whatever a
 // crash strands.

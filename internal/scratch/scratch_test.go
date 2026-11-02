@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
@@ -464,27 +464,6 @@ func TestBuild_ManifestPersistsToCAS(t *testing.T) {
 	}
 }
 
-func TestStripPrefixFromPath(t *testing.T) {
-	tests := []struct {
-		path, prefix, want string
-	}{
-		{"mygo-1.0/bin/go", "mygo-1.0", "bin/go"},
-		{"mygo-1.0/", "mygo-1.0", ""},
-		{"mygo-1.0", "mygo-1.0", ""},
-		{"other/file", "mygo-1.0", "other/file"},
-		{"bin/go", "", "bin/go"},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s_%s", tt.path, tt.prefix), func(t *testing.T) {
-			got := stripPrefixFromPath(tt.path, tt.prefix)
-			if got != tt.want {
-				t.Errorf("stripPrefixFromPath(%q, %q) = %q, want %q", tt.path, tt.prefix, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestExtractTarGz(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{
 		"prefix/file1.txt": "hello",
@@ -498,7 +477,7 @@ func TestExtractTarGz(t *testing.T) {
 	}
 
 	extractDir := filepath.Join(dir, "out")
-	if err := extractTarGz(archivePath, extractDir, "prefix"); err != nil {
+	if err := extract(context.Background(), archivePath, extractDir, "prefix", "tool"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -533,7 +512,7 @@ func TestExtractZip(t *testing.T) {
 	}
 
 	extractDir := filepath.Join(dir, "out")
-	if err := extractZip(archivePath, extractDir, ""); err != nil {
+	if err := extract(context.Background(), archivePath, extractDir, "", "tool"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -609,5 +588,100 @@ func TestBuildIgnoresStaleExtractTreesAndCleansStaging(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".extract-") {
 			t.Fatalf("staging directory left behind: %s", e.Name())
 		}
+	}
+}
+
+// A non-archive download (like jq) is installed as bin/<toolchain> and
+// verified, independent of the staging directory's name.
+func TestBuild_RawBinaryInstalledUnderToolchainName(t *testing.T) {
+	script := []byte("#!/bin/sh\necho jq-1.7.1\n")
+	hash := sha256Hex(script)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(script) }))
+	defer srv.Close()
+
+	b, _ := newTestBuilder(t)
+	cfg := &config.ProjectConfig{Toolchains: []config.Toolchain{{
+		Name: "jq", From: "scratch",
+		Config: config.ToolchainConfig{Version: "1.7.1", URL: srv.URL + "/jq-macos-arm64", SHA256: hash},
+	}}}
+	if err := b.Build(context.Background(), cfg); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	manifest, err := b.Registry.Lookup(context.Background(), "jq", "1.7.1")
+	if err != nil || manifest == nil {
+		t.Fatalf("Lookup = %v, %v", manifest, err)
+	}
+	if _, ok := manifest.Artifacts["bin/jq"]; !ok || len(manifest.Artifacts) != 1 {
+		t.Fatalf("artifacts = %v, want only bin/jq", manifest.Artifacts)
+	}
+}
+
+// Toolchain archives may carry in-tree symlinks. They are extracted (so verify
+// can run through them) but never read into CAS; the build warns instead.
+func TestBuild_InTreeSymlinkIsSkippedWithWarning(t *testing.T) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	body := "#!/bin/sh\necho linked 1.0\n"
+	tw.WriteHeader(&tar.Header{Name: "bin/linked", Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
+	tw.Write([]byte(body))
+	tw.WriteHeader(&tar.Header{Name: "bin/alias", Linkname: "linked", Typeflag: tar.TypeSymlink})
+	tw.Close()
+	gw.Close()
+	archive := buf.Bytes()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(archive) }))
+	defer srv.Close()
+
+	b, _ := newTestBuilder(t)
+	var warnings bytes.Buffer
+	b.Warnings = &warnings
+	cfg := &config.ProjectConfig{Toolchains: []config.Toolchain{{
+		Name: "linked", From: "scratch",
+		Config: config.ToolchainConfig{Version: "1.0", URL: srv.URL + "/linked-1.0.tar.gz", SHA256: sha256Hex(archive)},
+	}}}
+	if err := b.Build(context.Background(), cfg); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	manifest, err := b.Registry.Lookup(context.Background(), "linked", "1.0")
+	if err != nil || manifest == nil {
+		t.Fatalf("Lookup = %v, %v", manifest, err)
+	}
+	if _, ok := manifest.Artifacts["bin/alias"]; ok || len(manifest.Artifacts) != 1 {
+		t.Fatalf("artifacts = %v, want only bin/linked", manifest.Artifacts)
+	}
+	if !strings.Contains(warnings.String(), "bin/alias") {
+		t.Fatalf("no warning for skipped symlink: %q", warnings.String())
+	}
+}
+
+// A symlink to a file outside the tree must never have its target's content
+// stored in CAS (from where write-through or cache push could upload it).
+func TestStoreArtifactsDoesNotReadThroughSymlinks(t *testing.T) {
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0o755)
+	os.WriteFile(filepath.Join(dir, "bin", "tool"), []byte("tool"), 0o755)
+	if err := os.Symlink(secret, filepath.Join(dir, "bin", "leak")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("bin", filepath.Join(dir, "bindir")); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := newTestBuilder(t)
+	artifacts, skipped, err := b.storeArtifacts(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("storeArtifacts: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts["bin/tool"] == "" {
+		t.Fatalf("artifacts = %v, want only bin/tool", artifacts)
+	}
+	if strings.Join(skipped, ",") != "bin/leak,bindir" {
+		t.Fatalf("skipped = %v", skipped)
+	}
+	if has, _ := b.Store.Has(context.Background(), cas.NewSHA256(sha256Hex([]byte("PRIVATE KEY")))); has {
+		t.Fatal("symlink target content was stored in CAS")
 	}
 }
