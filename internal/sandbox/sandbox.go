@@ -119,6 +119,9 @@ func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Diges
 	}
 	defer rc.Close()
 
+	// Toolchain manifests (internal/scratch) record path → digest only, no
+	// file modes, so every unpacked file is executable. The store's reader
+	// verifies the digest at EOF, which io.Copy reads to.
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err

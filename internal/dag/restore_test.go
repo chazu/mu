@@ -17,7 +17,10 @@ type restoreStore struct {
 	read func() io.ReadCloser
 }
 
-func (s restoreStore) Get(context.Context, cas.Digest) (io.ReadCloser, error) { return s.read(), nil }
+// Get honours the Store contract: the reader is digest-verified.
+func (s restoreStore) Get(_ context.Context, d cas.Digest) (io.ReadCloser, error) {
+	return cas.VerifyReader(s.read(), d, nil), nil
+}
 
 type failingRestoreReader struct {
 	io.Reader

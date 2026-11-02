@@ -138,6 +138,12 @@ STAGING AND CRASH CLEANUP
 
 VERIFYING CACHE INTEGRITY
 
+  Every CAS read is digest-checked as it streams, local or remote: restored
+  outputs, toolchain files unpacked into a sandbox, plugin scripts and
+  bundles. A local blob that no longer hashes to its name (bit-rot,
+  tampering) fails the read and is deleted, so a cached action re-executes
+  and the next lookup re-fetches or rebuilds instead of reusing it.
+
   mu verify                        Re-hash all blobs, report corruption.
   mu verify --json                 Output as JSON.
   mu verify --fix                  Delete corrupt blobs.

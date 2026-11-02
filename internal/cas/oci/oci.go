@@ -140,8 +140,18 @@ func (s *OCIStore) Has(ctx context.Context, dgst cas.Digest) (bool, error) {
 // the response's Content-Length against desc.Size; passing Size=0 would
 // falsely trip that check. We therefore resolve the blob's size first
 // (HEAD for remote; layout index for local) and populate the descriptor
-// before fetching.
+// before fetching. The returned reader is digest-verified (cas.VerifyReader):
+// registry bytes that do not hash to dgst fail at EOF with
+// cas.ErrDigestMismatch.
 func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
+	rc, err := s.get(ctx, dgst)
+	if err != nil {
+		return nil, err
+	}
+	return cas.VerifyReader(rc, dgst, nil), nil
+}
+
+func (s *OCIStore) get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, error) {
 	if err := dgst.Validate(); err != nil {
 		return nil, fmt.Errorf("oci: get blob %s: %w", dgst, err)
 	}
@@ -175,10 +185,8 @@ func (s *OCIStore) Get(ctx context.Context, dgst cas.Digest) (io.ReadCloser, err
 }
 
 // remoteBlobGet streams a blob body directly from a remote repository via
-// its authenticated Client. It skips oras-go's Content-Length validation
-// and (intentionally) does not verify the content digest here: callers are
-// responsible for digest verification (the CAS boundary does this via
-// cas.Cache stores fetched bytes with DiskStore.PutExpected).
+// its authenticated Client. It skips oras-go's Content-Length validation;
+// Get verifies the content digest as the body streams.
 func remoteBlobGet(ctx context.Context, rr *remote.Repository, dgst godigest.Digest) (io.ReadCloser, error) {
 	ref := rr.Reference
 	ref.Reference = dgst.String()

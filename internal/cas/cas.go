@@ -127,6 +127,10 @@ type ActionResult struct {
 
 // Store is the interface for a content-addressable store that also supports
 // action-result caching.
+//
+// Get must return a digest-verified reader (wrap it with VerifyReader): a
+// caller that reads to EOF without error has received exactly the bytes named
+// by the digest. Callers rely on this and do not re-hash what they read.
 type Store interface {
 	Has(ctx context.Context, dgst Digest) (bool, error)
 	Get(ctx context.Context, dgst Digest) (io.ReadCloser, error)
