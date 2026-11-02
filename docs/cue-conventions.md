@@ -1,196 +1,87 @@
-# CUE Conventions for `mu` Build Configs
+# Writing `mu.cue`
 
-## Status
+How mu reads CUE build configs, and the conventions that follow from it. For
+the field reference run `mu guide mu.cue`; the schema itself is
+[`internal/config/schema.cue`](../internal/config/schema.cue).
 
-The `mu.json` → `mu.cue` migration is complete; CUE is the canonical configuration format.
+## How mu loads config
 
-This document defines the authoring conventions for `mu.cue` project
-configurations. It complements the migration scout report at
-[`scout-cue-migration.md`](scout-cue-migration.md) and is the canonical reference
-for plugin and project authors writing CUE today.
+- mu evaluates CUE in-process with the `cuelang.org/go` library pinned in
+  `go.mod`. You do not need the `cue` CLI; it is useful only for `cue fmt`.
+- The project root is the nearest directory, walking up from the working
+  directory, that contains a `mu.cue`. `--config PATH` overrides discovery.
+- In each directory mu reads **only** the file named `mu.cue`. Other `.cue`
+  files next to it are not loaded, even in the same package. By convention
+  the file says `package mu`.
+- The root `mu.cue` is unified with `#ProjectConfig` and must evaluate to
+  concrete values.
+- Every `mu.cue` below the root is loaded the same way and merged in. Hidden
+  directories, `testdata/` directories and symlinks are skipped. In a
+  subdirectory config:
+  - a target name without a leading `//` is prefixed with the directory, so
+    `target: "lib"` in `pkg/mu.cue` becomes `//pkg/lib`;
+  - `sources` and plugin `script`/`command` paths are relative to that
+    directory.
+- In the root `mu.cue`, target names must start with `//`.
 
----
+## `cue.mod`, imports and `@embed`
 
-## 1. Minimum tooling
+- `cue.mod/module.cue` is **optional**. Projects without one load fine, and
+  none of the examples in this repo have one.
+- Add one only if `mu.cue` imports CUE packages from your own tree. The
+  import path is the module path plus the package directory:
 
-- **CUE language version: `>= v0.11.0`** (required for stable `@embed`).
-- **Recommended: `>= v0.13.0`** for bug fixes around `@embed` glob patterns and
-  sibling-module resolution.
-- **Go toolchain: `>= 1.26.2`** (matching the `go` directive in this module).
-- Pin the exact version in `go.mod` via `cuelang.org/go`.
+  ```cue
+  // cue.mod/module.cue
+  module: "example.com/myproject"
+  language: version: "v0.13.0"
+  ```
 
-If you are using `CUE_EXPERIMENT=embed=1`, upgrade — `@embed` is default-on from
-v0.11 and stable from v0.12.
+  ```cue
+  // mu.cue
+  package mu
 
----
+  import "example.com/myproject/build/defaults"
+  ```
 
-## 2. Directory layout
+- Do not use `@embed`. mu loads `mu.cue` as a single file, and CUE rejects
+  embedding there ("cannot embed files when not in a module"), even when a
+  `cue.mod` exists.
 
-Every project rooted at a `mu.cue` (or plugin directory containing a
-`plugin.bb` + `mu.cue`) follows the layout below. Paths are relative to the
-project root.
+## What invalidates the cache
 
-```
-<project-root>/
-├── mu.cue                  # the project config, package mu
-├── cue.mod/
-│   └── module.cue          # REQUIRED — see §3
-├── mu/
-│   ├── scripts/            # shell/tool scripts referenced by targets
-│   │   ├── lint.sh
-│   │   └── build.sh
-│   └── config/             # shared CUE packages (imported, not embedded)
-│       ├── toolchains.cue
-│       └── defaults.cue
-└── ... (the rest of the project)
-```
+An action's cache key covers its command, environment, output names, the
+content of its declared inputs and the toolchain and dependency artifacts it
+consumes. Plugins, and the built-in `shell` toolchain, turn a target's
+`sources` into those declared inputs. mu hashes nothing else from the working
+tree. Impure actions are never cached.
 
-### `mu/scripts/`
-
-Sibling scripts referenced by path from `mu.cue`. The loader hashes each
-referenced script into the containing target's action key, so edits to a script
-invalidate only the targets that reference it (preserving cache locality).
-
-Prefer this layout for anything that is fundamentally a script — shell, python,
-awk, jq, etc. Users edit these files in their native language mode, not as
-strings inside a CUE file.
-
-### `mu/config/`
-
-Shared CUE fragments that multiple targets or plugins need. Promote them to a
-CUE package and `import "mu/config"` — do **not** `@embed` CUE files. This
-preserves type checking, schema unification, and readable error locations.
-
----
-
-## 3. `cue.mod/module.cue` expectation
-
-Every project that uses `@embed` or cross-file imports **must** have a
-`cue.mod/module.cue` file at the project root. Without it, `load.Instances`
-refuses to resolve `@embed` and imports.
-
-Minimum contents:
+So if a target runs a script, list the script in `sources`:
 
 ```cue
-module: "example.com/myproject"
-language: version: "v0.11.0"
-```
-
-- `module:` is a stable module path used for internal imports. It does **not**
-  have to resolve on the public internet; it is a naming key.
-- `language.version:` pins the CUE syntax version used for evaluation.
-  Use `>= v0.11.0`.
-
-The `mu migrate` command creates `cue.mod/module.cue` automatically if absent.
-
----
-
-## 4. `@embed` vs sibling file reference
-
-**Rule of thumb: embed if the content is under 1 KB and fundamentally part of
-the config; reference as a sibling file otherwise.**
-
-### Use `@embed` when
-
-- The content is **< 1 KB** and has no independent editor ergonomics (e.g. a
-  short license header, a fixed JSON fragment, a tiny template).
-- The content is literally part of the evaluated `ProjectConfig` struct — it
-  *is* configuration, not an executable artifact.
-- You accept that changes invalidate the entire containing target's cache.
-
-```cue
-import "example.com/myproject/mu/config"
-
-#Target & {
-    target:    "//release/notice"
-    toolchain: "lint"
-    config: {
-        // Tiny literal — fine to embed.
-        header: _ @embed(file="scripts/license-header.txt")
-    }
+{
+	target:    "//lint/gofmt"
+	toolchain: "shell"
+	sources:   ["scripts/lint.sh", "cmd/mu/*.go"]
+	config: {
+		command: ["sh", "scripts/lint.sh"]
+		impure:  false
+	}
 }
 ```
 
-`@embed` on non-CUE blobs returns `bytes`. Convert explicitly with
-`string(_header)` if a string is required downstream.
+Without the `sources` entry, editing `lint.sh` does not change the key, and
+the old result is reused. `sources` accepts doublestar globs (`src/**/*.go`)
+relative to the config's directory. Matches inside hidden directories are
+dropped.
 
-### Use a sibling file reference when
+## Checking a config
 
-- The content is **≥ 1 KB**, or is an executable script, or has its own editor
-  mode (shell, python, dockerfile, etc.).
-- You want cache-digest locality — a change to one script should not rewrite the
-  entire evaluated config digest.
-- The content is shared across targets (reference the same path from each).
-
-```cue
-#Target & {
-    target:    "//lint/gofmt"
-    toolchain: "lint"
-    sources:   ["cmd/mu/*.go"]
-    config: {
-        command_file: "mu/scripts/lint.sh"   // hashed into action key by loader
-    }
-}
+```bash
+mu build --plan //...
 ```
 
-The `mu` loader enumerates referenced files and fingerprints them the same way
-it hashes `sources`. `mu verify` and cache-replay surface *which* sibling file
-changed.
-
-### Why the 1 KB heuristic
-
-- Below ~1 KB, embed cost (memory duplication × target count) is negligible and
-  the convenience of a single-file-in/single-struct-out loader wins.
-- Above ~1 KB, duplication adds up fast: a 50 KB script × 40 targets is 2 MB of
-  duplicated evaluated struct, and every edit re-digests every target.
-- The threshold is advisory, not enforced. Reviewer judgement applies.
-
----
-
-## 5. Summary (for reviewers)
-
-When reviewing a new `mu.cue`, check:
-
-1. `cue.mod/module.cue` exists and pins `language.version >= v0.11.0`.
-2. Scripts live under `mu/scripts/` and are referenced as sibling paths.
-3. Shared CUE fragments live under `mu/config/` and are imported (not embedded).
-4. `@embed` is used only for tiny literal blobs (< 1 KB, no separate editor
-   ergonomics).
-5. The file passes `cue vet` against the project schema and `mu validate`.
-
----
-
-## 6. Schema package namespaces (plugin output schemas)
-
-When a plugin ships CUE schemas describing the data it produces, the
-schema's CUE module path encodes provenance. Three tiers:
-
-| Prefix             | Owned by                    | Example          |
-| ------------------ | --------------------------- | ---------------- |
-| `pudl/...`         | the pudl project            | `pudl/core`      |
-| `mu/<plugin-name>` | the mu plugin's authors     | `mu/aws`         |
-| anything else      | third-party / user-defined  | `acme/inventory` |
-
-Rules:
-
-- **Use `mu/<x>` only when you are the author of plugin `<x>`.** The
-  segment after `mu/` must match the plugin's directory name.
-  `mu verify` warns when a plugin declares a `mu/<other>` namespace.
-- **Use `pudl/...` only for first-party pudl schemas.** Plugins should
-  not invent or shadow `pudl/...` packages.
-- **Anything else is fair game** for third-party or experimental work.
-
-This convention keeps provenance visible wherever the schema name
-appears (`pudl list`, drift output, agent transcripts).
-
-See `docs/brainstorms/2026-05-04-plugin-output-schemas.md` and
-`docs/plans/2026-05-04-feat-plugin-output-schemas-plan.md` for design.
-
----
-
-## See also
-
-- [`scout-cue-migration.md`](scout-cue-migration.md) — full design rationale and
-  migration plan.
-- [CUE `@embed` reference](https://cuelang.org/docs/reference/embed/) —
-  upstream documentation.
+This loads and validates every `mu.cue`, runs plugin `discover`, checks each
+target's `config` against the plugin's `config_schema`, and plans the full
+action graph without running anything. `mu target list` is a faster check
+when you only need the config to load.
