@@ -208,15 +208,29 @@ func (c *cliContext) openStore() (cas.Store, error) {
 	}
 	// Hold the cache shared while the store is in use so `mu cache clean`
 	// (exclusive) cannot collect blobs this process has not yet recorded.
+	if err := c.holdCache(); err != nil {
+		return nil, err
+	}
+	c.Store = store
+	return store, nil
+}
+
+// holdCache takes the cache directory's shared lock, once, until Close.
+// `mu cache clean` takes it exclusively, both to collect blobs and to prune
+// the plugins directory, so anything reading or running an installed plugin
+// must hold it too.
+func (c *cliContext) holdCache() error {
+	if c.cacheLock != nil {
+		return nil
+	}
 	lock, err := cas.LockShared(c.Paths.CacheDir, func() {
 		fmt.Fprintf(c.stderr, "mu %s: waiting for `mu cache clean` to finish...\n", c.Name)
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	c.cacheLock = lock
-	c.Store = store
-	return store, nil
+	return nil
 }
 
 // Close releases what Resolve/openStore acquired (the shared cache lock).

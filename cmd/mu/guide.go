@@ -111,6 +111,7 @@ func printGuideForPlugin(ctx context.Context, name string, selection ...string) 
 	}
 	root, rootErr := findGuideProjectRoot()
 	cli := &cliContext{Name: "guide plugin", stderr: os.Stderr, ProjectRoot: root, Offline: registryhttp.IsOffline(ctx)}
+	defer cli.Close()
 	if rootErr == nil {
 		cli.Config, _ = config.LoadOffline(root, cli.Offline)
 	}
