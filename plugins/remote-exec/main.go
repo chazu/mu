@@ -38,19 +38,24 @@ func main() {
 
 // newPlugin builds the plugin value; tests drive it in-process.
 func newPlugin() *muplugin.Plugin {
-	schema := ssh.ConfigSchema()
-	schema["command"] = map[string]any{"type": "array", "items": "string", "required": true, "description": "argv executed remotely"}
-	schema["check"] = map[string]any{"type": "array", "items": "string", "description": "Guard command; if exits 0, command is skipped"}
-	schema["env"] = map[string]any{"type": "object", "description": "Environment variables exported before command"}
-	schema["work_dir"] = map[string]any{"type": "string", "description": "Directory to cd into before running command"}
-	schema["impure"] = map[string]any{"type": "boolean", "default": true, "description": "Skip CAS cache for this action"}
-	schema["sealed_output_files"] = map[string]any{"type": "object", "description": "Map of sealed output names to absolute remote file paths"}
+	props := ssh.ConfigProperties()
+	props["command"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "argv executed remotely"}
+	props["check"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Guard command; if exits 0, command is skipped"}
+	props["env"] = map[string]any{"type": "object", "description": "Environment variables exported before command"}
+	props["work_dir"] = map[string]any{"type": "string", "description": "Directory to cd into before running command"}
+	props["impure"] = map[string]any{"type": "boolean", "default": true, "description": "Skip CAS cache for this action"}
+	props["sealed_output_files"] = map[string]any{"type": "object", "description": "Map of sealed output names to absolute remote file paths"}
 	return &muplugin.Plugin{
-		Name:         "remote-exec",
-		Version:      "0.2.0",
-		Description:  "Execute commands on remote hosts over SSH",
-		ConfigSchema: schema,
-		Plan:         plan,
+		Name:        "remote-exec",
+		Version:     "0.3.0",
+		Description: "Execute commands on remote hosts over SSH",
+		ConfigSchema: map[string]any{
+			"type":                 "object",
+			"properties":           props,
+			"required":             []string{"host", "command"},
+			"additionalProperties": false,
+		},
+		Plan: plan,
 	}
 }
 

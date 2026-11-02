@@ -31,23 +31,25 @@
 
 (defn handle-discover []
   {"name"             "lint"
-   "version"          "0.3.0"
+   "version"          "0.4.0"
    "protocol_version" 1
    "description"      "Run linter or code-quality commands against source files"
    "capabilities"     ["discover" "plan"]
    "consumes"         ["source:any"]
    "produces"         []
-   "config_schema"    {"command"     {"type" "array" "items" {"type" "string"}
-                                      "required" true "description" "Lint command to execute"}
-                       "fix_command" {"type" "array" "items" {"type" "string"}
-                                      "description" "Auto-fix command (planned instead of command only when fix is true)"}
-                       "fix"         {"type" "boolean"
-                                      "description" "Plan fix_command instead of command (rewrites sources)"}
-                       "env"         {"type" "object" "description" "Complete environment for the lint process (default: inherit mu's)"}
-                       "working_dir" {"type" "string" "description" "Working directory for the lint command"}
-                       "toolchains"  {"type" "array" "items" {"type" "string"}
-                                      "description" "Scratch toolchains the command needs; makes the action pure (sandboxed, cached)"}
-                       "network"     {"type" "boolean" "description" "Allow network access"}}})
+   "config_schema"    {"type"                 "object"
+                       "properties"           {"command"     {"type" "array" "items" {"type" "string"} "description" "Lint command to execute"}
+                                               "fix_command" {"type" "array" "items" {"type" "string"}
+                                                              "description" "Auto-fix command (planned instead of command only when fix is true)"}
+                                               "fix"         {"type" "boolean"
+                                                              "description" "Plan fix_command instead of command (rewrites sources)"}
+                                               "env"         {"type" "object" "description" "Complete environment for the lint process (default: inherit mu's)"}
+                                               "working_dir" {"type" "string" "description" "Working directory for the lint command"}
+                                               "toolchains"  {"type" "array" "items" {"type" "string"}
+                                                              "description" "Scratch toolchains the command needs; makes the action pure (sandboxed, cached)"}
+                                               "network"     {"type" "boolean" "description" "Allow network access"}}
+                       "required"             ["command"]
+                       "additionalProperties" false}})
 
 (defn handle-plan [req]
   (let [target  (get req "target")

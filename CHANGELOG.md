@@ -7,6 +7,20 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **`config_schema` is a real JSON Schema, and unknown config fields fail.**
+  A plugin's discover `config_schema` is now validated as JSON Schema
+  (Draft 7 unless it names another with `$schema`) describing the whole
+  config object. Previously a real JSON Schema had its `properties`
+  treated as a field name, so nothing was validated. Every bundled plugin
+  that plans reports one with `"additionalProperties": false`, so a misspelled or
+  unknown config field is a plan-time error rather than a warning. Errors
+  are the validator's path and reason (`config/goos: value must be one of
+  ...`); the did-you-mean hint is gone. The old field-map dialect
+  (`{"field": {"type": ..., "required": true}}`) still works for this
+  release with a deprecation warning naming the plugin. Plugin versions:
+  docker 0.2.0, go 0.2.0, k8s 0.5.0, lint 0.4.0, terraform 0.4.0, file
+  0.3.0, keypair-gen 0.2.0, remote-exec 0.3.0, remote-file 0.3.0, and sops
+  and doppler 0.1.1 (guide and manifest changes shipped under 0.1.0).
 - **Every pure action runs in the sandbox.** `MU_SANDBOX` is gone: pure
   actions see only their declared inputs, named scratch toolchains (now
   with file modes and in-tree symlinks), granted `host_paths` and system

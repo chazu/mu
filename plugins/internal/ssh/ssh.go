@@ -79,11 +79,13 @@ func portString(v any) string {
 	return "22"
 }
 
-// ConfigSchema returns the config_schema entries for the connection
-// fields (host, user, port, sudo), for a plugin to extend with its own.
-func ConfigSchema() map[string]any {
+// ConfigProperties returns the JSON Schema properties of the connection
+// fields (host, user, port, sudo), for a plugin to extend with its own
+// before wrapping them in its config_schema object. host is required: list
+// it in that object's "required".
+func ConfigProperties() map[string]any {
 	return map[string]any{
-		"host": map[string]any{"type": "string", "required": true, "description": "Remote hostname or IP"},
+		"host": map[string]any{"type": "string", "description": "Remote hostname or IP"},
 		"user": map[string]any{"type": "string", "default": "root", "description": "SSH login user"},
 		"port": map[string]any{"type": "integer", "default": 22, "description": "SSH port"},
 		"sudo": map[string]any{"type": "boolean", "default": false, "description": "Run privileged steps via sudo -S using SSH_PASS"},

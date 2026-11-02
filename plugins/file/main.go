@@ -32,11 +32,11 @@ func main() {
 func newPlugin() *muplugin.Plugin {
 	return &muplugin.Plugin{
 		Name:        "file",
-		Version:     "0.2.0",
+		Version:     "0.3.0",
 		Description: "Manage local files: copy, template, create, symlink, or remove",
 		Consumes:    []string{"source:any"},
 		Produces:    []string{"file"},
-		ConfigSchema: map[string]any{
+		ConfigSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
 			"path":                map[string]any{"type": "string", "description": "Destination path on the local filesystem"},
 			"source":              map[string]any{"type": "string", "description": "Source file to copy from"},
 			"content":             map[string]any{"type": "string", "description": "Inline content to write (alternative to source)"},
@@ -46,7 +46,7 @@ func newPlugin() *muplugin.Plugin {
 			"owner":               map[string]any{"type": "string", "description": "File owner (user name or UID)"},
 			"group":               map[string]any{"type": "string", "description": "File group (group name or GID)"},
 			"sealed_output_files": map[string]any{"type": "object", "description": "Map of sealed output names to file paths"},
-		},
+		}},
 		Plan: plan,
 	}
 }

@@ -24,8 +24,10 @@ type Plugin struct {
 	Consumes []string
 	Produces []string
 
-	// Optional: declarative config schema. The SDK passes it through to
-	// the discover response unmodified.
+	// Optional, but expected of plugins that plan: a JSON Schema for the
+	// target's config object, closed with "additionalProperties": false
+	// (see 'mu guide protocol'). The SDK passes it through to the
+	// discover response unmodified.
 	ConfigSchema map[string]any
 
 	// Optional. A plugin that builds targets implements Plan.

@@ -36,7 +36,7 @@
 
 (defn handle-discover []
   {"name"             "doppler"
-   "version"          "0.1.0"
+   "version"          "0.1.1"
    "protocol_version" 1
    "description"      "Resolve secrets from Doppler via the doppler CLI (read-only)"
    "consumes"         []

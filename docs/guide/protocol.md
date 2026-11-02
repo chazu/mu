@@ -37,7 +37,15 @@ METHODS
       "consumes": ["source:any"],
       "produces": ["binary"],
       "capabilities": ["discover", "plan"],
-      "config_schema": {"output": {"type": "string"}}
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "output": {"type": "string", "description": "Output path"},
+          "tags":   {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["output"],
+        "additionalProperties": false
+      }
     }
 
     Plugins must declare every supported method in `capabilities`.
@@ -46,13 +54,32 @@ METHODS
     and `advise` methods were removed (mu is a build tool), and a plugin
     that still advertises `observe` fails discover with a removal error.
 
-    Plan-capable plugins should declare `config_schema` (field name ->
-    {"type", "description", "default", "required"}): mu validates each
-    target's config against it before planning, so a typo or wrong type
-    fails early. When a plan-capable plugin declares none and a target
-    passes it config, mu prints one warning per plugin per run. Plugins
-    that do not plan (secret providers) take no target config
-    and need no schema.
+    CONFIG SCHEMA
+
+    Plan-capable plugins should declare `config_schema`: a JSON Schema
+    for the whole target `config` object (Draft 7, unless it names
+    another draft with "$schema"). mu validates each target's config
+    against it before planning, so a typo or wrong type fails early.
+    Close the object with "additionalProperties": false so an unknown
+    field is an error; "default" and "description" are documentation
+    ('mu plugin info' shows them) and the plugin applies its own
+    defaults. Errors name the config path and the reason:
+
+      target "//app": config/goos: value must be one of "linux", "darwin"
+      target "//app": config: additionalProperties 'goso' not allowed
+
+    When a plan-capable plugin declares none and a target passes it
+    config, mu prints one warning per plugin per run. Plugins that do
+    not plan (secret providers) take no target config and need no
+    schema.
+
+    Deprecated: the legacy field map ({"output": {"type": "string",
+    "required": true}}, one entry per field, with a per-field
+    "required" flag) is still accepted for one release. mu recognises
+    a JSON Schema by a top-level "$schema", a string "type", or a
+    "properties" object; anything else is read as the legacy map,
+    translated, and reported once per plugin with a deprecation
+    warning. Under the legacy map an unknown field is only a warning.
 
   plan (optional; required for build plugins)
     Request:  {

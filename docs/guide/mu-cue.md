@@ -57,8 +57,9 @@ UNKNOWN FIELDS
   The schema is closed: a field mu does not know is a load error naming
   the file, the path and the field, with a did-you-mean for a near miss
   (secrets.writable_ref: unknown field; did you mean "writable_refs"?).
-  A plugin target's config is the exception — it is free-form here and
-  the plugin validates it against the config_schema it reports. The
+  A plugin target's config is the exception — it is free-form here, and
+  at plan time mu validates it against the JSON Schema config_schema the
+  plugin reports, where an unknown field is an error too. The
   built-in shell and secret-gen toolchains have no plugin, so their
   config is checked at load time ('mu guide shell', 'mu guide
   secret-gen'), wrong types included.

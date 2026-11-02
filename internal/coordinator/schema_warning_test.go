@@ -13,9 +13,9 @@ import (
 func captureMissingSchemaWarnings(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prev := missingSchemaOut
-	missingSchemaOut = &buf
-	t.Cleanup(func() { missingSchemaOut = prev })
+	prev := schemaWarnOut
+	schemaWarnOut = &buf
+	t.Cleanup(func() { schemaWarnOut = prev })
 	return &buf
 }
 

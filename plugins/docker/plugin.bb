@@ -21,20 +21,22 @@
 
 (defn handle-discover []
   {"name"             "docker"
-   "version"          "0.1.0"
+   "version"          "0.2.0"
    "protocol_version" 1
    "description"      "Build and optionally push Docker images"
    "consumes"         ["source:dockerfile" "source:any"]
    "produces"         ["docker_image"]
-   "config_schema"    {"dockerfile" {"type" "string"  "default" "Dockerfile" "description" "Path to Dockerfile"}
-                       "tag"        {"type" "string"  "description" "Image tag (e.g. myapp:latest)"}
-                       "context"    {"type" "string"  "default" "." "description" "Docker build context directory"}
-                       "target"     {"type" "string"  "description" "Multi-stage build target name"}
-                       "platform"   {"type" "string"  "description" "Target platform (e.g. linux/amd64)"}
-                       "build_args" {"type" "object"  "description" "Build-time variables passed via --build-arg"}
-                       "no_cache"   {"type" "boolean" "default" false "description" "Disable layer caching"}
-                       "push"       {"type" "boolean" "default" false "description" "Push image to registry after build"}
-                       "labels"     {"type" "object"  "description" "OCI labels applied to image metadata"}}})
+   "config_schema"    {"type"                 "object"
+                       "properties"           {"dockerfile" {"type" "string"  "default" "Dockerfile" "description" "Path to Dockerfile"}
+                                               "tag"        {"type" "string"  "description" "Image tag (e.g. myapp:latest)"}
+                                               "context"    {"type" "string"  "default" "." "description" "Docker build context directory"}
+                                               "target"     {"type" "string"  "description" "Multi-stage build target name"}
+                                               "platform"   {"type" "string"  "description" "Target platform (e.g. linux/amd64)"}
+                                               "build_args" {"type" "object"  "description" "Build-time variables passed via --build-arg"}
+                                               "no_cache"   {"type" "boolean" "default" false "description" "Disable layer caching"}
+                                               "push"       {"type" "boolean" "default" false "description" "Push image to registry after build"}
+                                               "labels"     {"type" "object"  "description" "OCI labels applied to image metadata"}}
+                       "additionalProperties" false}})
 
 (defn target-short-name [target-name]
   (last (str/split target-name #"[:/]")))

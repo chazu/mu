@@ -10,9 +10,9 @@ import (
 	"github.com/chazu/mu/internal/plugin"
 )
 
-// missingSchemaOut receives the missing-config_schema warning; tests
-// replace it.
-var missingSchemaOut io.Writer = os.Stderr
+// schemaWarnOut receives the config_schema warnings (missing schema,
+// legacy schema, unknown legacy field); tests replace it.
+var schemaWarnOut io.Writer = os.Stderr
 
 // missingSchemaWarned records the plugins already warned about, so the
 // warning is printed once per plugin per process.
@@ -28,7 +28,7 @@ func warnMissingConfigSchema(t config.Target, info *plugin.DiscoverResponse) {
 	if _, already := missingSchemaWarned.LoadOrStore(t.Toolchain, true); already {
 		return
 	}
-	fmt.Fprintf(missingSchemaOut,
+	fmt.Fprintf(schemaWarnOut,
 		"warning: plugin %q declares no config_schema; config for target %q (and any other target using it) is not validated\n",
 		t.Toolchain, t.Name)
 }

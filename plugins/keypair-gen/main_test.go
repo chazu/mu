@@ -14,15 +14,21 @@ import (
 
 // TestParityWithBB replays the request script the retired plugin.bb
 // answered (captured in testdata/parity_bb_responses.ndjson) and requires
-// semantically identical responses. The one intentional deviation is the
-// action env: bb's "env": {} (clean environment) is expressed as an
-// explicit minimal PATH, because the SDK omits empty maps and an absent env
-// would let this impure action inherit mu's environment.
+// semantically identical responses. Intentional deviations: discover
+// reports a JSON Schema config_schema and a later version, and the action
+// env: bb's "env": {} (clean environment) is expressed as an explicit
+// minimal PATH, because the SDK omits empty maps and an absent env would
+// let this impure action inherit mu's environment.
 func TestParityWithBB(t *testing.T) {
-	plugintest.Parity(t, newPlugin(),
+	p := newPlugin()
+	plugintest.Parity(t, p,
 		filepath.Join("testdata", "parity_requests.ndjson"),
 		filepath.Join("testdata", "parity_bb_responses.ndjson"),
 		func(i int, golden map[string]any) {
+			if i == 0 {
+				golden["config_schema"] = plugintest.Schema(t, p)
+				golden["version"] = p.Version
+			}
 			actions, _ := golden["actions"].([]any)
 			for _, a := range actions {
 				action := a.(map[string]any)
@@ -32,6 +38,10 @@ func TestParityWithBB(t *testing.T) {
 				action["env"] = map[string]any{"PATH": actionEnv["PATH"]}
 			}
 		})
+}
+
+func TestConfigSchemaClosed(t *testing.T) {
+	plugintest.ClosedSchema(t, newPlugin(), map[string]any{"type": "ecdsa", "curve": "P-384", "comment": "deploy"})
 }
 
 func planFor(t *testing.T, target muplugin.TargetInfo) muplugin.PlanResponse {

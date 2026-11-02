@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,32 +17,26 @@ import (
 
 // TestParityWithBB replays the request script the retired plugin.bb
 // answered (captured in testdata/parity_bb_responses.ndjson) and requires
-// semantically identical responses. The one intentional difference: the
-// Go plugin declares a config_schema, which the bb discover lacked.
+// semantically identical responses. The intentional differences: the Go
+// plugin declares a config_schema, which the bb discover lacked, and a
+// later version.
 func TestParityWithBB(t *testing.T) {
-	schema := newPlugin().ConfigSchema
-	plugintest.Parity(t, newPlugin(),
+	p := newPlugin()
+	plugintest.Parity(t, p,
 		filepath.Join("testdata", "parity_requests.ndjson"),
 		filepath.Join("testdata", "parity_bb_responses.ndjson"),
 		func(i int, golden map[string]any) {
 			if i == 0 {
-				golden["config_schema"] = plugintest.Normalize(roundTrip(t, schema))
+				golden["config_schema"] = plugintest.Schema(t, p)
+				golden["version"] = p.Version
 			}
 		})
 }
 
-// roundTrip converts a Go value into its decoded-JSON form.
-func roundTrip(t *testing.T, v any) any {
-	t.Helper()
-	data, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out any
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatal(err)
-	}
-	return out
+func TestConfigSchemaClosed(t *testing.T) {
+	plugintest.ClosedSchema(t, newPlugin(), map[string]any{
+		"host": "h", "user": "u", "port": 2222, "sudo": true, "command": []any{"true"}, "check": []any{"false"},
+	})
 }
 
 func planReq(cfg map[string]any) muplugin.Request {
@@ -255,7 +248,7 @@ func TestCoordinatorRejectsWrongTypedConfig(t *testing.T) {
 		Name:   "//bad",
 		Config: map[string]any{"host": "h", "command": "uptime"},
 	})
-	if err == nil || !strings.Contains(err.Error(), `config field "command" must be an array`) {
+	if err == nil || !strings.Contains(err.Error(), "config/command: expected array") {
 		t.Fatalf("string command: err = %v, want a schema error naming command", err)
 	}
 }

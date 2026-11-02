@@ -319,7 +319,20 @@ func printPluginInfo(o pluginInfoOutput) {
 	}
 }
 
+// printConfigSchema lists the fields of a config_schema: the properties of
+// a JSON Schema, or the entries of a legacy field map.
 func printConfigSchema(schema map[string]any, dim, accent, bright, tag lipgloss.Style) {
+	required := map[string]bool{}
+	if props, ok := schema["properties"].(map[string]any); ok {
+		if req, ok := schema["required"].([]any); ok {
+			for _, r := range req {
+				if s, ok := r.(string); ok {
+					required[s] = true
+				}
+			}
+		}
+		schema = props
+	}
 	names := make([]string, 0, len(schema))
 	for k := range schema {
 		names = append(names, k)
@@ -347,6 +360,9 @@ func printConfigSchema(schema map[string]any, dim, accent, bright, tag lipgloss.
 		typePart := ""
 		if typStr != "" {
 			typePart = " " + dim.Render(typStr)
+		}
+		if req, _ := props["required"].(bool); req || required[name] {
+			typePart += " " + tag.Render("required")
 		}
 		fmt.Println("  " + namePart + typePart)
 

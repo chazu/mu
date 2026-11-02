@@ -59,19 +59,24 @@ func main() {
 
 // newPlugin builds the plugin value; tests drive it in-process.
 func newPlugin() *muplugin.Plugin {
-	schema := ssh.ConfigSchema()
-	schema["path"] = map[string]any{"type": "string", "required": true, "description": "Absolute path of the file on the remote host"}
-	schema["mode"] = map[string]any{"type": "string", "description": "File mode, e.g. \"0644\" (default 0644)"}
-	schema["owner"] = map[string]any{"type": "string", "description": "Owning user on the remote host"}
-	schema["group"] = map[string]any{"type": "string", "description": "Owning group on the remote host"}
-	schema["make_parents"] = map[string]any{"type": "boolean", "default": true, "description": "Create the parent directory if missing"}
+	props := ssh.ConfigProperties()
+	props["path"] = map[string]any{"type": "string", "description": "Absolute path of the file on the remote host"}
+	props["mode"] = map[string]any{"type": "string", "description": "File mode, e.g. \"0644\" (default 0644)"}
+	props["owner"] = map[string]any{"type": "string", "description": "Owning user on the remote host"}
+	props["group"] = map[string]any{"type": "string", "description": "Owning group on the remote host"}
+	props["make_parents"] = map[string]any{"type": "boolean", "default": true, "description": "Create the parent directory if missing"}
 	return &muplugin.Plugin{
-		Name:         "remote-file",
-		Version:      "0.2.0",
-		Description:  "Manage files on remote hosts over SSH with ownership and permissions",
-		Produces:     []string{"remote.file"},
-		ConfigSchema: schema,
-		Plan:         plan,
+		Name:        "remote-file",
+		Version:     "0.3.0",
+		Description: "Manage files on remote hosts over SSH with ownership and permissions",
+		Produces:    []string{"remote.file"},
+		ConfigSchema: map[string]any{
+			"type":                 "object",
+			"properties":           props,
+			"required":             []string{"host", "path"},
+			"additionalProperties": false,
+		},
+		Plan: plan,
 	}
 }
 

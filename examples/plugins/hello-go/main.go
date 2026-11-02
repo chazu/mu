@@ -25,7 +25,17 @@ func main() {
 		Version:     "0.1.0",
 		Description: "Writes a greeting to a file. The canonical Go SDK example.",
 		Produces:    []string{"text"},
-		Plan:        plan,
+		// A JSON Schema for target.config; mu validates each target
+		// against it before planning, and rejects unknown fields.
+		ConfigSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"out":     map[string]any{"type": "string", "default": "hello.txt", "description": "Output file"},
+				"message": map[string]any{"type": "string", "default": "hello from mu", "description": "Greeting text"},
+			},
+			"additionalProperties": false,
+		},
+		Plan: plan,
 	}).Main()
 }
 

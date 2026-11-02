@@ -52,11 +52,11 @@ func main() {
 func newPlugin() *muplugin.Plugin {
 	return &muplugin.Plugin{
 		Name:        "keypair-gen",
-		Version:     "0.1.0",
+		Version:     "0.2.0",
 		Description: "Generate SSH key pairs (Ed25519 or ECDSA) as sealed outputs",
 		Produces:    []string{},
 		Consumes:    []string{},
-		ConfigSchema: map[string]any{
+		ConfigSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
 			"type": map[string]any{
 				"type":        "string",
 				"default":     "ed25519",
@@ -73,7 +73,7 @@ func newPlugin() *muplugin.Plugin {
 				"type":        "string",
 				"description": "Key comment embedded in the public key",
 			},
-		},
+		}},
 		Plan: plan,
 	}
 }

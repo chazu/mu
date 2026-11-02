@@ -22,7 +22,15 @@ MINIMAL PLUGIN (30 LINES)
           Name:     "hello",
           Version:  "0.1.0",
           Produces: []string{"text"},
-          Plan:     plan,
+          ConfigSchema: map[string]any{
+              "type": "object",
+              "properties": map[string]any{
+                  "out": map[string]any{"type": "string"},
+              },
+              "required":             []string{"out"},
+              "additionalProperties": false,
+          },
+          Plan: plan,
       }).Main()
   }
 
@@ -77,7 +85,7 @@ THE PLUGIN STRUCT
   type Plugin struct {
       Name, Version, Description string
       Consumes, Produces         []string
-      ConfigSchema               map[string]any
+      ConfigSchema               map[string]any  // JSON Schema for target.config
 
       Plan          func(ctx, PlanRequest) (PlanResponse, error)  // optional
       ResolveSecret func(ctx, ref string) (string, error)         // optional
