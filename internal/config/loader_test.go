@@ -307,3 +307,14 @@ func TestLoad_RejectsRemovedKindImplements(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_RejectsRemovedSealedRouting(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+	writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+		`targets: [{target: "x", toolchain: "shell", sources: [], sealed_routing: "strict"}]`)
+	_, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "sealed_routing was removed; strict routing is always on") {
+		t.Fatalf("Load error = %v, want \"sealed_routing was removed\"", err)
+	}
+}

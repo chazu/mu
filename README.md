@@ -28,7 +28,8 @@ Plugins decide what to build and how. mu executes.
 - **Plugins** — external executables that emit action subgraphs via NDJSON protocol
 - **Toolchains** — built from scratch as content-addressed artifacts (download, verify, extract)
 - **Sealed I/O** — provider-backed values resolved at execution time, never
-  stored in the cache or manifest
+  stored in the cache or manifest; each action claims exactly the sealed
+  names its target declares
 
 ### Design Principles
 

@@ -313,7 +313,6 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 				SealedInputModes:  t.SealedInputModes,
 				SealedOutputs:     t.SealedOutputs,
 				SealedOutputModes: t.SealedOutputModes,
-				SealedRouting:     t.SealedRouting,
 			}
 
 			// Thread each dep's declared_outputs (artifact-type → path,
@@ -363,48 +362,12 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			planActions = append([]plugin.ActionSpec{transformAction}, planActions...)
 		}
 
-		if t.SealedRouting == "strict" {
-			if err := validateStrictSealedRouting(t, planActions); err != nil {
-				return nil, fmt.Errorf("coordinator: target %q: %w", t.Name, err)
-			}
-		} else {
-			// Apply target-level sealed_inputs to plan/transform-emitted actions.
-			// The plugin path threads these through TargetInfo, but pith plan
-			// programs emit bare action specs, so the coordinator attaches the
-			// target's sealed_inputs (and modes) to any emitted action that did
-			// not declare its own. This is what lets a pith body read a secret via
-			// secret/get / env-mode injection.
-			if len(t.SealedInputs) > 0 {
-				for i := range planActions {
-					if len(planActions[i].SealedInputs) == 0 {
-						planActions[i].SealedInputs = cloneStringMap(t.SealedInputs)
-						if len(t.SealedInputModes) > 0 {
-							planActions[i].SealedInputModes = cloneStringMap(t.SealedInputModes)
-						}
-					}
-				}
-			}
-
-			// Apply target-level sealed_outputs as a convenience: if the target
-			// declares them and no plan action set its own, attach them to the
-			// single action in the plan. Multi-action plans must have the
-			// plugin route sealed_outputs to the correct action explicitly.
-			if len(t.SealedOutputs) > 0 {
-				anyExplicit := false
-				for _, a := range planActions {
-					if len(a.SealedOutputs) > 0 {
-						anyExplicit = true
-						break
-					}
-				}
-				if !anyExplicit {
-					if len(planActions) != 1 {
-						return nil, fmt.Errorf("coordinator: target %q: sealed_outputs declared at target level but plan has %d actions; route them explicitly via the plugin", t.Name, len(planActions))
-					}
-					planActions[0].SealedOutputs = cloneStringMap(t.SealedOutputs)
-					planActions[0].SealedOutputModes = cloneStringMap(t.SealedOutputModes)
-				}
-			}
+		// Target-level sealed maps are the complete allow-list; actions
+		// claim from it explicitly (a lone action with no claims of its own
+		// is filled from the target maps).
+		autoClaimSingleAction(t, planActions)
+		if err := validateSealedRouting(t, planActions); err != nil {
+			return nil, fmt.Errorf("coordinator: target %q: %w", t.Name, err)
 		}
 
 		// Prefix action IDs with target name to avoid cross-target collisions.

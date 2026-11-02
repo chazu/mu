@@ -14,11 +14,21 @@ BASIC USAGE
 
   target: "//secrets/admin-pass"
   toolchain: "secret-gen"
+  sealed_outputs:      {VALUE: "pass:registry/admin"}
+  sealed_output_modes: {VALUE: "create_if_absent"}
   config: {
       ref:        "pass:registry/admin"
       derivation: ["openssl", "rand", "-base64", "24"]
       // mode defaults to "create_if_absent"
   }
+
+  The secret-gen action claims a sealed output named VALUE with
+  config.ref and config.mode. Sealed routing is strict, so the target
+  must declare that same output: sealed_outputs: {VALUE: <ref>} and
+  sealed_output_modes: {VALUE: <mode>} (the target-level mode default
+  is "overwrite", so state create_if_absent explicitly). Any
+  sealed_inputs the target declares are claimed by the action and
+  available to the derivation.
 
 CONFIG FIELDS
 
@@ -67,6 +77,8 @@ WORKED EXAMPLE — bootstrap zot's admin password
           target:    "//secrets/zot-admin"
           toolchain: "secret-gen"
           sources: []
+          sealed_outputs:      {VALUE: "pass:registry/admin"}
+          sealed_output_modes: {VALUE: "create_if_absent"}
           config: {
               ref:        "pass:registry/admin"
               derivation: ["openssl", "rand", "-base64", "32"]
@@ -123,8 +135,10 @@ COOKBOOK — common derivations
                        "htpasswd -nbBC 12 admin \"$RAW_PASS\""]
           env: {RAW_PASS: ""}    // runner overrides via sealed_inputs below
       }
-      sealed_inputs:      {RAW_PASS: "pass:registry/raw-pass"}
-      sealed_input_modes: {RAW_PASS: "env"}
+      sealed_inputs:       {RAW_PASS: "pass:registry/raw-pass"}
+      sealed_input_modes:  {RAW_PASS: "env"}
+      sealed_outputs:      {VALUE: "pass:registry/htpasswd-line"}
+      sealed_output_modes: {VALUE: "create_if_absent"}
 
   Diceware-style passphrase (requires 'diceware' or similar; example
   uses pwgen):

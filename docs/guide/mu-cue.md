@@ -51,8 +51,6 @@ TARGET FIELDS
   sealed_output_modes  {NAME: "create" | "overwrite" |
                        "create_if_absent"} — store mode per output
                        (optional, default overwrite).
-  sealed_routing       "strict" — require actions to claim target-level
-                       sealed declarations explicitly (optional).
 
 TARGET NAMING
 
@@ -74,19 +72,19 @@ SECRETS POLICY
   match is rejected at plan time. Omit the block to allow all
   writes; set to [] for explicit deny-all. See 'mu guide secrets'.
 
-STRICT SEALED ROUTING
+SEALED ROUTING
 
-  sealed_routing: "strict"
+  Target-level sealed maps are the complete allow-list. Plan actions must
+  claim each sealed name they use with the exact target ref and effective
+  mode. Every declared input must be claimed by at least one action; every
+  output by exactly one action. Undeclared claims, unused declarations,
+  mode/ref changes, and ambiguous outputs fail during planning. If the plan
+  has exactly one action and it makes no sealed claims, mu fills its claims
+  from the target maps. Planning never resolves provider values; each
+  claiming action resolves its inputs immediately before execution.
 
-  Strict mode treats target-level sealed maps as the complete capability
-  declaration. Plan actions must claim each input they consume using the
-  exact target ref and effective mode. Every declared input must be claimed
-  by at least one action; every output by exactly one action. Undeclared
-  claims, unused declarations, mode/ref changes, and ambiguous outputs fail
-  during planning. Planning never resolves provider values; each claiming
-  action resolves its inputs immediately before execution. Without
-  sealed_routing, the existing target-to-action convenience behavior remains
-  in effect. PUDL-generated targets use strict mode.
+  The former sealed_routing field was removed (routing is always strict);
+  setting it is a load error.
 
 CACHE CONFIG
 

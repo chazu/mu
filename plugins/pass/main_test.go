@@ -179,7 +179,7 @@ func TestLocalPluginDirResolvesPassRefs(t *testing.T) {
 			},
 			Secrets: &config.SecretsConfig{WritableRefs: []string{"pass:dst/*"}},
 			Targets: []config.Target{{
-				Name: "//copy", Toolchain: "copier", SealedRouting: "strict",
+				Name: "//copy", Toolchain: "copier",
 				SealedInputs:      map[string]string{"IN": "pass:db/login"},
 				SealedInputModes:  map[string]string{"IN": "env"},
 				SealedOutputs:     map[string]string{"OUT": "pass:dst/token"},
