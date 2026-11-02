@@ -37,7 +37,8 @@ func TestDeclaredPathSelectsExecutableAndChangesIdentity(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf declared > \"$MU_OUT/out\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	a := &Action{ID: "path", Command: []string{"mu-env-choice"}, Env: map[string]string{"PATH": dir}, Outputs: []string{"out"}, WorkDir: t.TempDir()}
+	// The script lives on the host, so the sandboxed action needs a grant.
+	a := &Action{ID: "path", Command: []string{"mu-env-choice"}, Env: map[string]string{"PATH": dir}, HostPaths: map[string]string{dir: "dir"}, Outputs: []string{"out"}, WorkDir: t.TempDir()}
 	first := ComputeActionKey(a)
 	t.Setenv("PATH", "/usr/bin:/bin")
 	result := executeEnvironmentAction(t, a)

@@ -7,6 +7,16 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **Every pure action runs in the sandbox.** `MU_SANDBOX` is gone: pure
+  actions see only their declared inputs, named scratch toolchains (now
+  with file modes and in-tree symlinks), granted `host_paths` and system
+  directories; impure actions run on the host. `network: false` and
+  filesystem confinement are kernel-enforced under Seatbelt and Linux
+  namespaces; with copy isolation mu warns once, and build manifests record
+  each action's `isolation`. Pure actions must declare relative outputs.
+  The go plugin and `//lint` targets build with the scratch go toolchain
+  (1.26.10) inside the sandbox, downloading modules with `network: true`;
+  the go plugin's separate `mod-download` action is gone.
 - **mu warns about unvalidated plugin config.** When a plan-capable plugin
   declares no `config_schema` and a target passes it config, `mu build`
   prints one warning per plugin. Every in-tree plan-capable plugin now

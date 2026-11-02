@@ -13,21 +13,12 @@ import (
 	"github.com/chazu/mu/internal/sandbox"
 )
 
-// requireHostShellSandbox skips when the sandbox cannot run /bin/sh: the Linux
-// namespace rootfs holds only the sandbox tree until system paths are mounted
-// read-only (mu-oa1.2).
+// requireHostShellSandbox returns the isolation sandboxed actions get. Every
+// level can run the host's /bin/sh: Linux namespaces mount the system
+// directories read-only.
 func requireHostShellSandbox(t *testing.T) sandbox.IsolationLevel {
 	t.Helper()
-	sb, err := sandbox.New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	level := sb.Level()
-	sb.Cleanup()
-	if level == sandbox.IsolationNamespace {
-		t.Skip("namespace sandbox has no /bin/sh until system paths are mounted (mu-oa1.2)")
-	}
-	return level
+	return sandbox.DetectedLevel()
 }
 
 func writeProjectFile(t *testing.T, root, rel, content string) cas.Digest {
@@ -71,21 +62,15 @@ func requireSucceeded(t *testing.T, result *dag.ExecuteResult) {
 	}
 }
 
-func TestSandboxGate(t *testing.T) {
+// Every pure action is sandboxed; impure actions run on the host.
+func TestSandboxPolicy(t *testing.T) {
 	pure := &dag.Action{}
 	impure := &dag.Action{Impure: true}
-	tool := &dag.Action{Toolchain: map[string]cas.Digest{}}
-	t.Setenv(dag.SandboxEnvVar, "")
-	if pure.Sandboxed() || impure.Sandboxed() || !tool.Sandboxed() {
-		t.Fatal("gate off: only toolchain actions are sandboxed")
-	}
-	off := dag.ComputeActionKey(pure)
-	t.Setenv(dag.SandboxEnvVar, "1")
 	if !pure.Sandboxed() || impure.Sandboxed() {
-		t.Fatal("gate on: every pure action, and no impure action, is sandboxed")
+		t.Fatal("want every pure action, and no impure action, sandboxed")
 	}
-	if dag.ComputeActionKey(pure) == off {
-		t.Fatal("sandboxed and bare execution share an action key")
+	if impure.Isolation() != "none" || pure.Isolation() != sandbox.DetectedLevel().String() {
+		t.Fatalf("isolation: pure %q, impure %q", pure.Isolation(), impure.Isolation())
 	}
 }
 
@@ -93,7 +78,6 @@ func TestSandboxGate(t *testing.T) {
 // and its outputs come back to the project.
 func TestSandboxedActionInputsAndOutputs(t *testing.T) {
 	level := requireHostShellSandbox(t)
-	t.Setenv(dag.SandboxEnvVar, "1")
 	project := t.TempDir()
 	inDigest := writeProjectFile(t, project, "pkg/in.txt", "declared\n")
 	writeProjectFile(t, project, "pkg/secret.txt", "undeclared\n")
@@ -125,13 +109,12 @@ test ! -e ../root.txt || { echo "undeclared root file visible" >&2; exit 4; }
 	}
 }
 
-// With the gate off the same action runs on the host and sees the project.
-func TestUnsandboxedActionSeesProject(t *testing.T) {
-	t.Setenv(dag.SandboxEnvVar, "")
+// An impure action runs on the host and sees the whole project.
+func TestImpureActionSeesProject(t *testing.T) {
 	project := t.TempDir()
 	writeProjectFile(t, project, "secret.txt", "undeclared\n")
 	a := &dag.Action{
-		ID: "read", Command: []string{"sh", "-c", "cat secret.txt > out.txt"},
+		ID: "read", Command: []string{"sh", "-c", "cat secret.txt > out.txt"}, Impure: true,
 		Outputs: []string{"out.txt"}, Env: map[string]string{}, ProjectRoot: project, WorkDir: project,
 	}
 	requireSucceeded(t, runGraph(t, &dag.Executor{Store: newStore(t), Workers: 1}, a))
@@ -139,7 +122,6 @@ func TestUnsandboxedActionSeesProject(t *testing.T) {
 
 func TestSandboxedActionChangedInputFails(t *testing.T) {
 	requireHostShellSandbox(t)
-	t.Setenv(dag.SandboxEnvVar, "1")
 	project := t.TempDir()
 	planned := writeProjectFile(t, project, "in.txt", "planned")
 	writeProjectFile(t, project, "in.txt", "edited after planning")
@@ -155,7 +137,6 @@ func TestSandboxedActionChangedInputFails(t *testing.T) {
 }
 
 func TestSandboxedOutputEscapeIsError(t *testing.T) {
-	t.Setenv(dag.SandboxEnvVar, "1")
 	project := t.TempDir()
 	for _, out := range []string{"../escape.txt", filepath.Join(project, "abs.txt")} {
 		a := &dag.Action{
@@ -173,7 +154,6 @@ func TestSandboxedOutputEscapeIsError(t *testing.T) {
 // consumer names one output by path and when it references the whole producer.
 func TestSandboxedActionUpstreamOutputs(t *testing.T) {
 	requireHostShellSandbox(t)
-	t.Setenv(dag.SandboxEnvVar, "1")
 	project := t.TempDir()
 	if err := os.Mkdir(filepath.Join(project, "gen"), 0o755); err != nil {
 		t.Fatal(err)
@@ -211,10 +191,9 @@ func TestSandboxedActionUpstreamOutputs(t *testing.T) {
 }
 
 // A pure action naming a scratch toolchain finds its binary under the sandbox
-// root on PATH. Toolchains sandbox the action even with MU_SANDBOX unset.
+// root on PATH.
 func TestSandboxedToolchainOnPath(t *testing.T) {
 	requireHostShellSandbox(t)
-	t.Setenv(dag.SandboxEnvVar, "")
 	store := newStore(t)
 	tool, err := store.Put(context.Background(), bytes.NewReader([]byte("#!/bin/sh\necho \"mytool $0\" > \"$1\"\n")))
 	if err != nil {
@@ -240,7 +219,6 @@ func TestSandboxedToolchainOnPath(t *testing.T) {
 // File-mode sealed inputs are readable inside the sandbox and gone afterwards.
 func TestSandboxedSealedInputFileMode(t *testing.T) {
 	requireHostShellSandbox(t)
-	t.Setenv(dag.SandboxEnvVar, "1")
 	project := t.TempDir()
 	a := &dag.Action{
 		ID:               "sealed",

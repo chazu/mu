@@ -29,15 +29,6 @@ func TestActionKey_PureDefaultEqualsExplicitCleanEnvironment(t *testing.T) {
 	}
 }
 
-func TestActionKey_BareAndEmptySandboxDiffer(t *testing.T) {
-	t.Setenv(dag.SandboxEnvVar, "") // with MU_SANDBOX=1 both would be sandboxed
-	a, b := baseAction(), baseAction()
-	b.Toolchain = map[string]cas.Digest{}
-	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
-		t.Fatal("bare and sandbox execution have the same key")
-	}
-}
-
 func TestActionKey_DelimitersCannotAliasFields(t *testing.T) {
 	cases := []struct {
 		name string

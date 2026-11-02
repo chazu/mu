@@ -32,6 +32,13 @@ func main() {
 		if _, err := os.ReadFile(os.Args[2]); err == nil {
 			fail(fmt.Errorf("read allowed"))
 		}
+	case "list-denied":
+		if len(os.Args) != 3 {
+			os.Exit(2)
+		}
+		if _, err := os.ReadDir(os.Args[2]); err == nil {
+			fail(fmt.Errorf("directory listing allowed"))
+		}
 	case "network":
 		if len(os.Args) != 4 {
 			os.Exit(2)

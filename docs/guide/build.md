@@ -96,11 +96,12 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
 
   Pure actions default to an empty environment. Declare PATH and other
   required variables in action.env; use sealed_inputs for secret values.
-  When a bare command has no PATH, Mu searches only /usr/bin:/bin for its
+  When a command has no PATH, Mu searches only /usr/bin:/bin for its
   initial executable. An explicit PATH controls lookup; ambient parent PATH
-  cannot select another binary. In the sandbox the toolchain bin/ comes first
-  on PATH (see `mu guide sandbox`; pure actions are sandboxed with
-  MU_SANDBOX=1 or when they name scratch toolchains).
+  cannot select another binary. Every pure action runs in the sandbox, where
+  the toolchain bin/ comes first on PATH and only declared inputs, named
+  toolchains, granted host_paths and system directories are visible (see
+  `mu guide sandbox`). Impure actions run on the host.
 
   Impure bare commands with no env declaration retain parent inheritance for
   direct host operations. Explicit env maps, including {}, replace inheritance.
@@ -116,6 +117,7 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
   provider access; the child uses fchdir on its inherited descriptor. Relative
   restores, output collection, and sandbox source reads use that pinned root.
   A later symlink swap cannot redirect those operations. This native descriptor
-  execution is supported on Linux and macOS. Bare commands remain intentional
-  host commands, not a full filesystem sandbox; explicit absolute outputs retain
-  their host-path contract.
+  execution is supported on Linux and macOS. Impure (host) commands remain
+  intentional host commands, not a filesystem sandbox; their explicit absolute
+  outputs retain their host-path contract. Pure actions must declare outputs
+  relative to their work directory.

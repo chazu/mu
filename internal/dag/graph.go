@@ -68,8 +68,7 @@ type Action struct {
 
 	// Toolchain is the merged artifact set (sandbox-root-relative path → CAS
 	// digest) of the scratch toolchains the action names. The executor
-	// unpacks it into the sandbox root; bin/ is on the sandbox PATH. A non-nil
-	// Toolchain sandboxes a pure action even when MU_SANDBOX is off.
+	// unpacks it into the sandbox root; bin/ is on the sandbox PATH.
 	Toolchain map[string]cas.Digest
 
 	// ToolchainModes holds permission bits for Toolchain files; a file

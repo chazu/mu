@@ -13,7 +13,6 @@ import (
 // with host_paths; kernel isolation denies it otherwise.
 func TestSandboxedHostPathGrant(t *testing.T) {
 	level := requireHostShellSandbox(t)
-	t.Setenv(dag.SandboxEnvVar, "1")
 	tools := t.TempDir()
 	helper := filepath.Join(tools, "helper.sh")
 	if err := os.WriteFile(helper, []byte("#!/bin/sh\necho granted > out.txt\n"), 0o755); err != nil {

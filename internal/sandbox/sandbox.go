@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/chazu/mu/internal/cas"
 )
@@ -30,6 +31,36 @@ const (
 	IsolationSeatbelt                        // macOS sandbox-exec (darwin)
 	IsolationNamespace                       // Linux user/mount/PID/net namespaces
 )
+
+// String names the level as build manifests record it.
+func (l IsolationLevel) String() string {
+	switch l {
+	case IsolationSeatbelt:
+		return "seatbelt"
+	case IsolationNamespace:
+		return "namespace"
+	default:
+		return "copy"
+	}
+}
+
+var (
+	detectOnce sync.Once
+	detected   IsolationLevel
+)
+
+// DetectedLevel is the isolation sandboxes get on this host, probed once per
+// process. When it is copy isolation, a one-time warning goes to stderr: the
+// sandbox then confines nothing.
+func DetectedLevel() IsolationLevel {
+	detectOnce.Do(func() {
+		detected = detectIsolation()
+		if detected == IsolationCopy {
+			fmt.Fprintln(os.Stderr, "mu: sandbox: kernel isolation unavailable on this host; network:false and filesystem confinement are NOT enforced")
+		}
+	})
+	return detected
+}
 
 // Sandbox manages a temporary rootfs for executing a build action.
 type Sandbox struct {
@@ -82,7 +113,7 @@ func New(store cas.Store) (*Sandbox, error) {
 		rootDir:   root,
 		workDir:   filepath.Join(root, "work"),
 		store:     store,
-		isolation: detectIsolation(),
+		isolation: DetectedLevel(),
 	}, nil
 }
 
@@ -440,10 +471,9 @@ func (s *Sandbox) buildEnv(env map[string]string) []string {
 		merged["PATH"] = binDir
 	}
 
-	// Set TMPDIR to sandbox's tmp directory for hermetic temp file creation.
-	if _, ok := merged["TMPDIR"]; !ok {
-		merged["TMPDIR"] = filepath.Join(s.rootDir, "tmp")
-	}
+	// TMPDIR is always the sandbox's tmp/: the only temp directory the
+	// command may write to.
+	merged["TMPDIR"] = filepath.Join(s.rootDir, "tmp")
 
 	// HOME is always the sandbox's empty, writable home/: a host HOME would
 	// be unreadable under kernel isolation, and tools deriving caches from

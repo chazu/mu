@@ -110,13 +110,20 @@ func (s *Sandbox) generateSBPL(network bool) string {
   (subpath (param "ROOT_DIR"))
   (subpath "/bin")
   (subpath "/sbin")
-  (subpath "/usr")
+  ;; /usr minus /usr/local, where host-installed tools live.
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/lib")
+  (subpath "/usr/libexec")
+  (subpath "/usr/share")
   (subpath "/System")
   (subpath "/Applications/Xcode.app/Contents/Developer")
   (subpath "/dev")
-  (subpath "/etc"))
+  ;; /etc is a symlink; the kernel matches the real path.
+  (subpath "/etc")
+  (subpath "/private/etc"))
 
-;; Writable: output + tmp + work dir
+;; Writable: only the sandbox's work/, out/, tmp/ and home/
 (allow file-write*
   (subpath (param "OUTPUT_DIR"))
   (subpath (param "TMPDIR"))
@@ -146,7 +153,8 @@ func (s *Sandbox) generateSBPL(network bool) string {
 
 // networkRules is appended for network: true. Besides sockets, macOS clients
 // resolve names through mDNSResponder and verify TLS certificates through
-// trustd/Security, which read the system keychains and trust settings.
+// trustd/Security, which read the system keychains and trust settings
+// (/private/etc is readable for every action).
 const networkRules = `
 ;; Network allowed
 (allow network-outbound)
@@ -158,7 +166,6 @@ const networkRules = `
   (global-name "com.apple.SecurityServer")
   (global-name "com.apple.ocspd"))
 (allow file-read*
-  (subpath "/private/etc")
   (subpath "/private/var/db/mds")
   (subpath "/Library/Keychains")
   (subpath "/System/Library/Keychains")

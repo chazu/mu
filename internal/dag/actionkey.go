@@ -21,8 +21,8 @@ import (
 // digests identify upstream content. Timeout/retry policy does not identify a
 // successful build's artifacts. The checkout location does not either: only
 // the project-relative work directory is hashed (v4), never the project root.
-// Whether the action runs sandboxed is hashed, so enabling MU_SANDBOX does not
-// reuse results produced on the bare host.
+// Whether the action runs sandboxed is hashed, so results produced on the bare
+// host by older mu versions (before every pure action was sandboxed) never hit.
 func ComputeActionKey(a *Action) cas.ActionKey {
 	h := sha256.New()
 	field := func(parts ...string) {
