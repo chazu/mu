@@ -123,20 +123,20 @@ secrets: {
 targets: [
     // OK: matches pass:registry/*
     {
-        target:    "//secrets/admin"
-        toolchain: "secret-gen"
+        target:         "//secrets/admin"
+        toolchain:      "secret-gen"
+        sealed_outputs: {VALUE: "pass:registry/admin"}
         config: {
-            ref:        "pass:registry/admin"
             derivation: ["openssl", "rand", "-base64", "24"]
         }
     },
 
     // FAIL at plan time: this ref is outside the allow-list.
     // {
-    //     target:    "//secrets/personal-rotation"
-    //     toolchain: "secret-gen"
+    //     target:         "//secrets/personal-rotation"
+    //     toolchain:      "secret-gen"
+    //     sealed_outputs: {VALUE: "pass:personal/email-app"}   // not under pass:registry/
     //     config: {
-    //         ref:        "pass:personal/email-app"   // not under pass:registry/
     //         derivation: ["openssl", "rand", "-base64", "32"]
     //     }
     // },

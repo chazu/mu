@@ -32,8 +32,8 @@ so the consumer's `deps` can express the bootstrapping order:
 ```cue
 target: "//secrets/admin-pass"
 toolchain: "secret-gen"
+sealed_outputs: {VALUE: "pass:registry/admin"}
 config: {
-    ref:        "pass:registry/admin"
     derivation: ["openssl", "rand", "-base64", "24"]
 }
 ```
@@ -51,10 +51,11 @@ A `secret-gen` target plans into exactly one action:
 1. The action runs `derivation` (an argv array) under bash.
 2. Stdout is captured and (by default) the trailing newline is
    stripped.
-3. The captured value is written to `$MU_SEALED_OUT_DIR/VALUE` — a
-   per-action temporary directory created by the executor.
-4. After the action exits successfully, the executor reads
-   `VALUE` and routes it through the configured provider plugin's
+3. The captured value is written to `$MU_SEALED_OUT_DIR/<NAME>`, where
+   `<NAME>` is the target's single `sealed_outputs` key (conventionally
+   `VALUE`) — a per-action temporary directory created by the executor.
+4. After the action exits successfully, the executor reads that file
+   and routes it through the configured provider plugin's
    `store_secret` method, with the mode you selected.
 5. The temp directory is deleted unconditionally; the value bytes are
    zeroed in memory after routing.
@@ -76,20 +77,23 @@ the destination invalidates any (hypothetical future) cached entry.
 ```cue
 target: "//secrets/some-name"
 toolchain: "secret-gen"
-config: {
-    // Required: destination ref. Must be of the form scheme:path.
-    // The scheme must match a registered plugin that declares the
-    // store_secret capability (today: "pass").
-    ref: "pass:registry/admin"
 
+// Required: the destination, as exactly one sealed_outputs entry. The
+// name is free (VALUE by convention). The ref must be of the form
+// scheme:path, and the scheme must match a registered plugin that
+// declares the store_secret capability.
+sealed_outputs: {VALUE: "pass:registry/admin"}
+
+// Optional: store mode for that entry. Default "create_if_absent"
+// (secret-gen's default; other toolchains default to "overwrite").
+//   - "create"           — fail if the entry already exists.
+//   - "overwrite"        — always set, replacing any prior value.
+//   - "create_if_absent" — no-op if the entry exists; create otherwise.
+sealed_output_modes: {VALUE: "create_if_absent"}
+
+config: {
     // Required: argv whose stdout becomes the stored value.
     derivation: ["openssl", "rand", "-base64", "24"]
-
-    // Optional: store mode. Default "create_if_absent".
-    //   - "create"           — fail if the entry already exists.
-    //   - "overwrite"        — always set, replacing any prior value.
-    //   - "create_if_absent" — no-op if the entry exists; create otherwise.
-    mode: "create_if_absent"
 
     // Optional: extra environment variables for the derivation.
     // Useful for pinning randomness sources or auth tokens for
@@ -108,7 +112,9 @@ config: {
 ```
 
 `sources`, `outputs`, and `network` are not used by `secret-gen` and
-are silently ignored if present.
+are silently ignored if present. `config.ref` and `config.mode` were
+removed: setting either fails planning with a message naming the
+`sealed_outputs` / `sealed_output_modes` entry to write instead.
 
 ---
 
@@ -140,8 +146,8 @@ targets: [
         target: "//secrets/zot-admin"
         toolchain: "secret-gen"
         sources: []
+        sealed_outputs: {VALUE: "pass:loosh/registry.loosh.cloud/admin"}
         config: {
-            ref:        "pass:loosh/registry.loosh.cloud/admin"
             derivation: ["openssl", "rand", "-base64", "32"]
         }
     },

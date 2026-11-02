@@ -91,7 +91,6 @@ func TestPlan_SealedOutputDeniedByPolicy(t *testing.T) {
 				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
 				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
-					"ref":        "pass:registry/admin",
 					"derivation": []any{"true"},
 				},
 			}},
@@ -112,6 +111,43 @@ func TestPlan_SealedOutputDeniedByPolicy(t *testing.T) {
 	}
 }
 
+// A secret-gen target names its destination only in sealed_outputs; with
+// no sealed_output_modes it plans with the create_if_absent default and
+// passes strict routing, and building routes the value to that ref.
+func TestBuild_SecretGenSealedOutputsOnly(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name: "//secrets/admin", Toolchain: "secret-gen",
+				SealedOutputs: map[string]string{"VALUE": "pass:registry/admin"},
+				Config:        map[string]any{"derivation": []any{"echo", "hunter2"}},
+			}},
+			Secrets: &config.SecretsConfig{WritableRefs: []string{"pass:registry/*"}},
+			Plugins: []config.PluginDef{{Name: "pass", Command: mockPluginCommand(t, "mock_provider.sh")}},
+		},
+		Store: newTestStore(t), Workers: 1,
+	}
+	plan, err := c.Plan(context.Background(), []string{"//secrets/admin"})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	a := plan.Graph.Action("//secrets/admin:gen")
+	if a.SealedOutputs["VALUE"] != "pass:registry/admin" || a.SealedOutputModes["VALUE"] != "create_if_absent" {
+		t.Fatalf("claims = %v / %v, want VALUE -> pass:registry/admin create_if_absent", a.SealedOutputs, a.SealedOutputModes)
+	}
+	if got := c.Config.Targets[0].SealedOutputModes; len(got) != 0 {
+		t.Errorf("config target modes mutated: %v", got)
+	}
+	result, err := c.Execute(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if n := len(result.ExecResult.Failed); n != 0 {
+		t.Fatalf("failed actions: %v", result.ExecResult.Failed[0].Err)
+	}
+}
+
 func TestPlan_SealedOutputAllowedByPolicy(t *testing.T) {
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),
@@ -122,7 +158,6 @@ func TestPlan_SealedOutputAllowedByPolicy(t *testing.T) {
 				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
 				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
-					"ref":        "pass:registry/admin",
 					"derivation": []any{"true"},
 				},
 			}},
@@ -155,7 +190,7 @@ func TestExecuteRechecksSealedOutputPolicyAgainstTamperedPlan(t *testing.T) {
 				Name: "//secrets/admin", Toolchain: "secret-gen",
 				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
 				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
-				Config:            map[string]any{"ref": "pass:registry/admin", "derivation": []any{"echo", "hunter2"}},
+				Config:            map[string]any{"derivation": []any{"echo", "hunter2"}},
 			}},
 			Secrets: &config.SecretsConfig{WritableRefs: []string{"pass:registry/*"}},
 			Plugins: []config.PluginDef{{Name: "pass", Command: mockPluginCommand(t, "mock_provider.sh")}},
@@ -194,7 +229,6 @@ func TestPlan_DenyAllPolicyBlocksWrites(t *testing.T) {
 				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
 				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
-					"ref":        "pass:registry/admin",
 					"derivation": []any{"true"},
 				},
 			}},
