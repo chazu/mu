@@ -40,9 +40,8 @@ SECRETS
 
   - resolve_secret only. The scheme name is "env" (the plugin's name in
     plugins[]); the ref path is the variable name.
-  - Pairs naturally with the pith `secret/get` word: a sealed_input named
-    GITLAB_TOKEN resolved via `env:GITLAB_TOKEN` is read in a pith body with
-    `["'GITLAB_TOKEN", "secret/get"]` and stays taint-tracked thereafter.
+  - A sealed_input named GITLAB_TOKEN resolved via `env:GITLAB_TOKEN` is
+    delivered to the action like any other sealed input (env or file mode).
 
 SECURITY NOTE
 

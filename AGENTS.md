@@ -90,7 +90,7 @@ mu guide pudl            # how mu pairs with pudl
 1. **Artifact** — content-addressed blob (SHA-256). Immutable. Stored in OCI layout at `~/.mu/cache/`. Distributable via OCI registry push/pull.
 2. **Action** — hermetic transformation: input artifacts → output artifacts. Fields: `id`, `command`, `inputs` (name→digest), `outputs` (paths), `depends_on`, `env`, `network`, `impure`, `timeout_s`, `retries`, `sealed_inputs/outputs`. Cached by input hash if pure.
 3. **Plugin** — external executable speaking NDJSON. Emits action subgraphs in response to `plan` requests.
-4. **Target** — declared build unit in `mu.cue`. Has `target` (name like `//cmd/app`), `toolchain`, `sources`, `deps`, `config`, optional BRICK metadata (`kind`, `implements`), optional inline `plan`/`transform` pith programs.
+4. **Target** — declared build unit in `mu.cue`. Has `target` (name like `//cmd/app`), `toolchain`, `sources`, `deps`, `config`, optional BRICK metadata (`kind`, `implements`)
 5. **Toolchain** — special target with `from: "scratch"`. mu downloads, verifies SHA-256, extracts, registers files as content-addressed artifacts. Passed to downstream plugins via `toolchain_artifacts`.
 
 ## DAG model
@@ -266,10 +266,6 @@ One of:
   // BRICK metadata (used by pudl, ignored by mu execution)
   kind:       "relationship" | "interface" | "component" | "kit"
   implements: "//interface/name"
-
-  // Optional inline pith VM programs (replace plugin dispatch)
-  plan:      "..."   // pith program emits actions
-  transform: "..."   // runs after deps complete
 }
 ```
 

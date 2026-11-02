@@ -15,11 +15,14 @@ func TestBuildValidatedRejectsBeforeExecution(t *testing.T) {
 	marker := filepath.Join(root, "executed")
 	coordinator := &Coordinator{
 		ProjectRoot: root,
-		Config: &config.ProjectConfig{Targets: []config.Target{{
-			Name: "//app", Plan: []any{map[string]any{
-				"id": "run", "command": []any{"touch", marker}, "outputs": []any{}, "impure": true,
-			}, "action/emit"},
-		}}},
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name: "//app", Toolchain: "cfg", Config: map[string]any{"actions": []any{map[string]any{
+					"id": "run", "command": []any{"touch", marker}, "outputs": []any{}, "impure": true,
+				}}},
+			}},
+			Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
+		},
 		Store: newTestStore(t), Workers: 1,
 	}
 	want := errors.New("plan not approved")
@@ -36,11 +39,14 @@ func TestBuildValidatedExecutesTheValidatedPlanResult(t *testing.T) {
 	marker := filepath.Join(root, "executed")
 	coordinator := &Coordinator{
 		ProjectRoot: root,
-		Config: &config.ProjectConfig{Targets: []config.Target{{
-			Name: "//app", Plan: []any{map[string]any{
-				"id": "run", "command": []any{"touch", marker}, "outputs": []any{}, "impure": true,
-			}, "action/emit"},
-		}}},
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name: "//app", Toolchain: "cfg", Config: map[string]any{"actions": []any{map[string]any{
+					"id": "run", "command": []any{"touch", marker}, "outputs": []any{}, "impure": true,
+				}}},
+			}},
+			Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
+		},
 		Store: newTestStore(t), Workers: 1,
 	}
 	var validated *PlanResult
@@ -76,24 +82,33 @@ done
 	coordinator := &Coordinator{
 		ProjectRoot: root,
 		Config: &config.ProjectConfig{
-			Plugins: []config.PluginDef{{Name: "fake", Script: providerPath}},
+			Plugins: []config.PluginDef{
+				{Name: "fake", Script: providerPath},
+				{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")},
+			},
 			Targets: []config.Target{{
-				Name: "//app", SealedRouting: "strict",
+				Name: "//app", SealedRouting: "strict", Toolchain: "cfg",
 				SealedInputs:     map[string]string{"TOKEN": "fake:apps/token"},
 				SealedInputModes: map[string]string{"TOKEN": "env"},
-				Plan: []any{map[string]any{
-					"id": "read", "body": []any{"'TOKEN", "secret/get", "drop"},
+				Config: map[string]any{"actions": []any{map[string]any{
+					"id": "read", "command": []any{"sh", "-c", `test "$TOKEN" = planned-provider-value`},
 					"outputs": []any{}, "impure": true,
 					"sealed_inputs":      map[string]any{"TOKEN": "fake:apps/token"},
 					"sealed_input_modes": map[string]any{"TOKEN": "env"},
-				}, "action/emit"},
+				}}},
 			}},
 		},
 		Store: newTestStore(t), Workers: 1,
 	}
 	result, err := coordinator.BuildValidated(context.Background(), []string{"//app"}, func(plan *PlanResult) error {
-		if len(plan.Plugins) != 1 || plan.Plugins[0].Digest == "" {
-			t.Fatalf("provider identity = %#v, want one content-addressed row", plan.Plugins)
+		var provider *PluginIdentity
+		for i := range plan.Plugins {
+			if plan.Plugins[i].Name == "fake" {
+				provider = &plan.Plugins[i]
+			}
+		}
+		if provider == nil || provider.Digest == "" {
+			t.Fatalf("provider identity = %#v, want a content-addressed row for fake", plan.Plugins)
 		}
 		return os.WriteFile(providerPath, []byte("#!/bin/sh\nexit 99\n"), 0o755)
 	})

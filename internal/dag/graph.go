@@ -11,11 +11,10 @@ import (
 type Action struct {
 	ID      string
 	Command []string
-	Body    []any // pith VM program; if non-nil, overrides Command execution
 
 	// EweRef is the content digest of an ewe populator program (a .cue file
 	// hashed into CAS at plan time). When set, the action runs that program
-	// through the ewe processor instead of a command or pith body. The program
+	// through the ewe processor instead of a command. The program
 	// reaches execute time as inert content-addressed text, never inlined CUE.
 	EweRef      cas.Digest
 	Inputs      map[string]cas.Digest // name -> content hash (resolved by coordinator)

@@ -30,7 +30,11 @@
 // mu codebase keeps its existing import paths.
 package muplugin
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // ProtocolVersion is the current version of the plugin protocol.
 const ProtocolVersion = 1
@@ -154,8 +158,7 @@ type DepInfo struct {
 type ActionSpec struct {
 	ID                string            `json:"id"`
 	Command           []string          `json:"command"`
-	Body              []any             `json:"body,omitempty"`       // pith VM program; mutually exclusive with Command
-	EweSource         string            `json:"ewe_source,omitempty"` // project-relative path to an ewe populator .cue program; mutually exclusive with Command/Body
+	EweSource         string            `json:"ewe_source,omitempty"` // project-relative path to an ewe populator .cue program; mutually exclusive with Command
 	Inputs            map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
 	Outputs           []string          `json:"outputs"`              // declared output file paths
 	DependsOn         []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
@@ -182,6 +185,31 @@ type ActionSpec struct {
 	// RetryBackoffMs is the sleep between attempts in milliseconds.
 	// 0 = retry immediately.
 	RetryBackoffMs int `json:"retry_backoff_ms,omitempty"`
+}
+
+// removedActionFields lists wire fields mu no longer accepts on an action,
+// with the error reported when a plan response still sets one. Without this
+// check encoding/json would drop the field silently and the action would only
+// fail later, at execution, for lacking a command.
+var removedActionFields = []struct{ name, message string }{
+	{"body", "action bodies were removed; emit a command instead"},
+}
+
+// UnmarshalJSON decodes an ActionSpec, rejecting removed fields.
+func (s *ActionSpec) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, removed := range removedActionFields {
+		if raw, ok := fields[removed.name]; ok && string(raw) != "null" {
+			var id string
+			_ = json.Unmarshal(fields["id"], &id)
+			return fmt.Errorf("action %q: %s", id, removed.message)
+		}
+	}
+	type plain ActionSpec
+	return json.Unmarshal(data, (*plain)(s))
 }
 
 // ResolveSecretResponse is returned by plugins for method "resolve_secret".

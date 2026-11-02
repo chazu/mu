@@ -161,18 +161,15 @@ HOST ENVIRONMENT
         EnvPassthrough: []string{"HOME", "PATH", "GOCACHE"},
     }
 
-WHEN TO USE GO vs BB vs PITH
+WHEN TO USE GO vs BB
 
   Go SDK         when you need static compilation, fast startup, or
                  strong typing. Production plugins. Default choice.
   bb             when you're sketching and want REPL-style iteration.
                  Cost: bb toolchain dependency on every host.
-  pith VM        when the plugin is pure data transformation and
-                 doesn't need a process. See `mu guide pith-plugins`.
 
 SEE ALSO
 
   mu guide plugins      — plugin structure, manifest, distribution
   mu guide protocol     — NDJSON wire format (language-agnostic spec)
-  mu guide pith-plugins — inline VM-based plugins
   examples/plugins/hello-go/ — canonical Go example

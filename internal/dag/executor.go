@@ -3,23 +3,19 @@ package dag
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/chazu/ewe"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/ewesink"
-	"github.com/chazu/mu/internal/pithvm"
 	"github.com/chazu/mu/internal/rootexec"
 	"github.com/chazu/mu/internal/sandbox"
-	"github.com/chazu/pith"
 )
 
 // ActionStatus represents the result of executing a single action.
@@ -76,18 +72,6 @@ type Executor struct {
 	// silently drop captured secrets.
 	SealedOutputWriter SealedOutputWriter
 
-	// completedOutputs tracks output file paths by target prefix for
-	// completed actions, enabling pith VM getOutput closures.
-	// Protected by outputsMu since the main goroutine writes and
-	// worker goroutines read concurrently.
-	completedOutputs map[string]map[string]string // target -> outputName -> filePath
-
-	// pithResults stores pith VM stack results by target prefix.
-	// Transform actions and body actions write their result here so
-	// downstream actions can access it via target/output under the
-	// "_result" key without requiring file-based output declarations.
-	pithResults map[string]any // target -> stack result
-
 	// completed records finished actions (and their output digests) by ID so
 	// downstream placeholder inputs can be resolved. Guarded by outputsMu.
 	completed map[string]completedAction
@@ -120,9 +104,6 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 		workers = runtime.NumCPU()
 	}
 
-	// Initialize completed outputs tracking for pith VM getOutput.
-	e.completedOutputs = make(map[string]map[string]string)
-	e.pithResults = make(map[string]any)
 	e.completed = make(map[string]completedAction)
 
 	// Track state for each action.
@@ -194,28 +175,6 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 				e.outputsMu.Lock()
 				e.completed[status.ID] = completedAction{action: g.Action(status.ID), outputs: status.Outputs}
 				e.outputsMu.Unlock()
-
-				// Record completed outputs by target prefix for pith VM getOutput.
-				if idx := strings.LastIndex(status.ID, ":"); idx >= 0 {
-					targetName := status.ID[:idx]
-					e.outputsMu.Lock()
-					if e.completedOutputs[targetName] == nil {
-						e.completedOutputs[targetName] = make(map[string]string)
-					}
-					for _, a := range g.Actions() {
-						if a.ID == status.ID {
-							for _, outPath := range a.Outputs {
-								resolved := outPath
-								if !filepath.IsAbs(outPath) && a.WorkDir != "" {
-									resolved = filepath.Join(a.WorkDir, outPath)
-								}
-								e.completedOutputs[targetName][outPath] = resolved
-							}
-							break
-						}
-					}
-					e.outputsMu.Unlock()
-				}
 			}
 
 			// Unblock dependents.
@@ -280,9 +239,9 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 	}
 
-	// Execute the command (or pith Body program).
-	if len(a.Command) == 0 && len(a.Body) == 0 && a.EweRef == (cas.Digest{}) {
-		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command, body, or ewe program", a.ID)}
+	// Execute the command (or ewe program).
+	if len(a.Command) == 0 && a.EweRef == (cas.Digest{}) {
+		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command or ewe program", a.ID)}
 	}
 
 	secrets := e.ResolvedSecrets[a.ID]
@@ -383,7 +342,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 
 	// Collect declared outputs into WorkDir so dependents and cache storage can
 	// find them. An action may write an output to either location:
-	//   - $MU_OUT (the staging dir): ewe/pith actions, or any command that
+	//   - $MU_OUT (the staging dir): ewe actions, or any command that
 	//     honors MU_OUT. We copy those into WorkDir.
 	//   - its working dir directly: a plain shell command with a relative output
 	//     path (e.g. `cowsay ... > greeting.txt`, `go build -o=mu`). exec runs
@@ -495,8 +454,6 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 			exitCode, err = e.executeInSandbox(attemptCtx, a, env, workRoot)
 		} else if a.EweRef != (cas.Digest{}) {
 			exitCode, err = e.executeEwe(attemptCtx, a, env, workRoot)
-		} else if len(a.Body) > 0 {
-			exitCode, err = e.executePithVM(attemptCtx, a, env, workRoot)
 		} else {
 			exitCode, err = e.executeBare(attemptCtx, a, env, workDir)
 		}
@@ -560,76 +517,6 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 		exitCode = cmd.ProcessState.ExitCode()
 	}
 	return exitCode, err
-}
-
-// executePithVM runs a pith VM program instead of a shell command.
-func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
-	vm := pith.New(ctx)
-
-	getOutput := func(targetName string) (map[string]any, error) {
-		e.outputsMu.RLock()
-		outputs := e.completedOutputs[targetName]
-		pithResult := e.pithResults[targetName]
-		e.outputsMu.RUnlock()
-
-		result := make(map[string]any)
-		for name, path := range outputs {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				result[name] = map[string]any{"path": path, "error": err.Error()}
-				continue
-			}
-			var parsed any
-			if json.Unmarshal(data, &parsed) == nil {
-				result[name] = parsed
-			} else {
-				result[name] = string(data)
-			}
-		}
-		if pithResult != nil {
-			result["_result"] = pithResult
-		}
-		if len(result) == 0 {
-			return nil, fmt.Errorf("no outputs for target %q", targetName)
-		}
-		return result, nil
-	}
-
-	// sealedNames lets the secret/env words partition the namespace: secret/get
-	// serves only these names; env/get refuses them. Names only — never values.
-	sealedNames := make(map[string]bool, len(a.SealedInputs))
-	for name := range a.SealedInputs {
-		sealedNames[name] = true
-	}
-
-	// Expose WorkDir as a sanctioned file/write root for pith bodies, alongside
-	// MU_SEALED_OUT_DIR / MU_OUT (added earlier in runAction). Copy first so we
-	// never mutate the caller's env map.
-	if a.WorkDir != "" {
-		cp := make(map[string]string, len(env)+1)
-		for k, v := range env {
-			cp[k] = v
-		}
-		cp["MU_WORK_DIR"] = a.WorkDir
-		env = cp
-	}
-
-	pithvm.RegisterExecDrivers(vm, env, sealedNames, getOutput, e.Store, workRoot)
-	if err := vm.Run(a.Body); err != nil {
-		return 1, err
-	}
-
-	// Store stack result for downstream access via target/output "_result" key.
-	if result, err := vm.Result(); err == nil && result != nil {
-		if idx := strings.LastIndex(a.ID, ":"); idx >= 0 {
-			targetName := a.ID[:idx]
-			e.outputsMu.Lock()
-			e.pithResults[targetName] = result
-			e.outputsMu.Unlock()
-		}
-	}
-
-	return 0, nil
 }
 
 // executeEwe runs an ewe populator program: it restores the program from CAS by

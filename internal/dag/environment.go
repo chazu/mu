@@ -45,7 +45,7 @@ func actionEnv(a *Action, host []string, muVars, sealed map[string]string) map[s
 	env := make(map[string]string)
 	declared := ActionEnvironment(a.Env, a.Impure)
 	// VM and sandbox execution never imports the ambient environment.
-	bare := a.Toolchain == nil && a.EweRef.IsZero() && len(a.Body) == 0
+	bare := a.Toolchain == nil && a.EweRef.IsZero()
 	if declared == nil && bare {
 		maps.Copy(env, hostVars)
 	} else {

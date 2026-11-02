@@ -224,7 +224,6 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 		actions = append(actions, &dag.Action{
 			ID:                spec.ID,
 			Command:           spec.Command,
-			Body:              spec.Body,
 			EweRef:            eweRef,
 			Inputs:            inputs,
 			InputSources:      inputSources,

@@ -51,6 +51,15 @@ All notable changes to mu are recorded here. The format follows
   added `digest` alongside it, which the schema rejects, leaving `mu.cue`
   unloadable.
 
+### Removed
+
+- The pith VM. Targets can no longer carry inline `plan` or `transform`
+  programs, and actions can no longer carry a `body`. A `mu.cue` target that
+  sets `plan`, `transform` or `body` fails to load, and a plugin plan response
+  with an action `body` is rejected. Use a `shell` target or a plugin that
+  emits commands. The `pith-plugins` guide topic and the pith examples are
+  gone, and mu no longer depends on `github.com/chazu/pith`.
+
 ## [v0.3.5] — 2026-08-05
 
 ### Added

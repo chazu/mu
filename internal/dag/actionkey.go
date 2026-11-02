@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -35,11 +34,6 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	field("mu.action-key/v4")
 	for _, arg := range a.Command {
 		field("cmd", arg)
-	}
-	if len(a.Body) > 0 {
-		if b, err := json.Marshal(a.Body); err == nil {
-			field("body", string(b))
-		}
 	}
 	if !a.EweRef.IsZero() {
 		field("ewe", a.EweRef.String())

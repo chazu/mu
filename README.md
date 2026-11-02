@@ -161,7 +161,7 @@ server.
 Run `mu guide` for the topic index. Each topic has its own page:
 `overview`, `mu.cue`, `plugins`, `build`, `observe`, `pudl`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
-`secret-providers`, `pith-plugins`, `sandbox`, `advice`, `sdk`.
+`secret-providers`, `sandbox`, `advice`, `sdk`.
 
 ## Topics
 
@@ -173,7 +173,6 @@ Run `mu guide` for the topic index. Each topic has its own page:
 | CUE config reference | [`docs/cue-conventions.md`](docs/cue-conventions.md) · `mu guide mu.cue` |
 | Plugin protocol (NDJSON) | `mu guide protocol` · [`docs/plugin-output-schemas.md`](docs/plugin-output-schemas.md) |
 | Writing plugins | `mu guide plugins` |
-| Inline programs (pith VM) | `mu guide pith-plugins` |
 | Sealed inputs/outputs (secrets) | `mu guide secrets` · [`docs/sealed-input-delivery-modes.md`](docs/sealed-input-delivery-modes.md) · [`docs/secrets-write-policy.md`](docs/secrets-write-policy.md) |
 | Secret-gen toolchain | `mu guide secret-gen` · [`docs/secret-gen-toolchain.md`](docs/secret-gen-toolchain.md) |
 | Sandbox model | `mu guide sandbox` |
@@ -212,7 +211,7 @@ refs/modes instead of inheriting target-wide access. The retired
 
 ## Project Status
 
-v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, pith VM, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
+v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
 
 ### Roadmap
 
