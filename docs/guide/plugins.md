@@ -145,6 +145,28 @@ WRITING A PLUGIN
     Action shapes (id/command/inputs/outputs/depends_on/env/network)
     map field-for-field via muplugin.ActionSpec.
 
+  CONFIG SCHEMA
+
+    A plugin that plans should report "config_schema" from discover: a
+    JSON Schema for the target's whole config object, closed with
+    "additionalProperties": false. mu validates every target against it
+    before planning and fails on a missing required field, a wrong type
+    or an unknown field (see 'mu guide protocol'). In Go:
+
+      ConfigSchema: map[string]any{
+          "type": "object",
+          "properties": map[string]any{
+              "out": map[string]any{"type": "string", "description": "Output file"},
+          },
+          "required":             []string{"out"},
+          "additionalProperties": false,
+      },
+
+    The old field-map form ({"out": {"type": "string", "required":
+    true}}) still works for one release but prints a deprecation
+    warning naming the plugin. Bump the plugin's version when its
+    schema changes: closing a schema rejects configs that used to pass.
+
   SEALED ACTION ROUTING
 
     TargetInfo carries sealed_inputs, sealed_input_modes, sealed_outputs,
@@ -314,8 +336,9 @@ PLUGIN GUIDES
 
     CONFIG FIELDS
       One row per field: name, type, required?, default, brief
-      meaning. Keep this in sync with the discover config_schema —
-      'mu plugin info' renders the schema; the guide explains it.
+      meaning. Keep this in sync with the discover config_schema (a
+      JSON Schema; see CONFIG SCHEMA above) — 'mu plugin info' renders
+      the schema; the guide explains it.
 
     SECRETS (omit if the plugin neither reads nor writes secrets)
       - For sealed_inputs: name each env var / file path the plugin

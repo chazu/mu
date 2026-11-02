@@ -35,7 +35,7 @@
 
 (defn handle-discover []
   {"name"             "sops"
-   "version"          "0.1.0"
+   "version"          "0.1.1"
    "protocol_version" 1
    "description"      "Resolve and store secrets in SOPS-encrypted files"
    "consumes"         []

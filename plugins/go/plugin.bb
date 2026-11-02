@@ -24,22 +24,24 @@
 
 (defn handle-discover []
   {"name"             "go"
-   "version"          "0.1.0"
+   "version"          "0.2.0"
    "protocol_version" 1
    "description"      "Compile Go packages into executables or libraries"
    "consumes"         ["source:go" "go_module_cache" "native_library"]
    "produces"         ["executable" "go_archive" "c_archive" "c_shared"]
-   "config_schema"    {"output"    {"type" "string"  "description" "Output binary path"}
-                       "pkg"       {"type" "string"  "default" "." "description" "Package path to build"}
-                       "goos"      {"type" "string"  "description" "Target operating system (cross-compile)"}
-                       "goarch"    {"type" "string"  "description" "Target architecture (cross-compile)"}
-                       "cgo"       {"type" "boolean" "default" false "description" "Enable cgo"}
-                       "tags"      {"type" "array"   "items" "string" "description" "Build tags to pass to the compiler"}
-                       "ldflags"   {"type" "string"  "description" "Linker flags (-ldflags)"}
-                       "gcflags"   {"type" "string"  "description" "Compiler flags (-gcflags)"}
-                       "trimpath"  {"type" "boolean" "default" true "description" "Remove file system paths from binary"}
-                       "race"      {"type" "boolean" "default" false "description" "Enable race detector"}
-                       "buildmode" {"type" "string"  "default" "exe" "description" "Go build mode (exe, c-archive, c-shared, etc.)"}}})
+   "config_schema"    {"type"                 "object"
+                       "properties"           {"output"    {"type" "string"  "description" "Output binary path"}
+                                               "pkg"       {"type" "string"  "default" "." "description" "Package path to build"}
+                                               "goos"      {"type" "string"  "description" "Target operating system (cross-compile)"}
+                                               "goarch"    {"type" "string"  "description" "Target architecture (cross-compile)"}
+                                               "cgo"       {"type" "boolean" "default" false "description" "Enable cgo"}
+                                               "tags"      {"type" "array"   "items" {"type" "string"} "description" "Build tags to pass to the compiler"}
+                                               "ldflags"   {"type" "string"  "description" "Linker flags (-ldflags)"}
+                                               "gcflags"   {"type" "string"  "description" "Compiler flags (-gcflags)"}
+                                               "trimpath"  {"type" "boolean" "default" true "description" "Remove file system paths from binary"}
+                                               "race"      {"type" "boolean" "default" false "description" "Enable race detector"}
+                                               "buildmode" {"type" "string"  "default" "exe" "description" "Go build mode (exe, c-archive, c-shared, etc.)"}}
+                       "additionalProperties" false}})
 
 (defn target-short-name
   "Extract short name from target like //cmd/server -> server"

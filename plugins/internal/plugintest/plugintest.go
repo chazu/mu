@@ -13,8 +13,11 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/coordinator"
 	"github.com/chazu/mu/sdk/muplugin"
 )
 
@@ -128,5 +131,40 @@ func Parity(t *testing.T, p *muplugin.Plugin, requestsPath, goldenPath string, a
 			wj, _ := json.MarshalIndent(w, "", "  ")
 			t.Errorf("request %d %s\n got (Go): %s\nwant (bb): %s", i+1, reqBytes, gj, wj)
 		}
+	}
+}
+
+// Schema returns p's config_schema decoded from JSON, as mu receives it.
+func Schema(t testing.TB, p *muplugin.Plugin) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(p.ConfigSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// ClosedSchema checks that p reports its config_schema as a closed JSON
+// Schema that mu accepts: valid (a complete config) passes mu's
+// validation, and valid plus an unknown field is rejected (a legacy field
+// map would only warn).
+func ClosedSchema(t *testing.T, p *muplugin.Plugin, valid map[string]any) {
+	t.Helper()
+	schema := Schema(t, p)
+	target := config.Target{Name: "//schema-check", Toolchain: p.Name, Config: valid}
+	if err := coordinator.ValidateTargetConfig(target, schema); err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+	withUnknown := map[string]any{"no_such_field": true}
+	for k, v := range valid {
+		withUnknown[k] = v
+	}
+	target.Config = withUnknown
+	if err := coordinator.ValidateTargetConfig(target, schema); err == nil || !strings.Contains(err.Error(), "no_such_field") {
+		t.Fatalf("unknown field: got %v, want an error naming no_such_field", err)
 	}
 }

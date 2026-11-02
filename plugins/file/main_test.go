@@ -15,17 +15,21 @@ import (
 // TestParityWithBB replays the request script the retired plugin.bb
 // answered (captured in testdata/parity_bb_responses.ndjson) and requires
 // semantically identical responses. Intentional differences: discover
-// lists capabilities (the bb discover omitted them), and the capture
+// lists capabilities (the bb discover omitted them) and reports a JSON
+// Schema config_schema and a later version, and the capture
 // action's env is PATH=/usr/bin:/bin instead of {} (see captureEnv). The
 // other actions' bb "env": {} is dropped by Normalize; both forms give a
 // pure action an empty environment.
 func TestParityWithBB(t *testing.T) {
-	plugintest.Parity(t, newPlugin(),
+	p := newPlugin()
+	plugintest.Parity(t, p,
 		filepath.Join("testdata", "parity_requests.ndjson"),
 		filepath.Join("testdata", "parity_bb_responses.ndjson"),
 		func(i int, golden map[string]any) {
 			if i == 0 {
 				golden["capabilities"] = []any{"discover", "plan"}
+				golden["config_schema"] = plugintest.Schema(t, p)
+				golden["version"] = p.Version
 			}
 			actions, _ := golden["actions"].([]any)
 			for _, a := range actions {
@@ -34,6 +38,12 @@ func TestParityWithBB(t *testing.T) {
 				}
 			}
 		})
+}
+
+func TestConfigSchemaClosed(t *testing.T) {
+	plugintest.ClosedSchema(t, newPlugin(), map[string]any{
+		"path": "/tmp/x", "content": "hi", "mode": "0600", "owner": "root", "group": "wheel",
+	})
 }
 
 func planFor(t *testing.T, target muplugin.TargetInfo) muplugin.PlanResponse {

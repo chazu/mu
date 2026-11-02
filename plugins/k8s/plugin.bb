@@ -34,19 +34,21 @@
 
 (defn handle-discover []
   {"name"             "k8s"
-   "version"          "0.4.0"
+   "version"          "0.5.0"
    "protocol_version" 1
    "description"      "Apply Kubernetes manifests via kubectl with server-side apply"
    "capabilities"     ["discover" "plan"]
    "consumes"         ["source:yaml" "source:json"]
    "produces"         ["k8s_resource"]
-   "config_schema"    {"namespace"             {"type" "string" "description" "Target Kubernetes namespace"}
-                       "context"               {"type" "string" "description" "Kubeconfig context to use"}
-                       "kubeconfig"            {"type" "string" "description" "Path to kubeconfig file"}
-                       "server_side"           {"type" "boolean" "default" true "description" "Use server-side apply"}
-                       "prune"                 {"type" "boolean" "default" false "description" "Remove resources not in the manifest set"}
-                       "dry_run"               {"type" "boolean" "default" false "description" "Validate without applying changes"}
-                       "sealed_output_secrets" {"type" "object" "description" "Map of sealed output names to cluster secret references"}}})
+   "config_schema"    {"type"                 "object"
+                       "properties"           {"namespace"             {"type" "string" "description" "Target Kubernetes namespace"}
+                                               "context"               {"type" "string" "description" "Kubeconfig context to use"}
+                                               "kubeconfig"            {"type" "string" "description" "Path to kubeconfig file"}
+                                               "server_side"           {"type" "boolean" "default" true "description" "Use server-side apply"}
+                                               "prune"                 {"type" "boolean" "default" false "description" "Remove resources not in the manifest set"}
+                                               "dry_run"               {"type" "boolean" "default" false "description" "Validate without applying changes"}
+                                               "sealed_output_secrets" {"type" "object" "description" "Map of sealed output names to cluster secret references"}}
+                       "additionalProperties" false}})
 
 (defn shell-quote
   "Single-quote a string for safe inclusion in a bash command."

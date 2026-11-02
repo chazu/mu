@@ -49,20 +49,22 @@
 
 (defn handle-discover []
   {"name"             "terraform"
-   "version"          "0.3.0"
+   "version"          "0.4.0"
    "protocol_version" 1
    "description"      "Plan and apply Terraform configurations and capture their state"
    "capabilities"     ["discover" "plan"]
    "consumes"         ["source:terraform" "source:hcl"]
    "produces"         ["terraform_state"]
-   "config_schema"    {"dir"                   {"type" "string"  "default" "." "description" "Working directory containing .tf files"}
-                       "var_file"              {"type" "string" "description" "Path to a .tfvars variable file"}
-                       "backend_config"        {"type" "object" "description" "Backend configuration key-value pairs for terraform init"}
-                       "auto_approve"          {"type" "boolean" "default" true "description" "Skip interactive approval during apply"}
-                       "parallelism"           {"type" "integer" "description" "Limit concurrent Terraform operations"}
-                       "emit_state"            {"type" "boolean" "default" true "description" "Capture state.json and outputs.json as target outputs"}
-                       "binary"                {"type" "string" "description" "Path to terraform or tofu binary"}
-                       "sealed_output_outputs" {"type" "object" "description" "Map of sealed output names to Terraform output names"}}})
+   "config_schema"    {"type"                 "object"
+                       "properties"           {"dir"                   {"type" "string"  "default" "." "description" "Working directory containing .tf files"}
+                                               "var_file"              {"type" "string" "description" "Path to a .tfvars variable file"}
+                                               "backend_config"        {"type" "object" "description" "Backend configuration key-value pairs for terraform init"}
+                                               "auto_approve"          {"type" "boolean" "default" true "description" "Skip interactive approval during apply"}
+                                               "parallelism"           {"type" "integer" "description" "Limit concurrent Terraform operations"}
+                                               "emit_state"            {"type" "boolean" "default" true "description" "Capture state.json and outputs.json as target outputs"}
+                                               "binary"                {"type" "string" "description" "Path to terraform or tofu binary"}
+                                               "sealed_output_outputs" {"type" "object" "description" "Map of sealed output names to Terraform output names"}}
+                       "additionalProperties" false}})
 
 (defn shell-quote
   "Single-quote a string for safe inclusion in a bash command."

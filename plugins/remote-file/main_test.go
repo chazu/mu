@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,17 +19,10 @@ import (
 // answered (captured in testdata/parity_bb_responses.ndjson) and requires
 // semantically identical responses. Intentional differences, all in
 // discover: the Go plugin declares a config_schema, no longer advertises
-// observe (the method was removed), and is version 0.2.0.
+// observe (the method was removed), and has a later version.
 func TestParityWithBB(t *testing.T) {
 	p := newPlugin()
-	schemaJSON, err := json.Marshal(p.ConfigSchema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema any
-	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
-		t.Fatal(err)
-	}
+	schema := plugintest.Schema(t, p)
 	plugintest.Parity(t, p,
 		filepath.Join("testdata", "parity_requests.ndjson"),
 		filepath.Join("testdata", "parity_bb_responses.ndjson"),
@@ -38,9 +30,15 @@ func TestParityWithBB(t *testing.T) {
 			if i == 0 {
 				golden["config_schema"] = schema
 				golden["capabilities"] = []any{"discover", "plan"}
-				golden["version"] = "0.2.0"
+				golden["version"] = p.Version
 			}
 		})
+}
+
+func TestConfigSchemaClosed(t *testing.T) {
+	plugintest.ClosedSchema(t, newPlugin(), map[string]any{
+		"host": "h", "path": "/etc/motd", "mode": "0644", "owner": "root", "group": "root", "make_parents": false,
+	})
 }
 
 func planOne(t *testing.T, target muplugin.TargetInfo) muplugin.ActionSpec {
@@ -159,7 +157,7 @@ func TestCoordinatorRejectsWrongTypedConfig(t *testing.T) {
 		Name:   "//motd",
 		Config: map[string]any{"host": "h", "path": "/etc/motd", "make_parents": "yes"},
 	})
-	if err == nil || !strings.Contains(err.Error(), `config field "make_parents" must be a boolean`) {
+	if err == nil || !strings.Contains(err.Error(), "config/make_parents: expected boolean") {
 		t.Fatalf("err = %v, want a schema error naming make_parents", err)
 	}
 }
