@@ -28,7 +28,7 @@ type Plugin struct {
 	// the discover response unmodified.
 	ConfigSchema map[string]any
 
-	// Optional. A plugin that supports build/convergence implements Plan.
+	// Optional. A plugin that builds targets implements Plan.
 	Plan func(ctx context.Context, req PlanRequest) (PlanResponse, error)
 
 	// Optional method handlers. A non-nil handler implies the capability;

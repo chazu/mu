@@ -45,6 +45,11 @@ AGGREGATION TARGETS
   Building //lint builds every dep; the "true" action itself does
   nothing.
 
+  A target runs only after all of its deps complete: every action of
+  //lint that has no predecessor inside //lint waits for every action of
+  each dep (and, through them, of their deps). Listing a target in deps
+  is enough to order it; the target need not read the dep's outputs.
+
 IMPURE VS PURE
 
   Shell targets default to impure (skip cache). Set "impure": false

@@ -5,9 +5,9 @@ They are external processes that communicate via NDJSON (see 'mu guide protocol'
 
 LOADING PLUGINS
 
-  There are four ways to reference a plugin. When a def sets more than
-  one, they resolve in this precedence order (url → script → digest →
-  command):
+  There are four ways to reference a plugin. Each plugins[] entry sets
+  exactly one of url, script, digest or command; an entry that sets none,
+  or more than one, fails when mu.cue loads.
 
   1. Remote URL with SHA256 verification:
      {"name": "file", "url": "https://example.com/file-plugin.bb", "sha256": "abc123..."}
@@ -23,7 +23,7 @@ LOADING PLUGINS
      {"name": "file", "digest": "sha256:<64 lowercase hex characters>"}
 
      The digest must be a full SHA-256 identity; abbreviated prefixes are
-     rejected by `mu validate` and at resolution. A "url" plugin's
+     rejected when mu.cue loads and at resolution. A "url" plugin's
      "sha256" field must likewise be 64 lowercase hex characters (no
      "sha256:" prefix).
 
@@ -33,8 +33,8 @@ LOADING PLUGINS
 WRITING A PLUGIN
 
   A plugin is any executable that reads NDJSON on stdin and writes NDJSON
-  on stdout. It must implement "discover". Plugins that build or converge
-  targets implement "plan"; secret-provider plugins may omit it.
+  on stdout. It must implement "discover". Plugins that build targets
+  implement "plan"; secret-provider plugins may omit it.
   Optionally it can implement "resolve_secret" and "store_secret".
 
   Capabilities:
