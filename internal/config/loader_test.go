@@ -295,6 +295,17 @@ preprocessor: {extension: "json", command: ["cat"]}
 	}
 }
 
+func TestLoad_RejectsRemovedAdvice(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "mu.cue"), minimalCueRoot("//app")+`
+advice: [{plugin: "void", phases: ["after-build"]}]
+`)
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "advice was removed") {
+		t.Fatalf("Load error = %v, want \"advice was removed\"", err)
+	}
+}
+
 func TestLoad_RejectsRemovedKindImplements(t *testing.T) {
 	for _, field := range []string{`kind: "kit"`, `implements: "//iface"`} {
 		root := t.TempDir()

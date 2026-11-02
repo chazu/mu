@@ -13,7 +13,7 @@ LIFECYCLE
 
   1. mu starts the plugin process.
   2. mu sends {"method": "discover"} — plugin replies with metadata.
-  3. mu sends plan/observe/resolve_secret/store_secret/advise requests as needed.
+  3. mu sends plan/observe/resolve_secret/store_secret requests as needed.
   4. mu closes stdin when done — plugin exits.
 
   Request deadlines cover waiting for another request, writing stdin, and

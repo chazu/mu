@@ -51,8 +51,6 @@ func runGuide(args []string) int {
 		printGuidePithPlugins()
 	case "sandbox":
 		printGuideSandbox()
-	case "advice":
-		printGuideAdvice()
 	case "sdk":
 		printGuideSDK()
 	case "plugin":
@@ -108,7 +106,6 @@ func printGuideSecretProviders() { printTopic("secret-providers") }
 func printGuideProtocol()        { printTopic("protocol") }
 func printGuidePithPlugins()     { printTopic("pith-plugins") }
 func printGuideSandbox()         { printTopic("sandbox") }
-func printGuideAdvice()          { printTopic("advice") }
 func printGuideSDK()             { printTopic("sdk") }
 
 // printGuideForPlugin finds and prints the guide text for a named plugin.

@@ -113,6 +113,9 @@ func rejectRemovedFields(val cue.Value, path string) error {
 	if val.LookupPath(cue.ParsePath("preprocessor")).Exists() {
 		return fmt.Errorf("%s: preprocessor was removed; write sub-directory configs as mu.cue", path)
 	}
+	if val.LookupPath(cue.ParsePath("advice")).Exists() {
+		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
+	}
 	targets := val.LookupPath(cue.ParsePath("targets"))
 	if !targets.Exists() {
 		return nil

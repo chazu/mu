@@ -30,7 +30,6 @@ var topicFiles = map[string]string{
 	"protocol":         "protocol.md",
 	"pith-plugins":     "pith-plugins.md",
 	"sandbox":          "sandbox.md",
-	"advice":           "advice.md",
 	"sdk":              "sdk.md",
 }
 

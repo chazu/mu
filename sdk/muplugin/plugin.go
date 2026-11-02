@@ -38,11 +38,6 @@ type Plugin struct {
 	Observe       func(ctx context.Context, req ObserveRequest) (ObserveResponse, error)
 	ResolveSecret func(ctx context.Context, ref string) (string, error)
 	StoreSecret   func(ctx context.Context, req StoreSecretRequest) error
-	Advise        func(ctx context.Context, req AdviseRequest) error
-
-	// AdvisePhases lists the build lifecycle phases this plugin wants to
-	// observe (e.g. "after-build"). Only consulted when Advise is non-nil.
-	AdvisePhases []string
 }
 
 // Main runs the plugin against stdin/stdout and exits the process.
@@ -158,21 +153,6 @@ func (p *Plugin) dispatch(ctx context.Context, req Request) any {
 			return StoreSecretResponse{Error: err.Error()}
 		}
 		return StoreSecretResponse{}
-	case "advise":
-		if p.Advise == nil {
-			return AdviseResponse{Error: "advise: capability not supported"}
-		}
-		err := p.Advise(ctx, AdviseRequest{
-			Phase:    req.Phase,
-			Manifest: req.Manifest,
-			Context:  req.AdviseContext,
-			Config:   req.AdviseConfig,
-			Secrets:  req.Secrets,
-		})
-		if err != nil {
-			return AdviseResponse{Error: err.Error()}
-		}
-		return AdviseResponse{OK: true}
 	default:
 		return map[string]string{"error": fmt.Sprintf("unknown method %q", req.Method)}
 	}
@@ -194,9 +174,6 @@ func (p *Plugin) discover() DiscoverResponse {
 	if p.StoreSecret != nil {
 		caps = append(caps, "store_secret")
 	}
-	if p.Advise != nil {
-		caps = append(caps, "advise")
-	}
 	resp := DiscoverResponse{
 		Name:            p.Name,
 		Version:         p.Version,
@@ -214,9 +191,6 @@ func (p *Plugin) discover() DiscoverResponse {
 	}
 	if p.Produces == nil {
 		resp.Produces = []string{}
-	}
-	if p.Advise != nil && len(p.AdvisePhases) > 0 {
-		resp.AdvisePhases = p.AdvisePhases
 	}
 	return resp
 }
