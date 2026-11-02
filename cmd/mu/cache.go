@@ -443,7 +443,7 @@ Commands:
   inspect   Show details of a cached item
   size      Show total cache disk usage
   clean     Remove unreachable blobs (GC)
-  push      Copy cached actions to the remote OCI registry (cache.push)
+  push      Push the cached results of [targets] (default //...) to cache.push
   login     Log in to an OCI registry [host] (default: cache.push's host; stored in ~/.mu/credentials.json)
   logout    Remove stored credentials for an OCI registry [host] (default: cache.push's host)`)
 		return code

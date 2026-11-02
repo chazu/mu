@@ -201,9 +201,25 @@ PUSHING
   cache.push is the repository ("host/namespace/repo") `mu cache push`
   writes to. It is required for push.
 
-    mu cache push                  Copy cached action results and their output
-                                   blobs from the local CAS to cache.push.
-    mu cache push --dry-run        List the action tags that would be pushed.
+    mu cache push [target...]      Push the local results of the targets'
+                                   actions (default //...) and their output
+                                   blobs to cache.push.
+    mu cache push --dry-run [target...]
+                                   List the results that would be pushed.
+
+  The targets are planned, not built. Only results for their actions are
+  pushed, so results from other projects sharing the local cache never reach
+  this project's registry. An action that consumes another's output has a
+  key that depends on what the producer produced, so keys are derived in
+  dependency order from the local results; actions with no local result
+  (not built on this machine) are counted and skipped, as is everything
+  downstream of them. Build first to push everything.
+
+  Each result is pushed on its own. Results the registry already has are
+  skipped, and a failure does not stop the rest. The summary reports pushed,
+  skipped (already present), and failed counts; the exit status is non-zero
+  if anything failed. --verbose lists each pushed result and each action
+  without a local result.
 
   The OCI manifest and tag for each local result are built at push time;
   output blobs the registry already has are not uploaded again.

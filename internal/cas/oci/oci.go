@@ -464,6 +464,23 @@ func (s *OCIStore) pushLocalBlob(ctx context.Context, local *cas.DiskStore, dgst
 	return desc.Size, nil
 }
 
+// HasActionResult reports whether the registry already has a result for key
+// (its action tag resolves). A tag is applied only after its manifest's
+// blobs were pushed, so a present tag means a complete entry.
+func (s *OCIStore) HasActionResult(ctx context.Context, key cas.ActionKey) (bool, error) {
+	if err := key.Digest.Validate(); err != nil {
+		return false, fmt.Errorf("oci: action key: %w", err)
+	}
+	tag := actionKeyToTag(key)
+	if _, err := s.repo.Resolve(ctx, tag); err != nil {
+		if isNotFound(err) {
+			return false, nil
+		}
+		return false, s.authErr(fmt.Errorf("oci: resolve action tag %s: %w", tag, err))
+	}
+	return true, nil
+}
+
 // ActionTag returns the registry tag under which the result for key is stored.
 func ActionTag(key cas.ActionKey) string { return actionKeyToTag(key) }
 
