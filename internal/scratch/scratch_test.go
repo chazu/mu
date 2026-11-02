@@ -611,3 +611,28 @@ func TestBuildIgnoresStaleExtractTreesAndCleansStaging(t *testing.T) {
 		}
 	}
 }
+
+// A non-archive download (like jq) is installed as bin/<toolchain> and
+// verified, independent of the staging directory's name.
+func TestBuild_RawBinaryInstalledUnderToolchainName(t *testing.T) {
+	script := []byte("#!/bin/sh\necho jq-1.7.1\n")
+	hash := sha256Hex(script)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(script) }))
+	defer srv.Close()
+
+	b, _ := newTestBuilder(t)
+	cfg := &config.ProjectConfig{Toolchains: []config.Toolchain{{
+		Name: "jq", From: "scratch",
+		Config: config.ToolchainConfig{Version: "1.7.1", URL: srv.URL + "/jq-macos-arm64", SHA256: hash},
+	}}}
+	if err := b.Build(context.Background(), cfg); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	manifest, err := b.Registry.Lookup(context.Background(), "jq", "1.7.1")
+	if err != nil || manifest == nil {
+		t.Fatalf("Lookup = %v, %v", manifest, err)
+	}
+	if _, ok := manifest.Artifacts["bin/jq"]; !ok || len(manifest.Artifacts) != 1 {
+		t.Fatalf("artifacts = %v, want only bin/jq", manifest.Artifacts)
+	}
+}

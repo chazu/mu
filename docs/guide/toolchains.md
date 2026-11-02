@@ -68,8 +68,8 @@ FAILURE MODES
 
   Unknown archive extension
     Falls back to extractRawBinary: copies the file to
-    <extractDir>/bin/<dirname-without-version-suffix> and chmods +x.
-    Useful for single-file releases (e.g. jq).
+    <extractDir>/bin/<toolchain> and chmods +x. Useful for single-file
+    releases (e.g. jq).
 
   Binary not found at conventional path
     verify() errors. Workarounds: rename the toolchain to match the

@@ -101,7 +101,7 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	}
 	defer os.RemoveAll(extractDir)
 
-	if err := extract(archivePath, extractDir, tc.Config.StripPrefix); err != nil {
+	if err := extract(archivePath, extractDir, tc.Config.StripPrefix, name); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
 
@@ -183,8 +183,9 @@ func verify(ctx context.Context, extractDir, name string) error {
 	return fmt.Errorf("%s: neither 'version' nor '--version' succeeded", binPath)
 }
 
-// extract dispatches to the appropriate extractor based on the archive file extension.
-func extract(archivePath, destDir, stripPrefix string) error {
+// extract dispatches to the appropriate extractor based on the archive file
+// extension. A non-archive download is installed as bin/<name>.
+func extract(archivePath, destDir, stripPrefix, name string) error {
 	lower := strings.ToLower(archivePath)
 	switch {
 	case strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
@@ -195,31 +196,20 @@ func extract(archivePath, destDir, stripPrefix string) error {
 		return extractZip(archivePath, destDir, stripPrefix)
 	default:
 		// Not an archive — treat as a raw binary. Copy to bin/<name>.
-		return extractRawBinary(archivePath, destDir)
+		return extractRawBinary(archivePath, destDir, name)
 	}
 }
 
-// extractRawBinary copies a single binary file to <destDir>/bin/<name> and makes
-// it executable. The binary name is derived from the download filename, stripping
-// common platform suffixes.
-func extractRawBinary(srcPath, destDir string) error {
+// extractRawBinary copies a single binary file to <destDir>/bin/<name> and
+// makes it executable. name is the toolchain name, so verify finds the binary
+// where it looks for it regardless of how the download or staging dir is named.
+func extractRawBinary(srcPath, destDir, name string) error {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("toolchain name %q is not a valid binary file name", name)
+	}
 	binDir := filepath.Join(destDir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
-	}
-
-	// Derive binary name: strip platform suffixes from the download name.
-	// e.g. "jq-1.7.1" from archive path "jq-1.7.1" → use the toolchain name
-	// which is in the parent dir name like "jq-1.7.1".
-	// Since we don't have the toolchain name here, use the destDir basename.
-	dirBase := filepath.Base(destDir) // e.g. "jq-1.7.1"
-	// Strip version: everything before the first dash followed by a digit.
-	name := dirBase
-	for i := 0; i < len(dirBase)-1; i++ {
-		if dirBase[i] == '-' && dirBase[i+1] >= '0' && dirBase[i+1] <= '9' {
-			name = dirBase[:i]
-			break
-		}
 	}
 
 	destPath := filepath.Join(binDir, name)
