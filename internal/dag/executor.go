@@ -435,8 +435,8 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 }
 
 // runWithTimeoutAndRetry executes the action with optional per-attempt
-// timeout and optional retry. Retries apply only when Network is true;
-// Retries on a non-network action are silently ignored. Parent-context
+// timeout and optional retry. Retries apply only when Network is true
+// (planning rejects them on any other action). Parent-context
 // cancellation (SIGINT) returns immediately.
 //
 // Returns (exitCode, attempts, err). attempts is 1 on success without

@@ -126,6 +126,22 @@ func TestResolveAbsoluteFileInput(t *testing.T) {
 	}
 }
 
+// Retries only take effect on network actions, so asking for them anywhere
+// else is a plan error rather than a silent no-op.
+func TestResolveRejectsRetriesWithoutNetwork(t *testing.T) {
+	dir := t.TempDir()
+	spec := plugin.ActionSpec{ID: "build", Command: []string{"true"}, Retries: 2}
+	_, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, dir, nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "retries apply only to network actions") {
+		t.Fatalf("Resolve error = %v, want retries rejection", err)
+	}
+	spec.Network = true
+	spec.Impure = true
+	if _, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, dir, nil, nil, nil); err != nil {
+		t.Fatalf("Resolve network action with retries: %v", err)
+	}
+}
+
 func TestResolveCrossTargetProducer(t *testing.T) {
 	// Simulate a dependent target whose plugin referenced a dep's declared
 	// output path (e.g. "infra/vpc/state.json"). The file does NOT exist on
