@@ -82,11 +82,10 @@ DELIVERY MODES — sealed_input_modes
   'pass insert -m'), read it from a file-mode path or printf the
   env-mode value into the pipe.
 
-  Sandbox-mode (toolchain-pinned) actions reject file mode at exec
-  time because the temp file lives outside the sandbox view; env mode
-  works in both. shell, secret-gen, remote-exec, remote-file, and
-  plugin actions that pin no toolchain run bare and support file
-  mode.
+  Sandboxed (pure) actions get the file inside the sandbox root
+  instead (sealed/<NAME>, 0600), removed as soon as the command
+  exits. Impure actions (shell, secret-gen, remote-exec,
+  remote-file by default) run on the host as described above.
 
   The mode is part of the cache key (see SECURITY MODEL), and under
   strict routing the action that consumes a name must claim the same

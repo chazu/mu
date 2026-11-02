@@ -125,8 +125,8 @@ DELIVERY MODE GUIDANCE
   - Short single-line secrets (passwords, tokens) → env mode.
   - Multi-line / binary / >4 KB secrets (SSH keys, kubeconfigs,
     GCP service-account JSON) → recommend 'file' in your GUIDE.md.
-  - Sandbox-pinned (toolchain-built) actions reject file mode.
-    Document this if your action runs sandboxed.
+  - File mode works in sandboxed actions too: the file is written
+    inside the sandbox root and removed when the command exits.
 
 NETWORK + IMPURE
 
@@ -179,8 +179,7 @@ SECRETS section. Recommended subsections (drop any that don't apply):
     which sealed_output_modes are meaningful.
   - Ref grammar (providers only): full syntax, sub-prefixes, examples.
   - A worked writable_refs pattern users can paste into mu.cue.
-  - Caveats: forced-impure actions, sandbox + file-mode incompat,
-    rotation behavior.
+  - Caveats: forced-impure actions, rotation behavior.
 
 See plugins/pass/GUIDE.md for a provider example, and
 plugins/host/GUIDE.md / plugins/remote-exec/GUIDE.md for consumer

@@ -311,7 +311,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	for i, t := range targets {
 		// A target's own outputs are excluded: its actions wire to each
 		// other via {action:id}, not through the cross-target path map.
-		resolved, err := Resolve(ctx, plannedActions[i], c.ProjectRoot, c.Store, producers.actionIDsExcept(t.Name))
+		resolved, err := Resolve(ctx, plannedActions[i], c.ProjectRoot, c.Store, producers.actionIDsExcept(t.Name), c.toolchainLookup(registry))
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}

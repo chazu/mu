@@ -30,6 +30,7 @@ func TestActionKey_PureDefaultEqualsExplicitCleanEnvironment(t *testing.T) {
 }
 
 func TestActionKey_BareAndEmptySandboxDiffer(t *testing.T) {
+	t.Setenv(dag.SandboxEnvVar, "") // with MU_SANDBOX=1 both would be sandboxed
 	a, b := baseAction(), baseAction()
 	b.Toolchain = map[string]cas.Digest{}
 	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
@@ -58,9 +59,9 @@ func TestActionKey_DelimitersCannotAliasFields(t *testing.T) {
 
 func TestActionKey_ExecutionDeclarationsAffectKey(t *testing.T) {
 	for name, change := range map[string]func(*dag.Action){
-		"outputs":   func(a *dag.Action) { a.Outputs = []string{"new.txt"} },
-		"toolchain": func(a *dag.Action) { a.Toolchain = map[string]cas.Digest{"bin/cc": cas.NewSHA256("cc")} },
-		"sources":   func(a *dag.Action) { a.Sources = []string{"extra.c"} },
+		"outputs":    func(a *dag.Action) { a.Outputs = []string{"new.txt"} },
+		"toolchain":  func(a *dag.Action) { a.Toolchain = map[string]cas.Digest{"bin/cc": cas.NewSHA256("cc")} },
+		"input_path": func(a *dag.Action) { a.InputPaths = map[string]string{"src": "extra.c"} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, b := baseAction(), baseAction()
@@ -75,7 +76,7 @@ func TestActionKey_ExecutionDeclarationsAffectKey(t *testing.T) {
 func TestActionKey_DeclarationOrderIndependent(t *testing.T) {
 	a, b := baseAction(), baseAction()
 	a.Outputs, b.Outputs = []string{"a", "b"}, []string{"b", "a"}
-	a.Sources, b.Sources = []string{"c", "d"}, []string{"d", "c"}
+	a.InputPaths, b.InputPaths = map[string]string{"c": "c", "d": "d"}, map[string]string{"d": "d", "c": "c"}
 	a.Toolchain = map[string]cas.Digest{"cc": cas.NewSHA256("a"), "ld": cas.NewSHA256("b")}
 	b.Toolchain = map[string]cas.Digest{"ld": cas.NewSHA256("b"), "cc": cas.NewSHA256("a")}
 	if dag.ComputeActionKey(a) != dag.ComputeActionKey(b) {

@@ -13,7 +13,6 @@ import (
 
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/rootexec"
-	"github.com/chazu/mu/internal/sandbox"
 )
 
 // ActionStatus represents the result of executing a single action.
@@ -252,10 +251,13 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	}
 	// Apply per-name delivery modes. "env" (or empty) is the default and
 	// exports the value verbatim; "file" writes to a 0600 temp file under a
-	// per-action sealed-input directory and exports the path. Sandbox-mode
-	// actions cannot use "file" because the temp file lives outside the
-	// sandbox view.
+	// per-action sealed-input directory and exports the path. A sandboxed
+	// action gets its files inside the sandbox root instead (see
+	// executeInSandbox), where it can read them; they are written per attempt
+	// and removed as soon as the command exits.
+	sandboxed := a.Sandboxed()
 	var sealedInDir string
+	var sealedFiles map[string]string // sandboxed file-mode values, name -> value
 	sealedEnv := make(map[string]string, len(secrets))
 	for k, v := range secrets {
 		mode := a.SealedInputModes[k]
@@ -263,8 +265,12 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		case "", "env":
 			sealedEnv[k] = v
 		case "file":
-			if a.Toolchain != nil {
-				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q uses mode=file, which is not supported in sandboxed (toolchain) actions", a.ID, k)}
+			if sandboxed {
+				if sealedFiles == nil {
+					sealedFiles = make(map[string]string)
+				}
+				sealedFiles[k] = v
+				continue
 			}
 			if sealedInDir == "" {
 				dir, err := os.MkdirTemp("", "mu-sealed-in-*")
@@ -316,8 +322,9 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// For bare-mode actions with relative output paths, create a per-action
 	// output directory and expose it as $MU_OUT. After execution, outputs
 	// are copied to WorkDir so dependents and cache storage can find them.
+	// Sandboxed actions get $MU_OUT inside the sandbox (executeInSandbox).
 	var muOutDir string
-	if a.Toolchain == nil && hasRelativeOutputs(a.Outputs) {
+	if !sandboxed && hasRelativeOutputs(a.Outputs) {
 		dir, err := os.MkdirTemp("", "mu-out-*")
 		if err != nil {
 			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create output dir: %w", a.ID, err)}
@@ -332,7 +339,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// enter the key).
 	execEnv := actionEnv(a, os.Environ(), muVars, sealedEnv)
 
-	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv, workDir, workRoot)
+	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv, sealedFiles, workDir, workRoot)
 
 	if execErr != nil {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
@@ -424,7 +431,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 // Returns (exitCode, attempts, err). attempts is 1 on success without
 // retry. err is non-nil iff the final attempt failed OR the parent
 // context was cancelled.
-func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env map[string]string, workDir *os.File, workRoot *os.Root) (int, int, error) {
+func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env, sealedFiles map[string]string, workDir *os.File, workRoot *os.Root) (int, int, error) {
 	maxRetries := 0
 	if a.Network && a.Retries > 0 {
 		maxRetries = a.Retries
@@ -448,8 +455,8 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 
 		var exitCode int
 		var err error
-		if a.Toolchain != nil {
-			exitCode, err = e.executeInSandbox(attemptCtx, a, env, workRoot)
+		if a.Sandboxed() {
+			exitCode, err = e.executeInSandbox(attemptCtx, a, env, sealedFiles, workRoot)
 		} else {
 			exitCode, err = e.executeBare(attemptCtx, a, env, workDir)
 		}
@@ -513,63 +520,6 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 		exitCode = cmd.ProcessState.ExitCode()
 	}
 	return exitCode, err
-}
-
-// executeInSandbox runs a command in a hermetic sandbox environment.
-// The toolchain artifacts are unpacked into the sandbox, sources are copied in,
-// the command runs inside the sandbox, and outputs are copied back to WorkDir.
-// The env parameter may include resolved secrets merged with the action's declared env.
-func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
-	sb, err := sandbox.New(e.Store)
-	if err != nil {
-		return -1, fmt.Errorf("create sandbox: %w", err)
-	}
-	defer sb.Cleanup()
-	sb.Stdout = e.SubprocessStdout
-
-	// Unpack toolchain into sandbox rootfs.
-	if err := sb.UnpackToolchain(ctx, a.Toolchain); err != nil {
-		return -1, fmt.Errorf("unpack toolchain: %w", err)
-	}
-
-	// Copy sources into sandbox work directory.
-	if len(a.Sources) > 0 && a.WorkDir != "" {
-		var err error
-		if workRoot != nil {
-			err = sb.CopySourcesRoot(workRoot, a.Sources)
-		} else {
-			err = sb.CopySources(a.WorkDir, a.Sources)
-		}
-		if err != nil {
-			return -1, fmt.Errorf("copy sources: %w", err)
-		}
-	}
-
-	// Execute.
-	exitCode, err := sb.Exec(ctx, a.Command, env, a.Network)
-	if err != nil {
-		return exitCode, err
-	}
-
-	// Copy declared outputs back from sandbox to the original WorkDir.
-	for _, outRel := range a.Outputs {
-		sbOut := sb.OutputPath(outRel)
-		hostOut := filepath.Join(a.WorkDir, outRel)
-		if workRoot != nil && !filepath.IsAbs(outRel) {
-			hostOut = outRel
-		}
-		src, err := os.Open(sbOut)
-		if err != nil {
-			return exitCode, fmt.Errorf("open sandbox output %s: %w", outRel, err)
-		}
-		if err := writeFile(ctx, hostOut, src, workRoot); err != nil {
-			src.Close()
-			return exitCode, fmt.Errorf("copy output %s: %w", outRel, err)
-		}
-		src.Close()
-	}
-
-	return exitCode, nil
 }
 
 // captureSealedOutputs reads each declared sealed-output file from the

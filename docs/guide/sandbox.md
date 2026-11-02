@@ -1,5 +1,34 @@
 mu guide sandbox — hermetic execution environments
 
+WHICH ACTIONS RUN SANDBOXED
+
+  Impure actions always run on the host. A pure action runs in the sandbox
+  when it names scratch toolchains ("toolchains" in the action spec), or —
+  for every pure action — when MU_SANDBOX=1 is set in mu's environment.
+  MU_SANDBOX is off by default until plugins stop relying on host-installed
+  tools; it will become the default. Sandboxed and bare runs of the same
+  action have different action keys, so toggling it never reuses results.
+
+WHAT A SANDBOXED ACTION SEES
+
+  sandbox root/      unpacked artifacts of the named toolchains
+    bin/             toolchain binaries; first on PATH
+    work/            mirrors the project root, holding ONLY the action's file
+                     inputs at their project-relative paths: project files and
+                     upstream outputs (fetched from CAS by digest). Each file
+                     is checked against the digest in the action key; a file
+                     edited since planning fails the action.
+    work/<work_dir>  the command's working directory
+    out/             $MU_OUT, for actions with relative outputs
+    tmp/             $TMPDIR
+    sealed/          file-mode sealed inputs (0600), removed right after exit
+
+  Without a declared PATH the action gets bin/ plus /usr/bin:/bin. After the
+  command exits, each declared output is taken from out/ or the working
+  directory and copied back to the host work directory. Outputs must be
+  relative paths inside the work directory; absolute or escaping outputs are
+  an error for sandboxed actions.
+
 ISOLATION LEVELS
 
   mu auto-detects the strongest isolation available on the platform:

@@ -116,9 +116,9 @@ func TestActionEnvLayering(t *testing.T) {
 		t.Fatalf("declared impure env = %v, want declared + passthrough", got)
 	}
 
-	// Sandboxed execution never imports the ambient environment.
-	sandboxed := &Action{Impure: true, Toolchain: map[string]cas.Digest{}}
+	// Pure (possibly sandboxed) execution never imports the ambient environment.
+	sandboxed := &Action{Toolchain: map[string]cas.Digest{}}
 	if got := actionEnv(sandboxed, host, nil, nil); len(got) != 0 {
-		t.Fatalf("sandboxed impure action inherited host env: %v", got)
+		t.Fatalf("sandboxed pure action inherited host env: %v", got)
 	}
 }

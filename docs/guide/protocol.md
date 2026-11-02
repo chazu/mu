@@ -151,6 +151,12 @@ ACTION SPEC FIELDS
   work_dir            string — working directory relative to project root (optional).
   impure              bool — skip CAS cache (optional; forced true
                       when sealed_outputs is non-empty).
+  toolchains          []string — names of `from: "scratch"` toolchains the
+                      action needs (optional, pure actions only). Their files
+                      are unpacked into the sandbox root (bin/ is on PATH; a
+                      raw binary "<name>" lands at bin/<name>) and hashed into
+                      the action key. Naming one sandboxes the action. An
+                      unknown name is a plan error. See `mu guide sandbox`.
   timeout_s           int — per-attempt wall-clock timeout in seconds (optional).
   retries             int — additional attempts on failure (network actions only).
   retry_backoff_ms    int — sleep between retries.

@@ -129,7 +129,7 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 		Retries:           2,
 		RetryBackoffMs:    250,
 		Toolchain:         map[string]cas.Digest{"bin/apply": toolDigest},
-		Sources:           []string{"desired.json"},
+		InputPaths:        map[string]string{"desired.json": "desired.json"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 			Retries           int               `json:"retries"`
 			RetryBackoffMs    int               `json:"retry_backoff_ms"`
 			Toolchain         map[string]string `json:"toolchain"`
-			Sources           []string          `json:"sources"`
+			InputPaths        map[string]string `json:"input_paths"`
 		} `json:"actions"`
 	}
 	if err := json.Unmarshal(payload, &plan); err != nil {
@@ -221,7 +221,7 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 	if !action.Network || !action.Impure || action.WorkDir != "deploy" || action.TimeoutS != 30 || action.Retries != 2 || action.RetryBackoffMs != 250 {
 		t.Errorf("execution policy fields were not preserved: %#v", action)
 	}
-	if len(action.Command) != 2 || len(action.Outputs) != 1 || len(action.DependsOn) != 1 || action.Env["MODE"] != "test" || len(action.Sources) != 1 {
+	if len(action.Command) != 2 || len(action.Outputs) != 1 || len(action.DependsOn) != 1 || action.Env["MODE"] != "test" || action.InputPaths["desired.json"] != "desired.json" {
 		t.Errorf("action projection incomplete: %#v", action)
 	}
 }

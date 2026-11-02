@@ -66,14 +66,18 @@ type Action struct {
 	// defaults to "overwrite" (always set).
 	SealedOutputModes map[string]string
 
-	// Toolchain is the set of artifacts (relative path → CAS digest) that
-	// constitute the hermetic build environment for this action. When set,
-	// the executor unpacks these into a sandbox before running the command.
+	// Toolchain is the merged artifact set (sandbox-root-relative path → CAS
+	// digest) of the scratch toolchains the action names. The executor
+	// unpacks it into the sandbox root; bin/ is on the sandbox PATH. A non-nil
+	// Toolchain sandboxes a pure action even when MU_SANDBOX is off.
 	Toolchain map[string]cas.Digest
 
-	// Sources lists relative file paths (from WorkDir) to copy into the
-	// sandbox's working directory. Used only when Toolchain is set.
-	Sources []string
+	// InputPaths maps file input names to their project-relative,
+	// slash-separated paths. A sandboxed action finds each such input at
+	// work/<path>; the sandbox's work tree mirrors the project root. Inputs
+	// standing for a whole producer ("{action:id}") have no entry: all of the
+	// producer's relative outputs are placed at their own paths instead.
+	InputPaths map[string]string
 
 	// InputSources marks inputs produced by another action in the graph. Their
 	// Inputs entry is a zero placeholder until the executor fills in the

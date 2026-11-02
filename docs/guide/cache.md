@@ -15,8 +15,10 @@ HOW CACHING WORKS
   - Declared environment variables (sorted); pure defaults are clean, while
     impure bare commands may inherit
   - Sorted env_passthrough names (never their host values)
-  - Sorted toolchain artifact paths and digests, including bare vs sandbox mode
-  - Sorted declared output paths and sandbox source paths
+  - Sorted input paths (where each input lands in the sandbox work tree)
+  - Sorted toolchain artifact paths and digests, and whether the action runs
+    sandboxed (MU_SANDBOX=1 or named toolchains) or bare
+  - Sorted declared output paths
   - Network flag
   - Impure flag
   - Work directory relative to the project root (slash-separated). The

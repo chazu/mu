@@ -26,8 +26,8 @@ func ActionEnvironment(env map[string]string, impure bool) map[string]string {
 //
 //  1. Base. Pure actions get ActionEnvironment(a.Env, false): the declared env
 //     (already hashed into the action key), never the host. An impure action
-//     with no env declaration (a.Env == nil) running a bare command starts from
-//     the host environment; otherwise it gets its declared env.
+//     with no env declaration (a.Env == nil) starts from the host environment;
+//     otherwise it gets its declared env.
 //  2. a.EnvPassthrough: each named variable is copied from host when set there.
 //     Only the names are part of the action key, never the values.
 //  3. muVars: per-execution MU_* runtime variables (MU_OUT, MU_SEALED_OUT_DIR).
@@ -44,9 +44,10 @@ func actionEnv(a *Action, host []string, muVars, sealed map[string]string) map[s
 	}
 	env := make(map[string]string)
 	declared := ActionEnvironment(a.Env, a.Impure)
-	// Sandbox execution never imports the ambient environment.
-	bare := a.Toolchain == nil
-	if declared == nil && bare {
+	// Only impure actions can have a nil declared env, and impure actions
+	// always run on the host, so sandboxed (pure) execution never imports the
+	// ambient environment.
+	if declared == nil {
 		maps.Copy(env, hostVars)
 	} else {
 		maps.Copy(env, declared)

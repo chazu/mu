@@ -164,6 +164,12 @@ type ActionSpec struct {
 	WorkDir           string            `json:"work_dir,omitempty"` // relative to project root (default: project root)
 	Impure            bool              `json:"impure,omitempty"`   // skip CAS cache
 
+	// Toolchains names `from: "scratch"` toolchains the action needs. Their
+	// artifacts are unpacked into the sandbox root (bin/ is on PATH) and
+	// hashed into the action key. Only pure actions may name toolchains: they
+	// run in the sandbox, impure actions run on the host.
+	Toolchains []string `json:"toolchains,omitempty"`
+
 	// TimeoutS is the per-attempt wall-clock timeout in seconds. 0 = no
 	// timeout (legacy). Applies to all actions regardless of Network.
 	TimeoutS int `json:"timeout_s,omitempty"`
