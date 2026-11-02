@@ -1,0 +1,9 @@
+{"method":"discover"}
+{"method":"plan","target":{"name":"//keys/deploy","toolchain":"keypair-gen","config":{},"sealed_outputs":{"PRIVATE":"pass:raw:deploy/key","PUBLIC":"pass:deploy/key.pub"},"sealed_output_modes":{"PRIVATE":"create_if_absent","PUBLIC":"create_if_absent"}}}
+{"method":"plan","target":{"name":"//keys/ec","toolchain":"keypair-gen","config":{"type":"ecdsa","curve":"P-384","comment":"o'brien@host"},"sealed_outputs":{"PRIVATE":"pass:raw:ec/key","PUBLIC":"pass:ec/key.pub"}}}
+{"method":"plan","target":{"name":"//keys/ec521","toolchain":"keypair-gen","config":{"type":"ecdsa","curve":"P-521"},"sealed_outputs":{"PRIVATE":"pass:raw:ec/k","PUBLIC":"pass:ec/k.pub"},"sealed_output_modes":{"PRIVATE":"overwrite"}}}
+{"method":"plan","target":{"toolchain":"keypair-gen","config":{"type":"ed25519"},"sealed_outputs":{"PRIVATE":"pass:raw:anon/key","PUBLIC":"pass:anon/key.pub"}}}
+{"method":"plan","target":{"name":"//keys/none","toolchain":"keypair-gen","config":{}}}
+{"method":"plan","target":{"name":"//keys/one","toolchain":"keypair-gen","config":{},"sealed_outputs":{"PRIVATE":"pass:raw:one/key"}}}
+{"method":"plan","target":{"name":"//keys/badcurve","toolchain":"keypair-gen","config":{"type":"ecdsa","curve":"P-192"},"sealed_outputs":{"PRIVATE":"pass:raw:bc/key","PUBLIC":"pass:bc/key.pub"}}}
+{"method":"plan","target":{"name":"//keys/badtype","toolchain":"keypair-gen","config":{"type":"rsa"},"sealed_outputs":{"PRIVATE":"pass:raw:bt/key","PUBLIC":"pass:bt/key.pub"}}}

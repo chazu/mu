@@ -113,7 +113,7 @@ allows writes under `pass:registry/`:
 
 ```cue
 plugins: [
-    {name: "pass", script: "plugins/pass/plugin.bb"},
+    {name: "pass", script: "plugins/pass"},
 ]
 
 secrets: {

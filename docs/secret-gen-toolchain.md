@@ -131,7 +131,7 @@ unless you have an explicit rotation story.
 
 ```cue
 plugins: [
-    {name: "pass", script: "plugins/pass/plugin.bb"},
+    {name: "pass", script: "plugins/pass"},
     // ...
 ]
 
@@ -204,5 +204,5 @@ declaring the `store_secret` capability. Current support:
 
 Adding a new backend means implementing the plugin protocol's
 `store_secret` method. See `internal/plugin/protocol.go` for the
-wire format and `plugins/pass/plugin.bb` for the reference
+wire format and `plugins/pass/main.go` for the reference
 implementation.

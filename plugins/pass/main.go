@@ -1,10 +1,13 @@
 // pass plugin: bidirectional secret provider backed by the `pass`
 // password-store CLI (https://passwordstore.org).
 //
-// Port of the original Babashka plugin (plugin.bb) to Go using sdk/muplugin.
-// Behavior matches the bb version exactly for both resolve_secret and
-// store_secret, including the "raw:" ref prefix handling and the three
-// store modes (create, overwrite, create_if_absent).
+// Built on sdk/muplugin; this is the plugin's only implementation (the
+// manifest's entrypoint is the compiled binary, see GUIDE.md). It replaced
+// a Babashka plugin; testdata/parity_bb_responses.ndjson holds that
+// plugin's captured responses and main_test.go checks they still match,
+// including the "raw:" ref prefix handling and the three store modes
+// (create, overwrite, create_if_absent). One deliberate difference: an
+// empty secret_value is rejected like a missing one.
 //
 // Capabilities: discover, resolve_secret, store_secret.
 // SecretPlugin wires both resolve + store and derives the capabilities list.
@@ -33,7 +36,14 @@ import (
 )
 
 func main() {
-	muplugin.SecretPlugin("pass", "0.3.0", &passBackend{}).Main()
+	newPlugin().Main()
+}
+
+// newPlugin builds the plugin value; tests drive it in-process.
+func newPlugin() *muplugin.Plugin {
+	p := muplugin.SecretPlugin("pass", "0.3.0", &passBackend{})
+	p.Description = "Resolve and store secrets via the pass password manager"
+	return p
 }
 
 // passBackend implements muplugin.SecretBackend by shelling out to the

@@ -177,12 +177,13 @@ sealed_outputs go through store_secret.
 THE PASS PLUGIN
 ────────────────────────────────────────────────────────────────────
 
-The bundled pass plugin (plugins/pass/plugin.bb, v0.3.0) implements:
+The bundled pass plugin (plugins/pass, a Go plugin, v0.3.0) implements:
   discover, resolve_secret, store_secret
 
-Register it:
+Build its binary, then register the directory:
 
-  plugins: [{name: "pass", script: "plugins/pass/plugin.bb"}]
+  go build -trimpath -o plugins/pass/plugin ./plugins/pass
+  plugins: [{name: "pass", script: "plugins/pass"}]
 
 Resolution: "pass:foo/bar" → 'pass show foo/bar' (first line).
             "pass:raw:foo/bar" → full content (newline-trimmed).

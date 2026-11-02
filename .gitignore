@@ -21,6 +21,9 @@
 /terraform
 /void
 
+# Compiled entrypoints of in-tree Go plugin directories (see `mu guide plugins`)
+plugins/*/plugin
+
 # Examples build output
 examples/*/hello
 
