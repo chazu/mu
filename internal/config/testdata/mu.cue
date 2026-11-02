@@ -4,10 +4,7 @@
 cache: {
 	path:   "~/.mu/cache"
 	remote: "registry.loosh.cloud/mu"
-	push: {
-		registry:   "registry.loosh.cloud"
-		repository: "mu"
-	}
+	push:   "registry.loosh.cloud/mu"
 }
 toolchains: [
 	{

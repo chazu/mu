@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 func TestNewRemote_RejectsEmptyRef(t *testing.T) {
@@ -42,8 +44,8 @@ func TestIsLocalRegistry(t *testing.T) {
 		{"registry.example.com:5000/repo", false},
 	}
 	for _, c := range cases {
-		if got := isLocalRegistry(c.ref); got != c.want {
-			t.Errorf("isLocalRegistry(%q) = %v, want %v", c.ref, got, c.want)
+		if got := IsLocalRegistry(c.ref); got != c.want {
+			t.Errorf("IsLocalRegistry(%q) = %v, want %v", c.ref, got, c.want)
 		}
 	}
 }
@@ -57,6 +59,10 @@ func TestRemoteLookupHasOwnBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if store.lookupTimeout != registryhttp.LookupTimeout {
+		t.Fatalf("remote lookup bound = %s, want %s", store.lookupTimeout, registryhttp.LookupTimeout)
+	}
+	store.lookupTimeout = 500 * time.Millisecond // keep the test fast
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -81,5 +87,24 @@ func TestRemoteGetMissingBlobIsNotFound(t *testing.T) {
 	_, err = store.Get(context.Background(), cas.NewSHA256(strings.Repeat("b", 64)))
 	if !errors.Is(err, cas.ErrNotFound) {
 		t.Fatalf("Get missing = %v, want cas.ErrNotFound", err)
+	}
+}
+
+// Registry bytes that do not hash to the requested digest fail the read at
+// EOF; a hostile or broken registry cannot pass content through Get.
+func TestRemoteGetRejectsTamperedBlob(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("tampered")) }))
+	defer server.Close()
+	store, err := NewRemote(strings.TrimPrefix(server.URL, "http://") + "/cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := store.Get(context.Background(), cas.NewSHA256(strings.Repeat("c", 64)))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer rc.Close()
+	if _, err := io.ReadAll(rc); !errors.Is(err, cas.ErrDigestMismatch) {
+		t.Fatalf("ReadAll = %v, want cas.ErrDigestMismatch", err)
 	}
 }

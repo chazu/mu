@@ -7,19 +7,13 @@ package mu
 // with a push-capable snk_ PAT.
 cache: {
 	remote: "registry.platform.loosh.cloud/loosh-industries/mu-cache"
-	push: {
-		registry:   "registry.platform.loosh.cloud"
-		repository: "loosh-industries/mu-cache"
-	}
+	push:   "registry.platform.loosh.cloud/loosh-industries/mu-cache"
 }
 
 // `mu build --publish <target>` pushes that target's outputs to the platform
 // registry (akashic) as a first-class artifact under loosh-industries/<slug>,
 // tagged by git sha + latest. Same auth as the cache push.
-publish: {
-	registry:   "registry.platform.loosh.cloud"
-	repository: "loosh-industries"
-}
+publish: repository: "registry.platform.loosh.cloud/loosh-industries"
 toolchains: [{
 	toolchain: "bb"
 	from:      "scratch"

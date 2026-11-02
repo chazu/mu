@@ -443,6 +443,11 @@ func (r *PluginResolver) extractDirFromCAS(ctx context.Context, name string, dgs
 	if err := archive.ExtractTar(ctx, rc, staging, archive.Policy{Limits: archive.Plugin}); err != nil {
 		return "", fmt.Errorf("extract plugin bundle: %w", err)
 	}
+	// The tar reader may stop before EOF; drain so the store's digest check
+	// runs before the staged bundle is published.
+	if _, err := io.Copy(io.Discard, rc); err != nil {
+		return "", fmt.Errorf("verify plugin bundle: %w", err)
+	}
 	if entries, err := os.ReadDir(staging); err != nil {
 		return "", err
 	} else if len(entries) == 0 {
@@ -570,13 +575,11 @@ func (r *PluginResolver) ExtractFile(ctx context.Context, name string, dgst cas.
 		return "", err
 	}
 	defer os.Remove(tmp.Name())
-	actual, copyErr := cas.ComputeDigest(io.TeeReader(cas.ContextReader(ctx, rc), tmp))
+	// Store.Get verifies the digest at EOF, which io.Copy reads to.
+	_, copyErr := io.Copy(tmp, cas.ContextReader(ctx, rc))
 	readCloseErr := rc.Close()
 	if copyErr == nil {
 		copyErr = readCloseErr
-	}
-	if copyErr == nil && actual != dgst {
-		copyErr = fmt.Errorf("plugin content digest %s does not match %s", actual, dgst)
 	}
 	if copyErr == nil {
 		copyErr = tmp.Chmod(0o755)

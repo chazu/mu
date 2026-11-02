@@ -181,9 +181,7 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 		}
 
 		ref := base + "/" + targetSlug(target)
-		// TODO(mu-zl9.4): use the unified registry client constructor once it
-		// lands instead of the cache-push helper.
-		remoteRepo, err := newPushRepository(ref)
+		remoteRepo, err := oci.NewRepository(ref)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  publish: %s: %v\n", target, err)
 			failed++
@@ -244,22 +242,15 @@ func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[s
 	return outputs, command, exitCode
 }
 
-// resolvePublishBase returns "<registry>/<repository>" from config.publish, or a
-// user-actionable error naming the missing field.
+// resolvePublishBase returns publish.repository ("host/namespace"), or a
+// user-actionable error if it is missing.
 func resolvePublishBase(c *cliContext) (string, int, bool) {
-	if c.Config == nil || c.Config.Publish == nil {
+	if c.Config == nil || c.Config.Publish == nil || c.Config.Publish.Repository == "" {
 		return "", c.fail(exitUsage,
 			`publish is not configured in mu.cue — add:
-  publish: { registry: "<host>", repository: "<org>" }`), false
+  publish: { repository: "<host>/<namespace>" }`), false
 	}
-	p := c.Config.Publish
-	if p.Registry == "" {
-		return "", c.fail(exitUsage, `publish.registry is not set in mu.cue`), false
-	}
-	if p.Repository == "" {
-		return "", c.fail(exitUsage, `publish.repository is not set in mu.cue`), false
-	}
-	return p.Registry + "/" + p.Repository, exitOK, true
+	return c.Config.Publish.Repository, exitOK, true
 }
 
 // targetSlug turns a target label into a repository path segment: "//image/

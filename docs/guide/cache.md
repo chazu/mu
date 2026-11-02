@@ -142,6 +142,12 @@ STAGING AND CRASH CLEANUP
 
 VERIFYING CACHE INTEGRITY
 
+  Every CAS read is digest-checked as it streams, local or remote: restored
+  outputs, toolchain files unpacked into a sandbox, plugin scripts and
+  bundles. A local blob that no longer hashes to its name (bit-rot,
+  tampering) fails the read and is deleted, so a cached action re-executes
+  and the next lookup re-fetches or rebuilds instead of reusing it.
+
   mu verify                        Re-hash all blobs, report corruption.
   mu verify --json                 Output as JSON.
   mu verify --fix                  Delete corrupt blobs.
@@ -154,8 +160,17 @@ REMOTE CACHE
     cache: {
       path:   "~/.mu/cache"                      // optional; the default
       remote: "registry.example.com/acme/mu-cache"
-      push:   {registry: "registry.example.com", repository: "acme/mu-cache"}
+      push:   "registry.example.com/acme/mu-cache"
     }
+    publish: repository: "registry.example.com/acme"   // mu build --publish
+
+  Registry references: every registry location in mu.cue is one string,
+  "host/namespace/repo" (for publish, the base "host/namespace" that each
+  target's slug is appended to), with no scheme. The host is everything
+  before the first "/" and is what `mu cache login` takes. localhost and
+  127.0.0.1 registries use plain HTTP; all others use TLS. The older split
+  {registry, repository} forms of cache.push and publish are rejected at
+  load.
 
   remote is a full repository reference ("host/namespace/repo", no scheme).
   On a local miss, mu looks the action up in the remote. A remote result is
@@ -170,10 +185,15 @@ REMOTE CACHE
   `mu cache push`.
 
   The remote is optional. The first remote failure (unreachable, timeout,
-  auth error) prints one warning and switches the rest of that command to
+  server error) prints one warning and switches the rest of that command to
   local-only; the build continues, rebuilding whatever it cannot find
   locally. The next command tries the remote again. Warm local results never
   contact the remote. --offline skips the remote entirely.
+
+  An authentication failure (HTTP 401/403, or a challenge mu has no
+  credential for) is not an outage: it fails the lookup, and the build, with
+  an error ending in "run: mu cache login <host>". Log in, fix the remote, or
+  build with --offline.
 
   Earlier releases configured a list under cache.backends, with read_repair
   and write_through flags. Those fields are rejected at load with a hint:
@@ -182,44 +202,58 @@ REMOTE CACHE
 
 PUSHING
 
-  cache.push names the registry host and repository `mu cache push` writes
-  to. Both fields are required for push.
+  cache.push is the repository ("host/namespace/repo") `mu cache push`
+  writes to. It is required for push.
 
-    mu cache push                  Copy cached action results and their output
-                                   blobs from the local CAS to cache.push's
-                                   registry/repository.
-    mu cache push --dry-run        List the action tags that would be pushed.
+    mu cache push [target...]      Push the local results of the targets'
+                                   actions (default //...) and their output
+                                   blobs to cache.push.
+    mu cache push --dry-run [target...]
+                                   List the results that would be pushed.
+
+  The targets are planned, not built. Only results for their actions are
+  pushed, so results from other projects sharing the local cache never reach
+  this project's registry. An action that consumes another's output has a
+  key that depends on what the producer produced, so keys are derived in
+  dependency order from the local results; actions with no local result
+  (not built on this machine) are counted and skipped, as is everything
+  downstream of them. Build first to push everything.
+
+  Each result is pushed on its own. Results the registry already has are
+  skipped, and a failure does not stop the rest. The summary reports pushed,
+  skipped (already present), and failed counts; the exit status is non-zero
+  if anything failed. --verbose lists each pushed result and each action
+  without a local result.
 
   The OCI manifest and tag for each local result are built at push time;
   output blobs the registry already has are not uploaded again.
-  Tags are derived (action-*); only the registry and repository are
-  configurable. To read what you push, set cache.remote to
-  "<push.registry>/<push.repository>".
+  Tags are derived (action-*); only the repository is configurable. To read
+  what you push, set cache.remote to the same reference.
 
 AUTHENTICATION
 
   mu cache login [host]            Log in to an OCI registry and store the
-                                   credential. Host defaults to cache.push.registry.
+                                   credential. Host defaults to the host of
+                                   cache.push (else cache.remote, else
+                                   publish.repository).
   mu cache login [host] --username <u> --password-stdin
   mu cache logout [host]           Remove the stored credential.
 
   Flags: --username, --password (prefer --password-stdin), --password-stdin.
   On a TTY, username/password are prompted interactively when omitted.
 
-  Credential storage is asymmetric:
-    Writes (login, cache push, build --publish)
-      Stored in ~/.mu/credentials.json (Docker-format JSON, plaintext).
-      mu deliberately avoids the Docker credential chain for writes so it
-      never needs a credential-helper binary (e.g. docker-credential-desktop).
-      The Docker chain (~/.docker/config.json) is consulted as a read-only
-      fallback, so existing `docker login` / `oras login` sessions still work.
-    Reads (cache.remote)
-      Resolve credentials ONLY through the Docker chain (~/.docker/config.json);
-      ~/.mu/credentials.json is not consulted. Access is anonymous if none
-      is found. localhost / 127.0.0.1 registries use plain HTTP.
-
-  Because of this asymmetry, `mu cache login` covers push but not pull: to
-  authenticate a private remote cache you also need `docker login`.
+  Every registry access (cache.remote reads, cache push, build --publish)
+  uses the same client and credentials:
+    Lookups try ~/.mu/credentials.json first (Docker-format JSON, plaintext,
+    written by `mu cache login`), then the Docker chain
+    (~/.docker/config.json and its credential helpers), so existing
+    `docker login` / `oras login` sessions keep working. A broken Docker
+    chain (e.g. a missing docker-credential-desktop) is skipped. With no
+    credential, access is anonymous, which suffices for public registries.
+    Login and logout write only ~/.mu/credentials.json, so mu never needs a
+    credential-helper binary.
+  MU_HTTP_TRACE=1 dumps registry requests and responses to stderr with
+  credentials redacted.
 
 PLUGIN STORAGE
 
@@ -243,10 +277,12 @@ REMOTE METADATA BUDGETS
 
 REGISTRY OUTAGES AND LOCAL OPERATION
 
-  The remote cache is optional (see REMOTE CACHE). Remote action-result
-  lookups have a two-second budget covering auth and metadata reads. The
-  first failure disables the remote for the rest of the command with one
-  warning; the next command retries it. Warm local results need no registry
+  The remote cache is optional (see REMOTE CACHE). Each remote
+  action-result lookup has a ten-second budget, covering connection setup,
+  the registry token exchange, and the metadata reads; each request within
+  it is further bounded as below. The first failure other than an
+  authentication failure disables the remote for the rest of the command
+  with one warning; the next command retries it. Warm local results need no registry
   request. Cancelling the command does not count as a remote failure.
 
   Registry and Mu-managed download clients bound connect/TLS setup to three

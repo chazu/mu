@@ -105,11 +105,18 @@ func Validate(cfg *ProjectConfig) error {
 	}
 
 	// Validate cache config.
-	if cfg.Cache != nil && cfg.Cache.Remote != "" {
-		r := cfg.Cache.Remote
-		if strings.Contains(r, "://") || !strings.Contains(r, "/") {
-			errs = append(errs, fmt.Sprintf("cache.remote: want a repository reference \"host/namespace/repo\" without a scheme, got %q", r))
+	// Every registry location is one "host/path" string without a scheme.
+	checkRef := func(field, want, ref string) {
+		if ref != "" && (strings.Contains(ref, "://") || !strings.Contains(ref, "/")) {
+			errs = append(errs, fmt.Sprintf("%s: want a registry reference %q without a scheme, got %q", field, want, ref))
 		}
+	}
+	if cfg.Cache != nil {
+		checkRef("cache.remote", "host/namespace/repo", cfg.Cache.Remote)
+		checkRef("cache.push", "host/namespace/repo", cfg.Cache.Push)
+	}
+	if cfg.Publish != nil {
+		checkRef("publish.repository", "host/namespace", cfg.Publish.Repository)
 	}
 
 	if len(errs) > 0 {
