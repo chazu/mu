@@ -71,7 +71,9 @@ targets: [{
 	toolchain: "lint"
 	sources: ["cmd/**/*.go", "internal/**/*.go", "sdk/**/*.go", "plugins/**/*.go"]
 	config: {
-		command: ["gofmt", "-l", "."]
+		// `gofmt -l` exits 0 even when it lists files, so fail explicitly.
+		command: ["sh", "-c", "out=$(gofmt -l .) || exit 1; [ -z \"$out\" ] || { echo \"$out\"; exit 1; }"]
+		// Planned only with `fix: true`; plain `mu build` never rewrites sources.
 		fix_command: ["gofmt", "-w", "."]
 	}
 }, {
