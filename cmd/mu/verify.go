@@ -19,12 +19,12 @@ func runVerify(args []string) int {
 	if code, ok := parseFlags(fs, args, "verify [flags]"); !ok {
 		return code
 	}
-	if code, ok := ctx.Resolve(resolveOpts{}); !ok {
+	cacheDir, code, resolved := ctx.localCacheDir()
+	if !resolved {
 		return code
 	}
 	jsonOut := &ctx.JSON
 
-	cacheDir := ctx.CachePath()
 	blobDir := filepath.Join(cacheDir, "blobs", "sha256")
 
 	if _, err := os.Stat(blobDir); os.IsNotExist(err) {

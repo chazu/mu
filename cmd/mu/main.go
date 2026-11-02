@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/sandbox"
 	"github.com/chazu/mu/internal/staging"
 )
@@ -80,11 +81,11 @@ func startStagingSweep() {
 	if os.Getenv("MU_NO_STAGING_SWEEP") == "1" {
 		return
 	}
-	home, err := os.UserHomeDir()
+	p, err := paths.Default()
 	if err != nil {
 		return
 	}
-	staging.MaybeSweep(home, time.Now())
+	staging.MaybeSweep(p, time.Now())
 }
 
 func usage(w io.Writer) {

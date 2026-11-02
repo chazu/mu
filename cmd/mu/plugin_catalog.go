@@ -84,10 +84,6 @@ func splitPluginRef(ref string) (name, version string, err error) {
 }
 
 func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL string, catalog *plugincatalog.Catalog, selected plugincatalog.Plugin) (plugincatalog.LockedPlugin, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return plugincatalog.LockedPlugin{}, fmt.Errorf("resolving home directory: %w", err)
-	}
 	lockPath := filepath.Join(cli.ProjectRoot, "mu.lock")
 	lock, err := plugincatalog.LoadLock(lockPath)
 	if err != nil {
@@ -97,7 +93,7 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 	resolver := &coordinator.PluginResolver{
 		Store:       cli.Store,
 		ProjectRoot: cli.ProjectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+		CacheDir:    cli.Paths.PluginsDir,
 	}
 	var resolved coordinator.ResolvedPlugin
 	if previous, ok := lock.Find(selected.Name); ok && previous.Version == selected.Version &&

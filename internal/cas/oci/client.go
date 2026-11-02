@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/registryhttp"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -92,11 +93,11 @@ func IsLocalRegistry(ref string) bool {
 // Docker-format JSON that `mu cache login` writes, kept under ~/.mu so it
 // never conflicts with ~/.docker and never needs a credential helper binary.
 func CredentialsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	p, err := paths.Default()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".mu", "credentials.json"), nil
+	return p.CredentialsFile, nil
 }
 
 // CredentialStore returns the credential store every registry access uses.

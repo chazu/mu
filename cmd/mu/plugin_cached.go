@@ -22,14 +22,6 @@ type cachedPluginVersion struct {
 	legacy bool
 }
 
-func cachedPluginVersions(name string) ([]cachedPluginVersion, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	return cachedPluginVersionsIn(filepath.Join(home, ".mu", "plugins"), name)
-}
-
 // cachedPluginVersionsIn lists the versions of plugin name materialized
 // under pluginsDir (normally ~/.mu/plugins).
 func cachedPluginVersionsIn(pluginsDir, name string) ([]cachedPluginVersion, error) {
@@ -96,14 +88,10 @@ func cachedPluginVersionsIn(pluginsDir, name string) ([]cachedPluginVersion, err
 
 // A single cached identity remains convenient. Multiple versions require an
 // explicit full digest; directory order is never a version-selection policy.
-func resolveCachedPlugin(name string, selection ...string) (plugin.PluginDef, cas.Digest, error) {
-	versions, err := cachedPluginVersions(name)
+func resolveCachedPlugin(pluginsDir, name, requested string) (plugin.PluginDef, cas.Digest, error) {
+	versions, err := cachedPluginVersionsIn(pluginsDir, name)
 	if err != nil {
 		return plugin.PluginDef{}, cas.Digest{}, err
-	}
-	requested := ""
-	if len(selection) > 0 {
-		requested = selection[0]
 	}
 	if requested != "" {
 		digest, err := cas.ParseFullDigest(requested)

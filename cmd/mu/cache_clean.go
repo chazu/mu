@@ -68,17 +68,13 @@ func runCacheClean(args []string) int {
 
 	// Also reclaim staging stranded by crashed processes. The inactivity
 	// threshold still applies, so concurrent runs are never disturbed.
-	var staged []staging.Removal
 	var stagedBytes int64
-	if home, err := os.UserHomeDir(); err == nil {
-		var sweepErr error
-		staged, sweepErr = staging.Sweep(staging.DefaultRules(home, os.TempDir()), staging.MinAge, time.Now(), *dryRun)
-		if sweepErr != nil {
-			fmt.Fprintf(os.Stderr, "mu cache clean: staging: %v\n", sweepErr)
-		}
-		for _, s := range staged {
-			stagedBytes += s.Bytes
-		}
+	staged, sweepErr := staging.Sweep(staging.DefaultRules(cli.Paths, os.TempDir()), staging.MinAge, time.Now(), *dryRun)
+	if sweepErr != nil {
+		fmt.Fprintf(os.Stderr, "mu cache clean: staging: %v\n", sweepErr)
+	}
+	for _, s := range staged {
+		stagedBytes += s.Bytes
 	}
 
 	if *jsonOut {

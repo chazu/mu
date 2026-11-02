@@ -5,10 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/chazu/mu/internal/registryhttp"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chazu/mu/internal/registryhttp"
 
 	"github.com/chazu/mu/docs/guide"
 	"github.com/chazu/mu/internal/config"
@@ -104,7 +105,7 @@ func printGuideSDK()             { printTopic("sdk") }
 
 // printGuideForPlugin finds and prints the guide text for a named plugin.
 // It searches in order:
-//  1. Extracted CAS bundles in ~/.mu/plugins/<name>/bundle-*/
+//  1. Extracted CAS bundles in <plugins dir>/<name>/bundle-*/
 //  2. Local plugin directory in the current project (plugins/<name>/)
 func printGuideForPlugin(ctx context.Context, name string, selection ...string) int {
 	requested := ""
@@ -112,11 +113,14 @@ func printGuideForPlugin(ctx context.Context, name string, selection ...string) 
 		requested = selection[0]
 	}
 	root, rootErr := findGuideProjectRoot()
-	var cfg *config.ProjectConfig
+	cli := &cliContext{Name: "guide plugin", stderr: os.Stderr, ProjectRoot: root, Offline: registryhttp.IsOffline(ctx)}
 	if rootErr == nil {
-		cfg, _ = config.LoadOffline(root, registryhttp.IsOffline(ctx))
+		cli.Config, _ = config.LoadOffline(root, cli.Offline)
 	}
-	source, def, _, err := resolveInfoTarget(ctx, root, cfg, name, requested)
+	if code, ok := cli.resolvePaths(); !ok {
+		return code
+	}
+	source, def, _, err := resolveInfoTarget(ctx, cli, name, requested)
 	if err == nil {
 		dir := def.WorkDir
 		if dir == "" {

@@ -12,11 +12,6 @@ import (
 	"github.com/chazu/mu/internal/cas/oci"
 )
 
-func cachePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".mu", "cache")
-}
-
 // cachedAction is one action result in the local disk cache.
 type cachedAction struct {
 	Tag    string // action-sha256-<key>: the tag `mu cache push` publishes it under

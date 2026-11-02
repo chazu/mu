@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/chazu/mu/internal/paths"
 )
 
 const (
@@ -58,19 +60,18 @@ type Removal struct {
 	Bytes int64  `json:"bytes"`
 }
 
-// DefaultRules lists every staging location mu creates under home/.mu and
-// in the system temporary directory tmp.
-func DefaultRules(home, tmp string) []Rule {
-	mu := filepath.Join(home, ".mu")
-	cache := filepath.Join(mu, "cache")
+// DefaultRules lists every staging location mu creates under the state
+// directories p (normally ~/.mu) and in the system temporary directory tmp.
+func DefaultRules(p paths.Paths, tmp string) []Rule {
+	cache := p.CacheDir
 	return []Rule{
 		// Scratch extraction is transient; anything here older than MinAge
 		// is a crashed staging tree or a pre-staging legacy tree.
 		{Dir: filepath.Join(cache, "extract")},
 		{Dir: filepath.Join(cache, "downloads"), Prefixes: []string{".fetch-"}},
 		{Dir: filepath.Join(cache, "ingest")},
-		{Dir: filepath.Join(mu, "plugins"), Prefixes: []string{".bundle-", ".plugin-"}, Depth: 1},
-		{Dir: filepath.Join(mu, "toolchains"), Prefixes: []string{".tool-"}, Depth: 2},
+		{Dir: p.PluginsDir, Prefixes: []string{".bundle-", ".plugin-"}, Depth: 1},
+		{Dir: p.ToolchainsDir, Prefixes: []string{".tool-"}, Depth: 2},
 		{Dir: tmp, Prefixes: []string{
 			"mu-cas-replay-", "mu-oci-blob-", "mu-plugin-fetch-", "mu-plugin-install-",
 			"mu-sandbox-", "mu-sbpl-", "mu-out-", "mu-sealed-in-", "mu-sealed-out-",
@@ -111,11 +112,11 @@ func Sweep(rules []Rule, minAge time.Duration, now time.Time, dryRun bool) ([]Re
 
 // MaybeSweep runs the default sweep at most once per Interval. It is best
 // effort: failures are ignored so that housekeeping never fails a command.
-func MaybeSweep(home string, now time.Time) {
-	if home == "" {
+func MaybeSweep(p paths.Paths, now time.Time) {
+	if p.Root == "" {
 		return
 	}
-	stamp := filepath.Join(home, ".mu", stampName)
+	stamp := filepath.Join(p.Root, stampName)
 	if info, err := os.Stat(stamp); err == nil && now.Sub(info.ModTime()) < Interval {
 		return
 	}
@@ -128,7 +129,7 @@ func MaybeSweep(home string, now time.Time) {
 		return
 	}
 	_ = os.Chtimes(stamp, now, now)
-	_, _ = Sweep(DefaultRules(home, os.TempDir()), MinAge, now, false)
+	_, _ = Sweep(DefaultRules(p, os.TempDir()), MinAge, now, false)
 }
 
 func candidates(r Rule) []string {
