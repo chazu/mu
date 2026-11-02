@@ -18,7 +18,6 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	golang.org/x/term v0.42.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

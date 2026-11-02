@@ -40,8 +40,7 @@ Commands:
   lock      Show the project's catalog plugin lockfile
   info      Show capabilities and metadata for a plugin (project or cached)
   push      Publish a plugin to the configured OCI cache
-  status    Reconcile declared plugins against the local cache
-  test      Run scenarios against a plugin (bundled + testdata/*.yaml)`)
+  status    Reconcile declared plugins against the local cache`)
 		return code
 	}
 
@@ -64,8 +63,6 @@ Commands:
 		return runPluginPush(args[1:])
 	case "status":
 		return runPluginStatus(args[1:])
-	case "test":
-		return runPluginTest(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "mu plugin: unknown command %q\n", args[0])
 		return 2

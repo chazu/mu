@@ -202,8 +202,6 @@ BUILDING AND DISTRIBUTING PLUGINS
   mu plugin status               Reconcile declared plugins against the
                                  local cache (ok / missing / stale / local).
   mu plugin push                 Publish a plugin to a configured OCI cache.
-  mu plugin test <plugin-path>   Run bundled + testdata/*.yaml scenarios
-                                 against a plugin.
 
 OFFICIAL SOURCE-PACKAGE CATALOG
 

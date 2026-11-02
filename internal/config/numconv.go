@@ -30,11 +30,6 @@
 //   - cmd/mu/verify_test.go:158       — reads JSON stdout of `mu verify
 //                                        --json`; always goes through
 //                                        encoding/json, never CUE. Left as-is.
-//   - internal/plugin/scenario/match.go:139,145
-//                                      — matches plugin RPC responses
-//                                        transported as JSON NDJSON. Plugin
-//                                        wire format is JSON by contract, not
-//                                        CUE. Left as-is.
 //
 // No `.(int64)` or `.(int)` assertions on config-derived values were found.
 // ToFloat64 / ToInt64 are therefore added preemptively for MCM-11, which
