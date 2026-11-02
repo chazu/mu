@@ -296,22 +296,7 @@ func resolveRemoteBackendRefs(c *cliContext) []string {
 		}
 	}
 	if c != nil && c.Config != nil && c.Config.Cache != nil {
-		repo := ""
-		if c.Config.Cache.Push != nil {
-			repo = c.Config.Cache.Push.Repository
-		}
-		for _, b := range c.Config.Cache.Backends {
-			if b.Type != "oci" {
-				continue
-			}
-			if b.Read != nil && !*b.Read {
-				continue
-			}
-			if repo == "" {
-				continue // can't form a full ref without a repository
-			}
-			add(b.Registry + "/" + repo)
-		}
+		add(c.Config.Cache.Remote)
 		if c.Config.Cache.Push != nil {
 			p := c.Config.Cache.Push
 			if p.Registry != "" && p.Repository != "" {

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -96,9 +95,6 @@ func (r *ToolchainRegistry) Lookup(ctx context.Context, name, version string) (*
 	// Look up in CAS.
 	key := actionKey(name, version)
 	result, err := r.store.GetActionResult(ctx, key)
-	if errors.Is(err, cas.ErrUnavailable) && ctx.Err() == nil {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("toolchain: get action result: %w", err)
 	}

@@ -204,7 +204,6 @@ v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandb
 
 ### Roadmap
 
-- Tiered cache composition (read-repair, write-through)
 - CLI polish: color output, consistent `--json`
 - GOCACHEPROG bridge
 - 1Password / OPA / buildpack / ko plugins

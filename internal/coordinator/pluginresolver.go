@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -471,9 +470,6 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 	// Check if we already have it in CAS by the declared sha256.
 	expectedDigest := cas.NewSHA256(p.SHA256)
 	has, err := r.Store.Has(ctx, expectedDigest)
-	if errors.Is(err, cas.ErrUnavailable) && ctx.Err() == nil {
-		err = nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("check CAS: %w", err)
 	}

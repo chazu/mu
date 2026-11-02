@@ -120,12 +120,16 @@ type PluginConfig struct {
 	Toolchains []Toolchain     `json:"toolchains,omitempty"`
 }
 
-// CacheConfig configures the build cache system.
+// CacheConfig configures the build cache: the local disk store plus at most
+// one read-only remote. Path is the local store's directory (default
+// ~/.mu/cache; ~ and $VARS expand). Remote is an OCI repository reference
+// ("host/namespace/repo") consulted on local misses; whatever it serves is
+// digest-verified and copied into the local store. Push is used only by
+// `mu cache push`.
 type CacheConfig struct {
-	Backends     []CacheBackend `json:"backends,omitempty"`
-	ReadRepair   bool           `json:"read_repair,omitempty"`
-	WriteThrough bool           `json:"write_through,omitempty"`
-	Push         *CachePush     `json:"push,omitempty"`
+	Path   string     `json:"path,omitempty"`
+	Remote string     `json:"remote,omitempty"`
+	Push   *CachePush `json:"push,omitempty"`
 }
 
 // CachePush configures the target of `mu cache push`. Registry is the OCI
@@ -145,14 +149,4 @@ type CachePush struct {
 type PublishConfig struct {
 	Registry   string `json:"registry,omitempty"`
 	Repository string `json:"repository,omitempty"`
-}
-
-// CacheBackend describes a single cache backend (disk or OCI registry).
-type CacheBackend struct {
-	Type     string `json:"type"`               // "disk" or "oci"
-	Path     string `json:"path,omitempty"`     // for disk
-	Registry string `json:"registry,omitempty"` // for oci
-	MaxSize  string `json:"max_size,omitempty"`
-	Read     *bool  `json:"read,omitempty"`
-	Write    *bool  `json:"write,omitempty"`
 }

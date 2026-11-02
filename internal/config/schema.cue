@@ -121,17 +121,6 @@ package mu
 	}
 }
 
-// #CacheBackend describes a single cache backend.
-#CacheBackend: {
-	type:      "disk" | "oci"
-	path?:     string
-	registry?: string
-	max_size?: string
-	read?:     bool
-	write?:    bool
-	...
-}
-
 // #CachePush describes the target of `mu cache push`.
 #CachePush: {
 	registry?:   string
@@ -139,12 +128,12 @@ package mu
 	...
 }
 
-// #CacheConfig configures the build cache system.
+// #CacheConfig configures the build cache: local disk plus at most one
+// read-only remote ("host/namespace/repo"). push is used by `mu cache push`.
 #CacheConfig: {
-	backends?: [...#CacheBackend]
-	read_repair?:   bool
-	write_through?: bool
-	push?:          #CachePush
+	path?:   string & !=""
+	remote?: string & !=""
+	push?:   #CachePush
 	...
 }
 

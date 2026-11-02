@@ -6,13 +6,7 @@ package mu
 // so a bare "mu" is rejected. Auth: `mu cache login registry.platform.loosh.cloud`
 // with a push-capable snk_ PAT.
 cache: {
-	backends: [
-		{type: "disk", path: "~/.mu/cache"}, {
-			type:     "oci"
-			registry: "registry.platform.loosh.cloud/loosh-industries/mu-cache"
-			write:    false
-		}]
-	read_repair: true
+	remote: "registry.platform.loosh.cloud/loosh-industries/mu-cache"
 	push: {
 		registry:   "registry.platform.loosh.cloud"
 		repository: "loosh-industries/mu-cache"

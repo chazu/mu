@@ -34,9 +34,6 @@ func TestDiskStoreRejectsEmptyPath(t *testing.T) {
 	if _, err := NewDiskStore(""); err == nil {
 		t.Fatal("expected error for empty path")
 	}
-	if _, err := BuildStore(BuildSpec{Backends: []ResolvedBackend{{BackendSpec: BackendSpec{Type: "disk"}, Read: true, Write: true}}}); err == nil {
-		t.Fatal("disk backend factory accepted an empty path")
-	}
 }
 
 func TestDiskStoreBlobRoundtrip(t *testing.T) {

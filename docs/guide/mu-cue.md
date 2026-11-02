@@ -89,13 +89,13 @@ SEALED ROUTING
 CACHE CONFIG
 
   cache: {
-      backends: [
-          {type: "disk", path: "~/.mu/cache", max_size: "10GB"},
-          {type: "oci", registry: "ghcr.io/org/cache"},
-      ]
-      write_through: true
-      read_repair:   true
+      path:   "~/.mu/cache"              // optional; local store (default shown)
+      remote: "ghcr.io/org/mu-cache"     // optional; read-only remote cache
+      push:   {registry: "ghcr.io", repository: "org/mu-cache"}   // mu cache push
   }
+
+  Local disk plus at most one read-only remote. The old cache.backends,
+  read_repair, and write_through fields are rejected. See `mu guide cache`.
 
 SEE ALSO
 
