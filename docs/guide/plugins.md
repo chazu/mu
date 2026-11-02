@@ -89,9 +89,9 @@ WRITING A PLUGIN
     mu.cue (see GO PLUGINS below). Full SDK reference: 'mu guide sdk'.
     Canonical example: examples/plugins/hello-go/.
 
-    In-tree Go plugins: plugins/{pass,keypair-gen}. Go ports that are
-    not yet their plugin's entrypoint: plugins/{file,host,remote-exec,
-    remote-file}/main.go.
+    In-tree Go plugins: plugins/{pass,keypair-gen,remote-exec,
+    remote-file}. Go ports that are not yet their plugin's entrypoint:
+    plugins/{file,host}/main.go.
 
   OTHER LANGUAGES
 

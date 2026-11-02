@@ -7,6 +7,22 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **`remote-exec` and `remote-file` run their Go implementations.** Their
+  `plugin.bb` files are gone; build the binaries with
+  `go build -trimpath -o plugins/<name>/plugin ./plugins/<name>`. Both declare
+  a `config_schema`, so a string `command` (which bb split into one argv
+  element per character) or a mistyped field fails at plan time.
+  remote-file no longer offers `observe`, and now claims its sealed inputs'
+  delivery modes, so a `file`-mode input passes strict routing. Shared SSH
+  code lives in `plugins/internal/ssh`.
+- **Plugins no longer bake host environment values into plans.** The go,
+  remote-exec and remote-file plugins name the host variables they need
+  (`PATH`, `HOME`, `GOCACHE`, `SSH_AUTH_SOCK`, ...) in `env_passthrough`
+  instead of copying their values into `env`, so plan digests and action keys
+  no longer change with `$PATH` or the login session, and the shared cache
+  can hit across machines. docker's actions pass `PATH`, `HOME` and the
+  `DOCKER_*` client settings through; k8s's impure actions inherit mu's
+  environment instead of running kubectl in an empty one.
 - **Strict sealed routing is the only mode.** A target's `sealed_inputs` /
   `sealed_outputs` are the complete allow-list: every action claim must match a
   declared name, ref, and mode; every declared input must be claimed at least

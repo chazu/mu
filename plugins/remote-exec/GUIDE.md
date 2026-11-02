@@ -1,15 +1,16 @@
 # remote-exec plugin
 
-> Implemented in Go using `sdk/muplugin`; the original Babashka version
-> at `plugin.bb` remains in-tree for one release cycle. See
-> `mu guide sdk`.
+> A Go plugin built on `sdk/muplugin` (see `mu guide sdk`). Build the
+> binary before use: `go build -trimpath -o plugins/remote-exec/plugin ./plugins/remote-exec`.
 
 Runs a command on a remote host via SSH. Optional `check` guard skips
 execution when a precondition is already met.
 
 ## Capabilities
 
-- `discover`
+- `discover` — declares a `config_schema`, so mistyped config fails at
+  plan time. In particular `command` must be an argv array:
+  `command: "uptime"` is rejected (write `command: ["uptime"]`).
 - `plan` — one action: ssh to host, optionally run `check`, run `command`,
   optionally fetch `sealed_output_files` back into `$MU_SEALED_OUT_DIR`.
 
