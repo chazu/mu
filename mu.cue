@@ -51,7 +51,11 @@ plugins: [
 targets: [{
 	target:    "//cmd/mu"
 	toolchain: "go"
-	sources: ["go.mod", "go.sum", "cmd/mu/*.go", "internal/builtin/*.go", "internal/cas/*.go", "internal/cas/oci/*.go", "internal/config/*.go", "internal/coordinator/*.go", "internal/dag/*.go", "internal/plugin/*.go", "internal/sandbox/*.go", "internal/scratch/*.go"]
+	// Must cover every module file `go list -deps ./cmd/mu` reports (Go
+	// sources and go:embed files); TestSelfBuildSourcesCoverDeps in cmd/mu
+	// enforces this. mu globs have no exclusions, so _test.go files are
+	// included too (test-only edits cause a rebuild, never a stale hit).
+	sources: ["go.mod", "go.sum", "cmd/**/*.go", "internal/**/*.go", "internal/**/*.cue", "sdk/**/*.go", "docs/guide/*.go", "docs/guide/*.md"]
 	config: {
 		output:   "mu"
 		pkg:      "./cmd/mu"
@@ -60,12 +64,12 @@ targets: [{
 }, {
 	target:    "//lint/go-vet"
 	toolchain: "lint"
-	sources: ["cmd/mu/*.go", "internal/**/*.go"]
+	sources: ["cmd/**/*.go", "internal/**/*.go", "sdk/**/*.go", "plugins/**/*.go"]
 	config: command: ["go", "vet", "./..."]
 }, {
 	target:    "//lint/gofmt"
 	toolchain: "lint"
-	sources: ["cmd/mu/*.go", "internal/**/*.go"]
+	sources: ["cmd/**/*.go", "internal/**/*.go", "sdk/**/*.go", "plugins/**/*.go"]
 	config: {
 		command: ["gofmt", "-l", "."]
 		fix_command: ["gofmt", "-w", "."]
