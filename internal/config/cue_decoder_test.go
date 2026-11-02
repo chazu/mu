@@ -182,30 +182,6 @@ func TestCueDecoder_RejectsRemovedCacheFields(t *testing.T) {
 	}
 }
 
-// TestIsCuePluginDir exercises the probe helper that parallels
-// IsPluginDir for the JSON decoder.
-func TestIsCuePluginDir(t *testing.T) {
-	pluginData, err := os.ReadFile("testdata/plugin/mu.cue")
-	if err != nil {
-		t.Fatalf("read plugin fixture: %v", err)
-	}
-	if !IsCuePluginDir(pluginData) {
-		t.Error("IsCuePluginDir(plugin fixture) = false, want true")
-	}
-
-	rootData, err := os.ReadFile("testdata/mu.cue")
-	if err != nil {
-		t.Fatalf("read root fixture: %v", err)
-	}
-	if IsCuePluginDir(rootData) {
-		t.Error("IsCuePluginDir(root fixture) = true, want false")
-	}
-
-	if IsCuePluginDir([]byte("this is not cue @@@@ !!!")) {
-		t.Error("IsCuePluginDir(garbage) = true, want false")
-	}
-}
-
 // TestCueDecoder_MissingFile ensures a missing mu.cue produces a clear
 // error rather than a panic or silent success.
 func TestCueDecoder_MissingFile(t *testing.T) {

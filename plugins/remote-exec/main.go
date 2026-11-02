@@ -1,8 +1,8 @@
-// remote-exec plugin: run a command on a remote host via SSH.
+// remote-exec plugin: run a command on a remote host via SSH, optionally
+// guarded by a check command. Implements discover and plan.
 //
-// Port of the original Babashka plugin (plugin.bb) to Go using sdk/muplugin.
-// Optionally guarded by a check command. Implements discover and plan
-// (no observe).
+// Unlike the retired Babashka version, a non-array command (for example
+// "uptime") is rejected rather than split into single-character argv.
 //
 // Config:
 //
@@ -25,33 +25,33 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/chazu/mu/plugins/internal/ssh"
 	"github.com/chazu/mu/sdk/muplugin"
 )
 
 func main() {
-	(&muplugin.Plugin{
-		Name:        "remote-exec",
-		Version:     "0.2.0",
-		Description: "Execute commands on remote hosts over SSH",
-		ConfigSchema: map[string]any{
-			"host":                map[string]any{"type": "string", "description": "Remote hostname or IP"},
-			"user":                map[string]any{"type": "string", "default": "root", "description": "SSH login user"},
-			"port":                map[string]any{"type": "integer", "default": 22, "description": "SSH port"},
-			"command":             map[string]any{"type": "array", "description": "argv executed remotely"},
-			"check":               map[string]any{"type": "array", "description": "Guard command; if exits 0, command is skipped"},
-			"env":                 map[string]any{"type": "object", "description": "Environment variables exported before command"},
-			"work_dir":            map[string]any{"type": "string", "description": "Directory to cd into before running command"},
-			"sudo":                map[string]any{"type": "boolean", "default": false, "description": "Run command via sudo -S using SSH_PASS"},
-			"impure":              map[string]any{"type": "boolean", "default": true, "description": "Skip CAS cache for this action"},
-			"sealed_output_files": map[string]any{"type": "object", "description": "Map of sealed output names to absolute remote file paths"},
-		},
-		Plan: plan,
-	}).Main()
+	newPlugin().Main()
+}
+
+// newPlugin builds the plugin value; tests drive it in-process.
+func newPlugin() *muplugin.Plugin {
+	schema := ssh.ConfigSchema()
+	schema["command"] = map[string]any{"type": "array", "items": "string", "required": true, "description": "argv executed remotely"}
+	schema["check"] = map[string]any{"type": "array", "items": "string", "description": "Guard command; if exits 0, command is skipped"}
+	schema["env"] = map[string]any{"type": "object", "description": "Environment variables exported before command"}
+	schema["work_dir"] = map[string]any{"type": "string", "description": "Directory to cd into before running command"}
+	schema["impure"] = map[string]any{"type": "boolean", "default": true, "description": "Skip CAS cache for this action"}
+	schema["sealed_output_files"] = map[string]any{"type": "object", "description": "Map of sealed output names to absolute remote file paths"}
+	return &muplugin.Plugin{
+		Name:         "remote-exec",
+		Version:      "0.2.0",
+		Description:  "Execute commands on remote hosts over SSH",
+		ConfigSchema: schema,
+		Plan:         plan,
+	}
 }
 
 func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
@@ -61,12 +61,11 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 		cfg = map[string]any{}
 	}
 
-	host, _ := cfg["host"].(string)
-	if host == "" {
-		return muplugin.PlanResponse{}, fmt.Errorf("remote-exec requires config.host")
+	conn, err := ssh.ConnFromConfig("remote-exec", cfg)
+	if err != nil {
+		return muplugin.PlanResponse{}, err
 	}
-	cmdArgv := stringSlice(cfg["command"])
-	if len(cmdArgv) == 0 {
+	if len(stringSlice(cfg["command"])) == 0 {
 		return muplugin.PlanResponse{}, fmt.Errorf("remote-exec requires config.command")
 	}
 
@@ -82,52 +81,30 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 		}
 	}
 
-	user := "root"
-	if u, ok := cfg["user"].(string); ok && u != "" {
-		user = u
-	}
-	port := portString(cfg["port"])
 	sudo := boolVal(cfg, "sudo")
 	impure := true
 	if v, ok := cfg["impure"].(bool); ok {
 		impure = v
 	}
 
-	sealedInputs := target.SealedInputs
-	sealedModes := target.SealedInputModes
-	sealedOutModes := target.SealedOutputModes
+	wrapper := buildWrapper(cfg, conn, sudo, sortedKeys(target.SealedInputs), sealedFiles)
 
-	wrapper := buildWrapper(cfg, host, user, port, sudo, sortedKeys(sealedInputs), sealedFiles)
-
-	env := map[string]string{
-		"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-	}
-	if v := os.Getenv("SSH_AUTH_SOCK"); v != "" {
-		env["SSH_AUTH_SOCK"] = v
-	}
-	if v := os.Getenv("HOME"); v != "" {
-		env["HOME"] = v
-	}
-
+	// The single action claims exactly what the target declares (strict
+	// sealed routing): every input with its mode, every output with its mode.
 	action := muplugin.ActionSpec{
-		ID:           "exec",
-		Command:      []string{"bash", "-c", wrapper},
-		Inputs:       map[string]string{},
-		Outputs:      []string{},
-		Env:          env,
-		SealedInputs: sealedInputs,
-		Network:      true,
-		Impure:       impure,
-		DependsOn:    []string{},
-	}
-	if len(sealedModes) > 0 {
-		action.SealedInputModes = sealedModes
-	}
-	if len(sealedOut) > 0 {
-		action.SealedOutputs = sealedOut
-	}
-	if len(sealedOutModes) > 0 {
-		action.SealedOutputModes = sealedOutModes
+		ID:                "exec",
+		Command:           []string{"bash", "-c", wrapper},
+		Inputs:            map[string]string{},
+		Outputs:           []string{},
+		Env:               ssh.ActionEnv(),
+		EnvPassthrough:    ssh.PassthroughNames(),
+		SealedInputs:      target.SealedInputs,
+		SealedInputModes:  target.SealedInputModes,
+		SealedOutputs:     sealedOut,
+		SealedOutputModes: target.SealedOutputModes,
+		Network:           true,
+		Impure:            impure,
+		DependsOn:         []string{},
 	}
 
 	return muplugin.PlanResponse{
@@ -149,24 +126,19 @@ func buildRemoteScript(cfg map[string]any, forwardKeys []string) string {
 	var b strings.Builder
 	b.WriteString("set -eu\n")
 
-	// env exports: stable sort to match the file plugin's ordering policy
-	// (bb iterates map order which is undefined; sorted is deterministic).
-	envKeys := make([]string, 0, len(env))
-	for k := range env {
-		envKeys = append(envKeys, k)
-	}
-	sort.Strings(envKeys)
-	for _, k := range envKeys {
-		fmt.Fprintf(&b, "export %s=%s\n", k, shellQuote(env[k]))
+	// env exports in sorted order, so the script (and the action key) is
+	// deterministic.
+	for _, k := range sortedKeys(env) {
+		fmt.Fprintf(&b, "export %s=%s\n", k, ssh.Quote(env[k]))
 	}
 
 	if workDir != "" {
-		fmt.Fprintf(&b, "cd %s\n", shellQuote(workDir))
+		fmt.Fprintf(&b, "cd %s\n", ssh.Quote(workDir))
 	}
 
 	if len(check) > 0 {
 		fmt.Fprintf(&b, "if %s >/dev/null 2>&1; then echo '[check passed, skipping]'; exit 0; fi\n",
-			argvToStr(check))
+			ssh.QuoteArgv(check))
 	}
 
 	preserve := ""
@@ -177,7 +149,7 @@ func buildRemoteScript(cfg map[string]any, forwardKeys []string) string {
 	if sudo {
 		runPrefix = "printf '%s\\n' \"${RE_SUDO_PASS:-}\" | sudo -S -p '' " + preserve
 	}
-	fmt.Fprintf(&b, "%s%s\n", runPrefix, argvToStr(cmdArgv))
+	fmt.Fprintf(&b, "%s%s\n", runPrefix, ssh.QuoteArgv(cmdArgv))
 
 	return b.String()
 }
@@ -193,26 +165,25 @@ func buildSealedOutputFetchers(sealedFiles map[string]string) string {
 	b.WriteString("  echo 'remote-exec: sealed_output_files declared but MU_SEALED_OUT_DIR is unset' >&2\n")
 	b.WriteString("  exit 1\n")
 	b.WriteString("fi\n")
-	names := make([]string, 0, len(sealedFiles))
-	for k := range sealedFiles {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		remotePath := sealedFiles[name]
+	for _, name := range sortedKeys(sealedFiles) {
 		fmt.Fprintf(&b,
-			"\"${SSH_CMD[@]}\" "+
-				"-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "+
+			"\"${SSH_CMD[@]}\" "+ssh.Options+
 				"-p \"$REMOTE_PORT\" \"$REMOTE_DEST\" "+
 				"cat %s > \"$MU_SEALED_OUT_DIR/%s\"\n",
-			shellQuote(remotePath), name)
+			ssh.Quote(sealedFiles[name]), name)
 		fmt.Fprintf(&b, "chmod 600 \"$MU_SEALED_OUT_DIR/%s\"\n", name)
 	}
 	return b.String()
 }
 
-// buildWrapper renders the bash wrapper executed on the builder.
-func buildWrapper(cfg map[string]any, host, user, port string, sudo bool, sealedKeys []string, sealedFiles map[string]string) string {
+// buildWrapper renders the bash wrapper executed on the builder. It:
+//  1. picks `sshpass -e ssh` or `ssh -o BatchMode=yes` from $SSH_PASS;
+//  2. forwards every sealed input except SSH_PASS (reserved for ssh auth)
+//     to the remote by prepending `export K=<printf %q>` lines;
+//  3. with sudo, also prepends RE_SUDO_PASS derived from SSH_PASS;
+//  4. passes the remote script as one ssh argument (no word splitting);
+//  5. ssh-cats each sealed_output_files entry into $MU_SEALED_OUT_DIR.
+func buildWrapper(cfg map[string]any, conn ssh.Conn, sudo bool, sealedKeys []string, sealedFiles map[string]string) string {
 	forwardKeys := make([]string, 0, len(sealedKeys))
 	for _, k := range sealedKeys {
 		if k != "SSH_PASS" {
@@ -220,17 +191,10 @@ func buildWrapper(cfg map[string]any, host, user, port string, sudo bool, sealed
 		}
 	}
 	remoteScript := buildRemoteScript(cfg, forwardKeys)
-	quotedScript := shellQuote(remoteScript)
 
 	var b strings.Builder
-	b.WriteString("set -eu\n")
-	b.WriteString("if [ -n \"${SSH_PASS:-}\" ]; then export SSHPASS=\"$SSH_PASS\"; fi\n")
-	b.WriteString("if [ -n \"${SSH_PASS:-}\" ]; then\n")
-	b.WriteString("  SSH_CMD=(sshpass -e ssh)\n")
-	b.WriteString("else\n")
-	b.WriteString("  SSH_CMD=(ssh -o BatchMode=yes)\n")
-	b.WriteString("fi\n")
-	fmt.Fprintf(&b, "REMOTE_SCRIPT=%s\n", quotedScript)
+	b.WriteString(ssh.WrapperPreamble)
+	fmt.Fprintf(&b, "REMOTE_SCRIPT=%s\n", ssh.Quote(remoteScript))
 
 	for _, k := range forwardKeys {
 		fmt.Fprintf(&b, "if [ -n \"${%s:-}\" ]; then\n", k)
@@ -240,34 +204,17 @@ func buildWrapper(cfg map[string]any, host, user, port string, sudo bool, sealed
 	}
 
 	if sudo {
-		b.WriteString("if [ -n \"${SSH_PASS:-}\" ]; then\n")
-		b.WriteString("  RE_SUDO_EXPORT=$(printf 'export RE_SUDO_PASS=%q\\n' \"$SSH_PASS\")\n")
-		b.WriteString("  REMOTE_SCRIPT=\"${RE_SUDO_EXPORT}\n${REMOTE_SCRIPT}\"\n")
-		b.WriteString("fi\n")
+		b.WriteString(ssh.SudoPassExport("RE"))
 	}
 
-	b.WriteString("REMOTE_CMD=\"bash -c $(printf %q \"$REMOTE_SCRIPT\")\"\n")
-	fmt.Fprintf(&b, "REMOTE_PORT=%s\n", shellQuote(port))
-	fmt.Fprintf(&b, "REMOTE_DEST=%s\n", shellQuote(user+"@"+host))
-	b.WriteString("\"${SSH_CMD[@]}\" ")
-	b.WriteString("-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 ")
+	b.WriteString(ssh.RemoteCmdLine)
+	fmt.Fprintf(&b, "REMOTE_PORT=%s\n", ssh.Quote(conn.Port))
+	fmt.Fprintf(&b, "REMOTE_DEST=%s\n", ssh.Quote(conn.Dest()))
+	b.WriteString("\"${SSH_CMD[@]}\" " + ssh.Options)
 	b.WriteString("-p \"$REMOTE_PORT\" \"$REMOTE_DEST\" ")
 	b.WriteString("\"$REMOTE_CMD\"\n")
 	b.WriteString(buildSealedOutputFetchers(sealedFiles))
 	return b.String()
-}
-
-// shellQuote single-quotes a string for safe inclusion in a bash command.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-func argvToStr(argv []string) string {
-	parts := make([]string, len(argv))
-	for i, a := range argv {
-		parts[i] = shellQuote(a)
-	}
-	return strings.Join(parts, " ")
 }
 
 func stringSlice(v any) []string {
@@ -296,22 +243,6 @@ func stringMap(v any) map[string]string {
 		}
 	}
 	return out
-}
-
-func portString(v any) string {
-	switch x := v.(type) {
-	case string:
-		if x != "" {
-			return x
-		}
-	case float64:
-		return strconv.Itoa(int(x))
-	case int:
-		return strconv.Itoa(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	}
-	return "22"
 }
 
 func boolVal(cfg map[string]any, key string) bool {

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -25,57 +24,10 @@ func defaultPluginCatalogURL() string {
 	return plugincatalog.DefaultURL
 }
 
-func runPluginSearch(args []string) int {
-	fs := flag.NewFlagSet("plugin search", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin search", fs)
-	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
-	if code, ok := parseFlags(fs, args, "plugin search [flags] [query]"); !ok {
-		return code
-	}
-	if fs.NArg() > 1 {
-		fmt.Fprintln(os.Stderr, "usage: mu plugin search [--catalog URL] [query]")
-		return exitUsage
-	}
-
-	ctx, cancel := context.WithTimeout(cli.networkContext(context.Background()), 30*time.Second)
-	defer cancel()
-	catalog, err := plugincatalog.Fetch(ctx, *catalogURL)
-	if err != nil {
-		return cli.fail(exitFail, "%v", err)
-	}
-	query := ""
-	if fs.NArg() == 1 {
-		query = fs.Arg(0)
-	}
-	items := catalog.Search(query)
-	if cli.JSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(items); err != nil {
-			return cli.fail(exitFail, "writing results: %v", err)
-		}
-		return exitOK
-	}
-	if len(items) == 0 {
-		fmt.Println("No plugins found.")
-		return exitOK
-	}
-	fmt.Printf("%-18s %-9s %-28s %s\n", "PLUGIN", "VERSION", "TOOLCHAIN", "DESCRIPTION")
-	for _, item := range items {
-		toolchain := item.Toolchain
-		if toolchain == "" {
-			toolchain = "direct"
-		}
-		fmt.Printf("%-18s %-9s %-28s %s\n", item.Name, item.Version, toolchain, item.Description)
-	}
-	return exitOK
-}
-
 func runPluginInstall(args []string) int {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin install", fs)
+	cli := newCLIContext("plugin install", fs, useConfig, useOffline)
 	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
 	if code, ok := parseFlags(fs, args, "plugin install [flags] <name[@version]>"); !ok {
 		return code
@@ -107,100 +59,6 @@ func runPluginInstall(args []string) int {
 		return cli.fail(exitFail, "%v", err)
 	}
 	fmt.Fprintf(os.Stdout, "installed plugin %q %s (%s)\n", entry.Name, entry.Version, entry.BundleDigest)
-	return exitOK
-}
-
-func runPluginUpdate(args []string) int {
-	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin update", fs)
-	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
-	if code, ok := parseFlags(fs, args, "plugin update [flags] [name]"); !ok {
-		return code
-	}
-	if fs.NArg() > 1 {
-		fmt.Fprintln(os.Stderr, "usage: mu plugin update [--catalog URL] [name]")
-		return exitUsage
-	}
-	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true, ValidateConfig: true, NeedStore: true}); !ok {
-		return code
-	}
-	lockPath := filepath.Join(cli.ProjectRoot, "mu.lock")
-	lock, err := plugincatalog.LoadLock(lockPath)
-	if err != nil {
-		return cli.fail(exitFail, "%v", err)
-	}
-	if len(lock.Plugins) == 0 {
-		return cli.fail(exitFail, "no plugins are locked; run mu plugin install first")
-	}
-
-	ctx, cancel := context.WithTimeout(cli.networkContext(context.Background()), 10*time.Minute)
-	defer cancel()
-	catalog, err := plugincatalog.Fetch(ctx, *catalogURL)
-	if err != nil {
-		return cli.fail(exitFail, "%v", err)
-	}
-
-	names := make([]string, 0, len(lock.Plugins))
-	if fs.NArg() == 1 {
-		name := fs.Arg(0)
-		if _, ok := lock.Find(name); !ok {
-			return cli.fail(exitFail, "plugin %q is not in mu.lock; run mu plugin install first", name)
-		}
-		names = append(names, name)
-	} else {
-		for _, p := range lock.Plugins {
-			names = append(names, p.Name)
-		}
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		selected, selectErr := catalog.Select(name, "")
-		if selectErr != nil {
-			return cli.fail(exitFail, "%v", selectErr)
-		}
-		if _, installErr := installCatalogPlugin(ctx, cli, *catalogURL, catalog, selected); installErr != nil {
-			return cli.fail(exitFail, "%v", installErr)
-		}
-		fmt.Fprintf(os.Stdout, "updated plugin %q to %s\n", name, selected.Version)
-	}
-	return exitOK
-}
-
-func runPluginLock(args []string) int {
-	fs := flag.NewFlagSet("plugin lock", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin lock", fs)
-	if code, ok := parseFlags(fs, args, "plugin lock [flags]"); !ok {
-		return code
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: mu plugin lock [--config path] [--json]")
-		return exitUsage
-	}
-	if code, ok := cli.Resolve(resolveOpts{NeedConfig: true}); !ok {
-		return code
-	}
-	lock, err := plugincatalog.LoadLock(filepath.Join(cli.ProjectRoot, "mu.lock"))
-	if err != nil {
-		return cli.fail(exitFail, "%v", err)
-	}
-	if cli.JSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(lock); err != nil {
-			return cli.fail(exitFail, "writing lockfile: %v", err)
-		}
-		return exitOK
-	}
-	if len(lock.Plugins) == 0 {
-		fmt.Println("No plugins locked.")
-		return exitOK
-	}
-	fmt.Printf("%-18s %-9s %-18s %s\n", "PLUGIN", "VERSION", "SOURCE", "BUNDLE")
-	for _, p := range lock.Plugins {
-		fmt.Printf("%-18s %-9s %-18s %s\n", p.Name, p.Version, p.SourceRevision, p.BundleDigest)
-	}
 	return exitOK
 }
 

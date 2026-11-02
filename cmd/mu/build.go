@@ -7,19 +7,17 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chazu/mu/internal/coordinator"
 	"github.com/chazu/mu/internal/dag"
-	"github.com/chazu/mu/internal/scratch"
 )
 
 func runBuild(args []string) int {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("build", fs)
+	cli := newCLIContext("build", fs, useConfig, useJSON, useVerbose, useOffline)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
@@ -56,7 +54,6 @@ func runBuild(args []string) int {
 	if code, ok := cli.Resolve(resolveOpts{
 		NeedConfig:     true,
 		NeedStore:      true,
-		NoCache:        *noCache,
 		ValidateConfig: true,
 	}); !ok {
 		return code
@@ -65,33 +62,14 @@ func runBuild(args []string) int {
 	ctx, stop := signal.NotifyContext(cli.networkContext(context.Background()), os.Interrupt)
 	defer stop()
 
-	registry := coordinator.NewToolchainRegistry(cli.Store)
-	home, _ := os.UserHomeDir()
-
-	c := &coordinator.Coordinator{
-		NoCache:           *noCache,
-		ProjectRoot:       cli.ProjectRoot,
-		Config:            cli.Config,
-		Store:             cli.Store,
-		ToolchainRegistry: registry,
-		Workers:           *jobs,
-		Verbose:           cli.Verbose,
-	}
-
+	opts := coordinatorOpts{Workers: *jobs, NoCache: *noCache}
 	// When emitting a manifest to stdout, redirect action subprocess
 	// stdout to stderr so colored tofu/terraform logs don't contaminate
 	// the JSON manifest downstream pipelines consume.
 	if *emitManifest {
-		c.SubprocessStdout = os.Stderr
+		opts.SubprocessStdout = os.Stderr
 	}
-
-	if len(cli.Config.Toolchains) > 0 && cli.Store != nil {
-		c.Builder = &scratch.Builder{
-			Store:    cli.Store,
-			Registry: registry,
-			CacheDir: filepath.Join(home, ".mu", "cache"),
-		}
-	}
+	c := newCoordinator(cli, opts)
 
 	// --plan mode: plan only, print the DAG, exit.
 	if *planOnly {

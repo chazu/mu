@@ -7,6 +7,31 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **mu warns about unvalidated plugin config.** When a plan-capable plugin
+  declares no `config_schema` and a target passes it config, `mu build`
+  prints one warning per plugin. Every in-tree plan-capable plugin now
+  declares a schema (remote-exec and remote-file were the last).
+- **The `file` plugin runs its Go implementation.** `plugin.bb` is gone;
+  build the binary with `go build -trimpath -o plugins/file/plugin ./plugins/file`.
+  Paths in its shell commands are now escaped, so a path containing `'` no
+  longer breaks the command, and a target without `path` gets an error
+  instead of crashing the plugin.
+- **`remote-exec` and `remote-file` run their Go implementations.** Their
+  `plugin.bb` files are gone; build the binaries with
+  `go build -trimpath -o plugins/<name>/plugin ./plugins/<name>`. Both declare
+  a `config_schema`, so a string `command` (which bb split into one argv
+  element per character) or a mistyped field fails at plan time.
+  remote-file no longer offers `observe`, and now claims its sealed inputs'
+  delivery modes, so a `file`-mode input passes strict routing. Shared SSH
+  code lives in `plugins/internal/ssh`.
+- **Plugins no longer bake host environment values into plans.** The go,
+  remote-exec and remote-file plugins name the host variables they need
+  (`PATH`, `HOME`, `GOCACHE`, `SSH_AUTH_SOCK`, ...) in `env_passthrough`
+  instead of copying their values into `env`, so plan digests and action keys
+  no longer change with `$PATH` or the login session, and the shared cache
+  can hit across machines. docker's actions pass `PATH`, `HOME` and the
+  `DOCKER_*` client settings through; k8s's impure actions inherit mu's
+  environment instead of running kubectl in an empty one.
 - **Strict sealed routing is the only mode.** A target's `sealed_inputs` /
   `sealed_outputs` are the complete allow-list: every action claim must match a
   declared name, ref, and mode; every declared input must be claimed at least
@@ -15,9 +40,16 @@ All notable changes to mu are recorded here. The format follows
   action and never checked an action's own claims, so a plugin could claim a
   ref the target never declared. One convenience remains: a plan with exactly
   one action and no claims gets the target's maps. The `sealed_routing` field
-  was removed; setting it is a load error. secret-gen targets must declare
-  `sealed_outputs: {VALUE: <ref>}` with the matching mode until `config.ref`
-  goes away.
+  was removed; setting it is a load error.
+- **secret-gen names its destination only in `sealed_outputs`.** A
+  secret-gen target declares exactly one `sealed_outputs` entry (any name,
+  conventionally `VALUE`) and optionally its `sealed_output_modes` entry,
+  which defaults to `create_if_absent`. `config.ref` and `config.mode` were
+  removed; setting either fails planning with the replacement to write.
+- **Cross-target path inputs are wired regardless of planning order.** An
+  input naming another target's declared output now links to that target
+  even when the consumer sorts first and lists no `deps`. Targets that read
+  each other's outputs are reported as a cycle at plan time.
 
 ### Added
 

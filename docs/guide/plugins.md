@@ -13,10 +13,11 @@ LOADING PLUGINS
      {"name": "file", "url": "https://example.com/file-plugin.bb", "sha256": "abc123..."}
 
   2. Local script (preferred for development):
-     {"name": "file", "script": "plugins/file/plugin.bb"}
+     {"name": "myplugin", "script": "plugins/myplugin/plugin.bb"}
 
      Also works with a directory containing mu.cue with a "plugin" key:
      {"name": "go", "script": "plugins/go"}
+     {"name": "file", "script": "plugins/file"}   (Go: build the binary first)
 
   3. CAS digest (for distribution — previously built plugin):
      {"name": "file", "digest": "sha256:<64 lowercase hex characters>"}
@@ -89,9 +90,9 @@ WRITING A PLUGIN
     mu.cue (see GO PLUGINS below). Full SDK reference: 'mu guide sdk'.
     Canonical example: examples/plugins/hello-go/.
 
-    In-tree Go plugins: plugins/{pass,keypair-gen}. Go ports that are
-    not yet their plugin's entrypoint: plugins/{file,host,remote-exec,
-    remote-file}/main.go.
+    In-tree Go plugins: plugins/{file,pass,keypair-gen,remote-exec,
+    remote-file}. (plugins/host/main.go is an unflipped port of an
+    observe-only plugin that is being deleted.)
 
   OTHER LANGUAGES
 
@@ -165,7 +166,7 @@ PLUGIN DIRECTORY STRUCTURE
   For bundling and distribution, plugins use this layout:
 
     plugins/myplugin/
-      mu.cue        Declares plugin metadata and build target.
+      mu.cue        Declares plugin metadata.
       plugin.bb      The plugin script.
       GUIDE.md       Optional guide text (shown by 'mu guide plugin myplugin').
 
@@ -177,16 +178,11 @@ PLUGIN DIRECTORY STRUCTURE
         "toolchain": "bb",
         "files": ["plugin.bb"],
         "guide": "GUIDE.md"
-      },
-      "targets": [
-        {
-          "target": "build",
-          "toolchain": "shell",
-          "sources": ["plugin.bb"],
-          "config": {"command": ["true"], "impure": false}
-        }
-      ]
+      }
     }
+
+  A project plugin entry with `script:` pointing into the directory is
+  bundled into the local CAS on demand when a build resolves it.
 
 GO PLUGINS
 
@@ -214,9 +210,8 @@ GO PLUGINS
     is that bundle digest, so it changes exactly when the binary (or
     another bundled file) changes; -trimpath keeps rebuilds of the same
     source with the same Go version byte-identical across checkouts.
-    The discover cache is keyed by the same
-    digest. The in-tree convention is to name the binary "plugin"
-    (ignored by .gitignore) so `mu plugin test plugins/<name>` finds it.
+    The in-tree convention is to name the binary "plugin" (ignored by
+    .gitignore).
 
   Catalog install ('mu plugin install <name>'):
     The catalog entry declares the entrypoint and a build command, e.g.
@@ -233,34 +228,32 @@ GO PLUGINS
   muplugin.Exchange; see plugins/pass/main_test.go for an end-to-end
   test that registers a plugin directory the way a project does.
 
-BUILDING AND DISTRIBUTING PLUGINS
+MANAGING PLUGINS
 
-  mu plugin add <name>    Build //plugins/<name> and register its CAS digest
-                          in mu.cue. After this, the plugin can be referenced
-                          by digest for reproducible builds.
+  mu plugin list [--json]        One table of the project's declared plugins
+                                 and every version installed under
+                                 ~/.mu/plugins. STATE reconciles a declared
+                                 digest with the install cache: ok, missing,
+                                 stale (other versions installed), or local
+                                 (script/url/command; not checked).
+                                 Installed-only plugins appear with no type.
+  mu plugin info [--json] [--digest <sha256:...>] <name>
+                                 Start one plugin, run discover, and show its
+                                 capabilities, config schema, digest, and
+                                 path. Project plugins (digest, url, script,
+                                 or command) resolve exactly as in a build.
+                                 Works outside any mu project.
+  mu plugin install <name[@version]>
+                                 Install a catalog plugin (below).
 
-  mu plugin list                 List plugins defined in mu.cue.
-  mu plugin list --discover      Start plugins and show capabilities.
-  mu plugin list --cached        Show every cached plugin version, one row per identity.
-  mu plugin list --json          Output as JSON.
-  mu plugin info <name>          Show capabilities, schemas, digest, and
-                                 path for a single plugin (project or
-                                 cached). Works outside any mu project.
-  mu plugin status               Reconcile declared plugins against the
-                                 local cache (ok / missing / stale / local).
-  mu plugin push                 Publish a plugin to a configured OCI cache.
-  mu plugin test <plugin-path>   Run bundled + testdata/*.yaml scenarios
-                                 against a plugin.
+  list and info honour --config; a project mu.cue that fails to load is an
+  error, not a silent fallback to installed plugins.
 
 OFFICIAL SOURCE-PACKAGE CATALOG
 
   The official catalog is published by the public chazu/mu-plugins GitHub
-  releases. Search it without a project:
-
-    mu plugin search
-    mu plugin search aws
-
-  Install a pinned or latest catalog package from inside a mu project:
+  releases. Install a pinned or latest catalog package from inside a mu
+  project:
 
     mu plugin install aws
     mu plugin install aws@0.1.0
@@ -274,20 +267,16 @@ OFFICIAL SOURCE-PACKAGE CATALOG
   writes the same metadata to `mu-plugin.json` inside the extracted bundle so
   downstream tools can inspect an installed package without its source tree.
 
-  Update one or all catalog-installed plugins:
-
-    mu plugin update aws
-    mu plugin update
-
-  Inspect the lockfile with `mu plugin lock` or `mu plugin lock --json`.
+  To update a plugin, install the newer version: `mu plugin install aws`
+  installs the latest release and rewrites its mu.cue and mu.lock entries.
   Override the catalog for a mirror or local test server with
   `--catalog URL` or `MU_PLUGIN_CATALOG`. The URL must serve the generated
   catalog JSON; package assets are still fetched from the HTTPS asset URLs
   recorded in that catalog.
 
-  Local `script:` plugins, digest references, direct command plugins, and OCI
-  plugin push/pull remain supported. Catalog installation is a source-package
-  distribution path layered on top of the same CAS resolver.
+  The catalog is the only plugin distribution channel. Local `script:`
+  plugins, digest references, and direct command plugins resolve through the
+  same CAS resolver.
 
 PLUGIN GUIDES
 
@@ -412,9 +401,6 @@ OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
     mu/<plugin>      schemas authored by the plugin's authors
     anything else    third-party / user-defined
 
-  'mu verify' warns when a plugin claims a mu/<x> namespace whose <x>
-  doesn't match its directory name.
-
   Full plugin-author guide: docs/plugin-output-schemas.md.
 
 CACHED VERSION SELECTION
@@ -426,7 +412,7 @@ CACHED VERSION SELECTION
 
     mu plugin info --digest sha256:<64 hex characters> <name>
     mu guide plugin --digest sha256:<64 hex characters> <name>
-    mu plugin list --cached --json
+    mu plugin list --json
 
   --digest selects an already cached version, even inside a project; it does
   not fetch another version. Listing exposes all available identities. Legacy
@@ -452,10 +438,8 @@ LOCAL DEPENDENCIES DURING REGISTRY OUTAGES
 
   mu plugin info --offline <name>
   mu guide plugin --offline <name>
-  mu plugin list --cached --json
+  mu plugin list --json
 
-  Catalog search/install/update supports --offline with a local file:// catalog
-  and already-resolved artifacts. It fails rather than downloading missing
-  package data. Remote discovery returns failure if its results are incomplete
-  because a registry cannot be reached; 404/405 tag-list endpoints alone retain
-  the existing unversioned-row fallback.
+  Catalog install supports --offline with a local file:// catalog and
+  already-resolved artifacts. It fails rather than downloading missing
+  package data.

@@ -74,30 +74,22 @@ func (r *metadataRegistry) Fetch(context.Context, ocispec.Descriptor) (io.ReadCl
 	return r.reader, nil
 }
 
-func TestEveryMetadataEntryPointRejectsDeclaredOversizeBeforeFetch(t *testing.T) {
-	for _, name := range []string{"action", "plugin", "index"} {
-		t.Run(name, func(t *testing.T) {
-			repo := &metadataRegistry{desc: ocispec.Descriptor{Size: MaxManifestBytes + 1}}
-			var err error
-			switch name {
-			case "action":
-				_, err = New(repo).GetActionResult(context.Background(), cas.ActionKey{Digest: cas.NewSHA256(strings.Repeat("a", cas.SHA256HexLen))})
-			case "plugin":
-				_, err = FetchPluginConfig(context.Background(), repo, "ref")
-			case "index":
-				_, err = FetchPluginIndex(context.Background(), repo)
-			}
-			if !errors.Is(err, ErrMetadataTooLarge) || repo.fetches != 0 {
-				t.Fatalf("oversize: %v, fetches=%d", err, repo.fetches)
-			}
-		})
+func TestMetadataEntryPointRejectsDeclaredOversizeBeforeFetch(t *testing.T) {
+	repo := &metadataRegistry{desc: ocispec.Descriptor{Size: MaxManifestBytes + 1}}
+	_, err := New(repo).GetActionResult(context.Background(), testActionKey())
+	if !errors.Is(err, ErrMetadataTooLarge) || repo.fetches != 0 {
+		t.Fatalf("oversize: %v, fetches=%d", err, repo.fetches)
 	}
+}
+
+func testActionKey() cas.ActionKey {
+	return cas.ActionKey{Digest: cas.NewSHA256(strings.Repeat("a", cas.SHA256HexLen))}
 }
 
 func TestActualTransferCannotExceedBudgetDespiteDeclaredSize(t *testing.T) {
 	reader := &countingMetadataReader{remaining: 1 << 30}
 	repo := &metadataRegistry{desc: ocispec.Descriptor{Size: 2}, reader: reader}
-	_, err := FetchPluginConfig(context.Background(), repo, "ref")
+	_, err := New(repo).GetActionResult(context.Background(), testActionKey())
 	if !errors.Is(err, ErrMetadataTooLarge) {
 		t.Fatalf("accepted oversized transfer: %v", err)
 	}
@@ -128,17 +120,18 @@ func TestLargeRepresentativeActionMetadataFitsBudgets(t *testing.T) {
 
 func TestOversizedConfigurationRejectedBeforeFetchingIt(t *testing.T) {
 	repo := newMemStore()
-	cfg := ocispec.Descriptor{MediaType: MediaTypePluginConfig, Size: MaxPluginConfigBytes + 1, Digest: godigest.FromString("oversized")}
+	cfg := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageConfig, Size: MaxActionConfigBytes + 1, Digest: godigest.FromString("oversized")}
 	manifest := ocispec.Manifest{Config: cfg}
 	data, _ := json.Marshal(manifest)
 	desc := ocispec.Descriptor{Size: int64(len(data)), Digest: godigest.FromBytes(data)}
 	if err := repo.Push(context.Background(), desc, strings.NewReader(string(data))); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tag(context.Background(), desc, "ref"); err != nil {
+	key := testActionKey()
+	if err := repo.Tag(context.Background(), desc, ActionTag(key)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FetchPluginConfig(context.Background(), repo, "ref"); !errors.Is(err, ErrMetadataTooLarge) {
+	if _, err := New(repo).GetActionResult(context.Background(), key); !errors.Is(err, ErrMetadataTooLarge) {
 		t.Fatalf("config boundary: %v", err)
 	}
 }

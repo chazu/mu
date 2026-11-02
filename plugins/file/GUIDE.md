@@ -1,7 +1,7 @@
 mu guide plugin file — file convergence plugin
 
-(Implemented in Go using sdk/muplugin; the original Babashka version
- at plugin.bb remains in-tree for one release cycle. See 'mu guide sdk'.)
+(A Go plugin built on sdk/muplugin; see 'mu guide sdk'. Build the binary
+ before use: go build -trimpath -o plugins/file/plugin ./plugins/file)
 
 Converges files to a desired state: write content, set permissions,
 create symlinks, or delete files.

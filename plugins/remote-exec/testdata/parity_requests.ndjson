@@ -1,0 +1,7 @@
+{"method":"discover"}
+{"method":"plan","target":{"name":"//host/uptime","toolchain":"remote-exec","config":{"host":"h.example","command":["uptime"]}}}
+{"method":"plan","target":{"name":"//host/full","toolchain":"remote-exec","config":{"host":"h.example","user":"deploy","port":2222,"command":["apt-get","install","-y","it's"],"check":["which","jq"],"env":{"A":"1","B":"x y"},"work_dir":"/srv/app","sudo":true,"impure":false},"sealed_inputs":{"API_TOKEN":"pass:api/token","SSH_PASS":"pass:hosts/h"},"sealed_input_modes":{"API_TOKEN":"file"}}}
+{"method":"plan","target":{"name":"//host/kubeconfig","toolchain":"remote-exec","config":{"host":"h.example","command":["kubeadm","init"],"sealed_output_files":{"ADMIN":"/etc/kubernetes/admin.conf","CA":"/etc/kubernetes/pki/ca.crt"}},"sealed_outputs":{"ADMIN":"pass:bootstrap/admin","CA":"pass:bootstrap/ca"},"sealed_output_modes":{"ADMIN":"create_if_absent"}}}
+{"method":"plan","target":{"name":"//host/nohost","toolchain":"remote-exec","config":{"command":["true"]}}}
+{"method":"plan","target":{"name":"//host/nocmd","toolchain":"remote-exec","config":{"host":"h.example"}}}
+{"method":"plan","target":{"name":"//host/mismatch","toolchain":"remote-exec","config":{"host":"h.example","command":["true"],"sealed_output_files":{"B":"/b"}},"sealed_outputs":{"A":"pass:bootstrap/a"}}}

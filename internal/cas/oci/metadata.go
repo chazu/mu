@@ -13,12 +13,10 @@ import (
 
 // Metadata budgets are independent of potentially multi-gigabyte layer blobs.
 // Eight MiB accommodates manifests/results with tens of thousands of ordinary
-// named outputs; plugin descriptors and indexes have smaller four MiB budgets.
+// named outputs.
 const (
 	MaxManifestBytes     int64 = 8 << 20
 	MaxActionConfigBytes int64 = 8 << 20
-	MaxPluginConfigBytes int64 = 4 << 20
-	MaxPluginIndexBytes  int64 = 4 << 20
 )
 
 var ErrMetadataTooLarge = errors.New("OCI metadata exceeds size limit")

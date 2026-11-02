@@ -96,9 +96,8 @@ plugin: {
 ```
 
 Each `schemas[]` entry pins one CUE module to a directory. mu picks
-these up at bundle time, includes the `.cue` files in the plugin
-artifact, and records the declarations in the OCI manifest so pudl can
-find them on the consumer side.
+these up at bundle time and includes the `.cue` files in the plugin
+bundle.
 
 ## How the data reaches pudl
 
@@ -136,20 +135,10 @@ On the pudl side:
 Raw JSON without the envelope wrapper imports just like before; the
 typed flow is opt-in per artifact.
 
-## Verifying
-
-`mu verify` walks `<projectRoot>/plugins/*` and warns when a plugin
-declares a `mu/<x>` namespace whose `<x>` doesn't match its own name.
-The warning is advisory; it does not fail verification. The intent is
-to catch typos and discourage namespace squatting.
-
 ## Relevant code paths
 
 - `internal/plugin/protocol.go` — `DiscoverResponse.OutputSchema`,
   `OutputSchemas`, and `SchemaRef`.
 - `internal/config/types.go` — `PluginManifest.Schemas`,
   `SchemaDecl`.
-- `internal/coordinator/pluginschemas.go` — `LoadVendoredSchemas`.
-- `internal/schemacache/` — content-addressed cache for vendored CUE.
-- `internal/cas/oci/plugin.go` — `PluginConfig.Schemas` carried in the
-  OCI artifact.
+

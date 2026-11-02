@@ -1,0 +1,6 @@
+{"method":"discover"}
+{"method":"plan","target":{"name":"//etc/motd","toolchain":"remote-file","sources":["files/motd"],"config":{"host":"h.example","path":"/etc/motd"}}}
+{"method":"plan","target":{"name":"//etc/caddy","toolchain":"remote-file","sources":["caddy/Caddy file"],"config":{"host":"h.example","user":"deploy","port":2200,"path":"/etc/caddy/it's","mode":"0640","owner":"root","group":"caddy","make_parents":false,"sudo":true},"sealed_inputs":{"SSH_PASS":"pass:hosts/h"}}}
+{"method":"plan","target":{"name":"//etc/none","toolchain":"remote-file","sources":[],"config":{"host":"h.example","path":"/x"}}}
+{"method":"plan","target":{"name":"//etc/nohost","toolchain":"remote-file","sources":["a"],"config":{"path":"/x"}}}
+{"method":"plan","target":{"name":"//etc/nopath","toolchain":"remote-file","sources":["a"],"config":{"host":"h.example"}}}

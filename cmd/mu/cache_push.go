@@ -24,7 +24,7 @@ import (
 func runCachePush(args []string) int {
 	fs := flag.NewFlagSet("cache push", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	c := newCLIContext("cache push", fs)
+	c := newCLIContext("cache push", fs, useConfig, useVerbose, useOffline)
 	dryRun := fs.Bool("dry-run", false, "list action tags that would be pushed, without pushing")
 	if code, ok := parseFlags(fs, args, "cache push [flags]"); !ok {
 		return code

@@ -1,17 +1,17 @@
 # remote-file plugin
 
-> Implemented in Go using `sdk/muplugin`; the original Babashka version
-> at `plugin.bb` remains in-tree for one release cycle. See
-> `mu guide sdk`.
+> A Go plugin built on `sdk/muplugin` (see `mu guide sdk`). Build the
+> binary before use: `go build -trimpath -o plugins/remote-file/plugin ./plugins/remote-file`.
 
 Ensures a file on a remote host matches a local source file's bytes,
-mode, and owner. SSH-based. Idempotent via `mu build` (always re-asserts).
+mode, and owner. SSH-based. Every `mu build` re-asserts the file (the
+action is impure).
 
 ## Capabilities
 
-- `discover`
+- `discover` — declares a `config_schema`, so mistyped config (e.g.
+  `make_parents: "yes"`) or a missing `host`/`path` fails at plan time.
 - `plan` — emits one action that pushes the source file to the remote path.
-- `observe` — returns `{exists, sha256, mode, owner, group}` for the remote path.
 
 ## Config
 
@@ -30,6 +30,12 @@ mode, and owner. SSH-based. Idempotent via `mu build` (always re-asserts).
 ## Sources
 
 Exactly one file. Zero or more than one → plan error.
+
+## Environment
+
+The action's env is fixed (`PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`);
+`HOME` and `SSH_AUTH_SOCK` are passed through by name (`env_passthrough`) so
+ssh finds its config and agent without host values entering the cache key.
 
 ## Sealed inputs
 
@@ -77,20 +83,3 @@ targets: [{
   sealed_inputs: SSH_PASS: "pass:servers/deploy@example.com"
 }]
 ```
-
-## Observe record schema
-
-```json
-{
-  "_schema": "remote.file",
-  "host": "example.com",
-  "path": "/etc/caddy/Caddyfile",
-  "exists": true,
-  "sha256": "abc123...",
-  "mode": "0644",
-  "owner": "root",
-  "group": "root"
-}
-```
-
-`exists: false` when the path does not exist.

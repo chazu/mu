@@ -9,15 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/chazu/mu/internal/config"
 )
 
 func runVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	ctx := newCLIContext("verify", fs)
+	ctx := newCLIContext("verify", fs, useJSON)
 	fix := fs.Bool("fix", false, "delete corrupt blobs")
 	if code, ok := parseFlags(fs, args, "verify [flags]"); !ok {
 		return code
@@ -127,22 +124,16 @@ func runVerify(args []string) int {
 		}
 	}
 
-	// Plugin schema namespace policing: walk in-tree plugin source dirs,
-	// load each manifest, and error when a "mu/<x>" output_schema or
-	// vendored schema doesn't match the plugin's own name.
-	schemaWarnings := verifyPluginSchemaNamespaces(ctx.ProjectRoot, *jsonOut)
-
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(map[string]any{
-			"ok":              ok,
-			"corrupt":         corrupt,
-			"missing":         missing,
-			"errors":          errCount,
-			"fixed":           *fix && corrupt > 0,
-			"corrupted":       corrupted,
-			"schema_warnings": schemaWarnings,
+			"ok":        ok,
+			"corrupt":   corrupt,
+			"missing":   missing,
+			"errors":    errCount,
+			"fixed":     *fix && corrupt > 0,
+			"corrupted": corrupted,
 		})
 	} else {
 		fmt.Printf("Verified %d blobs: %d ok", ok+corrupt, ok)
@@ -161,82 +152,8 @@ func runVerify(args []string) int {
 		}
 	}
 
-	if corrupt > 0 || missing > 0 || len(schemaWarnings) > 0 {
+	if corrupt > 0 || missing > 0 {
 		return exitFail
 	}
 	return exitOK
-}
-
-// schemaNamespaceWarning is one advisory finding from
-// verifyPluginSchemaNamespaces. Plugin-author convention is that
-// schemas under "mu/<x>" originate with plugin <x>; any other plugin
-// claiming that namespace is a likely mistake.
-type schemaNamespaceWarning struct {
-	Plugin  string `json:"plugin"`            // plugin directory name
-	Module  string `json:"module"`            // schema module that triggered the warning
-	Source  string `json:"source"`            // "output_schema" | "vendored"
-	Reason  string `json:"reason"`            // human-readable detail
-	Version string `json:"version,omitempty"` // version, if known
-}
-
-// verifyPluginSchemaNamespaces walks <projectRoot>/plugins/* and reports
-// errors when a plugin declares (or vendors) a schema in the mu/<x>
-// namespace that doesn't match its own directory name. Returns the list
-// of findings; also prints them to stderr in non-JSON mode.
-func verifyPluginSchemaNamespaces(projectRoot string, jsonOut bool) []schemaNamespaceWarning {
-	pluginsDir := filepath.Join(projectRoot, "plugins")
-	entries, err := os.ReadDir(pluginsDir)
-	if err != nil {
-		return nil
-	}
-	var warnings []schemaNamespaceWarning
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		pluginName := e.Name()
-		dir := filepath.Join(pluginsDir, pluginName)
-		pcfg, err := config.LoadPluginManifest(dir)
-		if err != nil || pcfg.Plugin == nil {
-			continue
-		}
-		for _, decl := range pcfg.Plugin.Schemas {
-			if w, ok := checkMuNamespace(pluginName, decl.Module); !ok {
-				warnings = append(warnings, schemaNamespaceWarning{
-					Plugin:  pluginName,
-					Module:  decl.Module,
-					Source:  "vendored",
-					Version: decl.Version,
-					Reason:  w,
-				})
-			}
-		}
-	}
-	if !jsonOut {
-		for _, w := range warnings {
-			fmt.Fprintf(os.Stderr, "  ERROR plugin %q vendors schema %q: %s\n",
-				w.Plugin, w.Module, w.Reason)
-		}
-	}
-	return warnings
-}
-
-// checkMuNamespace returns ok=false and a reason when module names a
-// "mu/<segment>" path whose <segment> doesn't match pluginName. Modules
-// outside the "mu/" namespace are not policed.
-func checkMuNamespace(pluginName, module string) (string, bool) {
-	const muPrefix = "mu/"
-	if !strings.HasPrefix(module, muPrefix) {
-		return "", true
-	}
-	rest := strings.TrimPrefix(module, muPrefix)
-	// First path segment after "mu/" identifies the plugin-author's namespace.
-	seg := rest
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		seg = rest[:i]
-	}
-	if seg == pluginName {
-		return "", true
-	}
-	return fmt.Sprintf("namespace segment %q does not match plugin name %q", seg, pluginName), false
 }

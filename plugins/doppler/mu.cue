@@ -7,12 +7,3 @@ plugin: {
 	files: ["plugin.bb"]
 	guide: "GUIDE.md"
 }
-targets: [{
-	target:    "build"
-	toolchain: "shell"
-	sources: ["plugin.bb"]
-	config: {
-		command: ["true"]
-		impure: false
-	}
-}]

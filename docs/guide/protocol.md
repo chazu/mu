@@ -44,6 +44,14 @@ METHODS
     Plugins must declare every supported method in `capabilities`.
     `plan` is required only for build/convergence plugins.
 
+    Plan-capable plugins should declare `config_schema` (field name ->
+    {"type", "description", "default", "required"}): mu validates each
+    target's config against it before planning, so a typo or wrong type
+    fails early. When a plan-capable plugin declares none and a target
+    passes it config, mu prints one warning per plugin per run. Plugins
+    that do not plan (secret providers, advisers) take no target config
+    and need no schema.
+
   plan (optional; required for build/convergence plugins)
     Request:  {
       "method": "plan",
@@ -181,13 +189,16 @@ CROSS-TARGET ARTIFACTS
   name → project-relative path). To consume one, declare the path as a
   normal input:
     "inputs": {"cryptolib": "lib/crypto/libcrypto.a"}
-  mu detects that the path is produced by an already-planned action,
-  defers the input digest, and injects an implicit DependsOn edge to the
-  producing action so the consumer runs after the producer. The deferred digest is
-  filled with the produced file's digest before the consumer's cache
-  lookup. Paths are
-  compared after cleaning: outputs relative to the producer's work_dir,
-  inputs relative to the project root ("./x" and "x" match).
+  mu plans every target before wiring inputs, so any input path that
+  another target's action declares as an output is linked, whatever the
+  planning order and whether or not that target is listed in "deps". mu
+  defers the input digest and injects an implicit DependsOn edge to the
+  producing action so the consumer runs after the producer. The deferred
+  digest is filled with the produced file's digest before the consumer's
+  cache lookup. Paths are compared after cleaning: outputs relative to the
+  producer's work_dir, inputs relative to the project root ("./x" and "x"
+  match). Two targets that read each other's outputs (directly or via
+  "deps") are a cycle and fail planning.
 
   Listing a target in "deps" also orders execution on its own: every
   action of the dependent with no predecessor in its own subgraph waits

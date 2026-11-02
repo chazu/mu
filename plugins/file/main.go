@@ -1,9 +1,10 @@
-// file plugin: converge files to a desired state.
+// file plugin: converge local files to a desired state (write content,
+// copy a source, symlink, remove), or capture local files into sealed
+// outputs. Implements discover and plan.
 //
-// Port of the original Babashka plugin (plugin.bb) to Go using sdk/muplugin.
-// Output bytes match the bb version action-for-action so existing scenarios
-// continue to pass. Same minor structural divergences as scratch's Go port
-// (capabilities field added by SDK, omitempty trims empty depends_on/env).
+// Every path in a generated shell command is single-quoted with escaping,
+// so paths containing a quote stay one word (the retired bb version
+// wrapped them in bare quotes).
 package main
 
 import (
@@ -15,8 +16,21 @@ import (
 	"github.com/chazu/mu/sdk/muplugin"
 )
 
+// captureEnv is the capture action's complete environment. The action has
+// sealed outputs, so it is impure, and an impure action with no env would
+// inherit mu's environment; the bb plugin's "env": {} kept it hermetic,
+// but the SDK omits empty maps, so name the system dirs holding bash, cp
+// and chmod. The other actions are pure and get an empty environment with
+// or without an env field.
+var captureEnv = map[string]string{"PATH": "/usr/bin:/bin"}
+
 func main() {
-	(&muplugin.Plugin{
+	newPlugin().Main()
+}
+
+// newPlugin builds the plugin value; tests drive it in-process.
+func newPlugin() *muplugin.Plugin {
+	return &muplugin.Plugin{
 		Name:        "file",
 		Version:     "0.2.0",
 		Description: "Manage local files: copy, template, create, symlink, or remove",
@@ -34,7 +48,7 @@ func main() {
 			"sealed_output_files": map[string]any{"type": "object", "description": "Map of sealed output names to file paths"},
 		},
 		Plan: plan,
-	}).Main()
+	}
 }
 
 func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
@@ -64,7 +78,8 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 					formatKeySet(outKeys), formatKeySet(fileKeys)),
 			}, nil
 		}
-		if path != "" || hasString(cfg, "content") || hasString(cfg, "source") ||
+		_, hasContent := cfg["content"].(string)
+		if path != "" || hasContent || hasString(cfg, "source") ||
 			hasString(cfg, "symlink") || boolVal(cfg, "absent") {
 			return muplugin.PlanResponse{
 				Error: "file: capture mode (sealed_output_files) is mutually exclusive with path/content/source/symlink/absent",
@@ -83,7 +98,8 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 	if sym, ok := cfg["symlink"].(string); ok && sym != "" {
 		return planSymlink(path, sym), nil
 	}
-	if content, ok := cfg["content"].(string); ok && content != "" {
+	// Any string content, even "", selects the write branch (as in bb).
+	if content, ok := cfg["content"].(string); ok {
 		return planWriteContent(cfg, path, content, mode), nil
 	}
 	if src, ok := cfg["source"].(string); ok && src != "" {
@@ -102,19 +118,17 @@ func planAbsent(path string) muplugin.PlanResponse {
 	return muplugin.PlanResponse{
 		Actions: []muplugin.ActionSpec{{
 			ID:        "remove",
-			Command:   []string{"sh", "-c", "rm -f '" + path + "'"},
+			Command:   []string{"sh", "-c", "rm -f " + shellQuote(path)},
 			Inputs:    map[string]string{},
 			Outputs:   []string{},
 			DependsOn: []string{},
-			Env:       map[string]string{},
 		}},
 		Outputs: map[string]string{},
 	}
 }
 
 func planSymlink(path, targetPath string) muplugin.PlanResponse {
-	cmd := "mkdir -p \"$(dirname '" + path + "')\" && " +
-		"ln -sfn '" + targetPath + "' '" + path + "'"
+	cmd := mkdirParent(path) + "ln -sfn " + shellQuote(targetPath) + " " + shellQuote(path)
 	return muplugin.PlanResponse{
 		Actions: []muplugin.ActionSpec{{
 			ID:        "symlink",
@@ -122,15 +136,14 @@ func planSymlink(path, targetPath string) muplugin.PlanResponse {
 			Inputs:    map[string]string{},
 			Outputs:   []string{path},
 			DependsOn: []string{},
-			Env:       map[string]string{},
 		}},
 		Outputs: map[string]string{"file": path},
 	}
 }
 
 func planWriteContent(cfg map[string]any, path, content, mode string) muplugin.PlanResponse {
-	writeCmd := "mkdir -p \"$(dirname '" + path + "')\" && " +
-		"cat > '" + path + "' <<'__MU_EOF__'\n" + content + "\n__MU_EOF__"
+	writeCmd := mkdirParent(path) +
+		"cat > " + shellQuote(path) + " <<'__MU_EOF__'\n" + content + "\n__MU_EOF__"
 	actions := []muplugin.ActionSpec{
 		{
 			ID:        "write",
@@ -138,7 +151,6 @@ func planWriteContent(cfg map[string]any, path, content, mode string) muplugin.P
 			Inputs:    map[string]string{},
 			Outputs:   []string{path},
 			DependsOn: []string{},
-			Env:       map[string]string{},
 		},
 		{
 			ID:        "chmod",
@@ -146,7 +158,6 @@ func planWriteContent(cfg map[string]any, path, content, mode string) muplugin.P
 			Inputs:    map[string]string{},
 			Outputs:   []string{},
 			DependsOn: []string{"write"},
-			Env:       map[string]string{},
 		},
 	}
 	if owner, ok := cfg["owner"].(string); ok && owner != "" {
@@ -159,8 +170,7 @@ func planWriteContent(cfg map[string]any, path, content, mode string) muplugin.P
 }
 
 func planCopySource(cfg map[string]any, path, source, mode string) muplugin.PlanResponse {
-	copyCmd := "mkdir -p \"$(dirname '" + path + "')\" && " +
-		"cp '" + source + "' '" + path + "'"
+	copyCmd := mkdirParent(path) + "cp " + shellQuote(source) + " " + shellQuote(path)
 	actions := []muplugin.ActionSpec{
 		{
 			ID:        "copy",
@@ -168,7 +178,6 @@ func planCopySource(cfg map[string]any, path, source, mode string) muplugin.Plan
 			Inputs:    map[string]string{source: source},
 			Outputs:   []string{path},
 			DependsOn: []string{},
-			Env:       map[string]string{},
 		},
 		{
 			ID:        "chmod",
@@ -176,7 +185,6 @@ func planCopySource(cfg map[string]any, path, source, mode string) muplugin.Plan
 			Inputs:    map[string]string{},
 			Outputs:   []string{},
 			DependsOn: []string{"copy"},
-			Env:       map[string]string{},
 		},
 	}
 	if owner, ok := cfg["owner"].(string); ok && owner != "" {
@@ -199,8 +207,12 @@ func chownAction(cfg map[string]any, owner, path, dep string) muplugin.ActionSpe
 		Inputs:    map[string]string{},
 		Outputs:   []string{},
 		DependsOn: []string{dep},
-		Env:       map[string]string{},
 	}
+}
+
+// mkdirParent is the shell prefix that creates path's parent directory.
+func mkdirParent(path string) string {
+	return "mkdir -p \"$(dirname " + shellQuote(path) + ")\" && "
 }
 
 func planCapture(sealedOut, sealedOutModes, sealedFiles map[string]string) muplugin.PlanResponse {
@@ -229,7 +241,7 @@ func planCapture(sealedOut, sealedOutModes, sealedFiles map[string]string) muplu
 		Inputs:        map[string]string{},
 		Outputs:       []string{},
 		DependsOn:     []string{},
-		Env:           map[string]string{},
+		Env:           captureEnv,
 		SealedOutputs: sealedOut,
 	}
 	if len(sealedOutModes) > 0 {
