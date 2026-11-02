@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func detectIsolation() IsolationLevel {
@@ -62,6 +63,7 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 		"-D", "SOURCE_DIR=" + realWork,
 		"-D", "OUTPUT_DIR=" + outDir,
 		"-D", "TMPDIR=" + tmpDir,
+		"-D", "HOME_DIR=" + filepath.Join(realRoot, "home"),
 		"-D", "ROOT_DIR=" + realRoot,
 	}
 	args = append(args, command...)
@@ -108,16 +110,24 @@ func (s *Sandbox) generateSBPL(network bool) string {
   (subpath (param "ROOT_DIR"))
   (subpath "/bin")
   (subpath "/sbin")
-  (subpath "/usr")
+  ;; /usr minus /usr/local, where host-installed tools live.
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/lib")
+  (subpath "/usr/libexec")
+  (subpath "/usr/share")
   (subpath "/System")
   (subpath "/Applications/Xcode.app/Contents/Developer")
   (subpath "/dev")
-  (subpath "/etc"))
+  ;; /etc is a symlink; the kernel matches the real path.
+  (subpath "/etc")
+  (subpath "/private/etc"))
 
-;; Writable: output + tmp + work dir
+;; Writable: only the sandbox's work/, out/, tmp/ and home/
 (allow file-write*
   (subpath (param "OUTPUT_DIR"))
   (subpath (param "TMPDIR"))
+  (subpath (param "HOME_DIR"))
   (subpath (param "SOURCE_DIR"))
   (literal "/dev/null"))
 
@@ -130,12 +140,58 @@ func (s *Sandbox) generateSBPL(network bool) string {
   (global-name "com.apple.system.notification_center"))
 (allow signal (target self))
 `
+	if grants := s.hostPathRules(); grants != "" {
+		profile += "\n;; Granted host paths (host_paths)\n" + grants
+	}
 	if network {
-		profile += "\n;; Network allowed\n(allow network-outbound)\n(allow network-bind)\n"
+		profile += networkRules
 	} else {
 		profile += "\n;; Network denied\n(deny network-outbound)\n(deny network-inbound)\n(deny network-bind)\n"
 	}
 	return profile
+}
+
+// networkRules is appended for network: true. Besides sockets, macOS clients
+// resolve names through mDNSResponder and verify TLS certificates through
+// trustd/Security, which read the system keychains and trust settings
+// (/private/etc is readable for every action).
+const networkRules = `
+;; Network allowed
+(allow network-outbound)
+(allow network-bind)
+(allow mach-lookup
+  (global-name "com.apple.dnssd.service")
+  (global-name "com.apple.trustd")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.ocspd"))
+(allow file-read*
+  (subpath "/private/var/db/mds")
+  (subpath "/Library/Keychains")
+  (subpath "/System/Library/Keychains")
+  (subpath "/System/Library/Security"))
+`
+
+// hostPathRules allows read and exec of each granted host path. The kernel
+// matches real paths, so a path behind a symlink (/var -> /private/var,
+// /opt/homebrew/bin/go -> ../Cellar/...) is granted under both spellings.
+func (s *Sandbox) hostPathRules() string {
+	var b strings.Builder
+	for _, p := range s.HostPaths {
+		paths := []string{p}
+		if real, err := filepath.EvalSymlinks(p); err == nil && real != p {
+			paths = append(paths, real)
+		}
+		for _, path := range paths {
+			fmt.Fprintf(&b, "(allow file-read* process-exec (subpath %s))\n", sbplString(path))
+		}
+	}
+	return b.String()
+}
+
+// sbplString quotes s as an SBPL string literal.
+func sbplString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // IsSandboxInit always returns false on macOS (no re-exec pattern needed).

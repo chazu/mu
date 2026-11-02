@@ -123,6 +123,11 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			return nil, err
 		}
 
+		hostPaths, err := resolveHostPaths(spec)
+		if err != nil {
+			return nil, err
+		}
+
 		workDir := projectRoot
 		if spec.WorkDir != "" {
 			workDir = filepath.Join(projectRoot, spec.WorkDir)
@@ -224,7 +229,10 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			Inputs:            inputs,
 			InputSources:      inputSources,
 			InputPaths:        inputPaths,
-			Toolchain:         toolchain,
+			Toolchain:         toolchain.files,
+			ToolchainModes:    toolchain.modes,
+			ToolchainLinks:    toolchain.links,
+			HostPaths:         hostPaths,
 			Outputs:           spec.Outputs,
 			DependsOn:         dependsOn,
 			Env:               env,
@@ -246,53 +254,86 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 	return actions, nil
 }
 
-// ToolchainLookup returns the artifact map (relative path -> full digest
-// string) of the named scratch toolchain, building it first when needed. It
-// returns (nil, nil) when no such toolchain is configured.
-type ToolchainLookup func(ctx context.Context, name string) (map[string]string, error)
+// ToolchainLookup returns the manifest of the named scratch toolchain,
+// building it first when needed. It returns (nil, nil) when no such toolchain
+// is configured. Callers must not modify the manifest.
+type ToolchainLookup func(ctx context.Context, name string) (*ToolchainManifest, error)
+
+// resolvedToolchain is the merged sandbox-root tree of an action's toolchains.
+type resolvedToolchain struct {
+	files map[string]cas.Digest
+	modes map[string]uint32
+	links map[string]string
+}
 
 // resolveToolchains merges the artifacts of every toolchain spec names into
-// one sandbox-root artifact set. A raw-binary toolchain stores its binary at
-// the root as "<name>"; it is placed at bin/<name> so it is on the sandbox
-// PATH. The result is nil when the action names no toolchain.
-func resolveToolchains(ctx context.Context, spec plugin.ActionSpec, impure bool, lookup ToolchainLookup) (map[string]cas.Digest, error) {
+// one sandbox-root tree: files with their modes, and in-tree symlinks. A
+// raw-binary toolchain stores its binary at the root as "<name>"; it is placed
+// at bin/<name> so it is on the sandbox PATH. The result is zero when the
+// action names no toolchain.
+func resolveToolchains(ctx context.Context, spec plugin.ActionSpec, impure bool, lookup ToolchainLookup) (resolvedToolchain, error) {
+	var tree resolvedToolchain
 	if len(spec.Toolchains) == 0 {
-		return nil, nil
+		return tree, nil
 	}
 	if impure {
-		return nil, fmt.Errorf("action %q names toolchains %v but is impure; toolchains exist only inside the sandbox, which runs pure actions", spec.ID, spec.Toolchains)
+		return tree, fmt.Errorf("action %q names toolchains %v but is impure; toolchains exist only inside the sandbox, which runs pure actions", spec.ID, spec.Toolchains)
 	}
-	merged := make(map[string]cas.Digest)
+	tree.files = make(map[string]cas.Digest)
 	owner := make(map[string]string)
+	conflict := func(name, rel string) error {
+		return fmt.Errorf("action %q: toolchains %q and %q both provide %q with different content", spec.ID, owner[rel], name, rel)
+	}
 	for _, name := range spec.Toolchains {
-		var artifacts map[string]string
+		var m *ToolchainManifest
 		var err error
 		if lookup != nil {
-			artifacts, err = lookup(ctx, name)
+			m, err = lookup(ctx, name)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("action %q toolchain %q: %w", spec.ID, name, err)
+			return tree, fmt.Errorf("action %q toolchain %q: %w", spec.ID, name, err)
 		}
-		if artifacts == nil {
-			return nil, fmt.Errorf("action %q names unknown toolchain %q (no `from: \"scratch\"` toolchain with that name is configured)", spec.ID, name)
+		if m == nil {
+			return tree, fmt.Errorf("action %q names unknown toolchain %q (no `from: \"scratch\"` toolchain with that name is configured)", spec.ID, name)
 		}
-		_, hasBin := artifacts["bin/"+name]
-		for rel, digest := range artifacts {
+		_, hasBin := m.Artifacts["bin/"+name]
+		_, hasBinLink := m.Symlinks["bin/"+name]
+		for rel, digest := range m.Artifacts {
 			d, err := cas.ParseFullDigest(digest)
 			if err != nil {
-				return nil, fmt.Errorf("action %q toolchain %q artifact %q: %w", spec.ID, name, rel, err)
+				return tree, fmt.Errorf("action %q toolchain %q artifact %q: %w", spec.ID, name, rel, err)
 			}
-			if rel == name && !hasBin {
+			mode, hasMode := m.Modes[rel]
+			if rel == name && !hasBin && !hasBinLink {
 				rel = "bin/" + name
 			}
-			if prev, ok := merged[rel]; ok && prev != d {
-				return nil, fmt.Errorf("action %q: toolchains %q and %q both provide %q with different content", spec.ID, owner[rel], name, rel)
+			prev, seen := tree.files[rel]
+			_, linked := tree.links[rel]
+			if linked || (seen && (prev != d || tree.modes[rel] != mode)) {
+				return tree, conflict(name, rel)
 			}
-			merged[rel] = d
 			owner[rel] = name
+			tree.files[rel] = d
+			if hasMode {
+				if tree.modes == nil {
+					tree.modes = make(map[string]uint32)
+				}
+				tree.modes[rel] = mode
+			}
+		}
+		for rel, target := range m.Symlinks {
+			_, isFile := tree.files[rel]
+			if prev, ok := tree.links[rel]; isFile || (ok && prev != target) {
+				return tree, conflict(name, rel)
+			}
+			owner[rel] = name
+			if tree.links == nil {
+				tree.links = make(map[string]string)
+			}
+			tree.links[rel] = target
 		}
 	}
-	return merged, nil
+	return tree, nil
 }
 
 // resolveEnvPassthrough validates and copies an action's env_passthrough names.
@@ -312,6 +353,57 @@ func resolveEnvPassthrough(spec plugin.ActionSpec) ([]string, error) {
 		seen[name] = struct{}{}
 	}
 	return append([]string(nil), spec.EnvPassthrough...), nil
+}
+
+// resolveHostPaths validates an action's host_paths and records an identity
+// for each: "file:<digest>" for a regular file (its content, read through
+// symlinks), "dir" for a directory. A directory's contents are not hashed:
+// granting one means trusting that host directory, as documented in
+// `mu guide protocol`. Paths must be absolute and clean, and "/" is refused
+// because granting it would undo the sandbox's confinement.
+func resolveHostPaths(spec plugin.ActionSpec) (map[string]string, error) {
+	if len(spec.HostPaths) == 0 {
+		return nil, nil
+	}
+	paths := make(map[string]string, len(spec.HostPaths))
+	for _, p := range spec.HostPaths {
+		// Clean leaves no ".." in an absolute path, so this also rejects them.
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+			return nil, fmt.Errorf("action %q host_paths: %q must be an absolute, clean path (no \"..\")", spec.ID, p)
+		}
+		if filepath.Dir(p) == p {
+			return nil, fmt.Errorf("action %q host_paths: granting %s would disable sandbox confinement", spec.ID, p)
+		}
+		if _, dup := paths[p]; dup {
+			return nil, fmt.Errorf("action %q host_paths: duplicate path %q", spec.ID, p)
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, fmt.Errorf("action %q host_paths: %w", spec.ID, err)
+		}
+		switch {
+		case info.IsDir():
+			paths[p] = "dir"
+		case info.Mode().IsRegular():
+			d, err := hashHostFile(p)
+			if err != nil {
+				return nil, fmt.Errorf("action %q host_paths: %w", spec.ID, err)
+			}
+			paths[p] = "file:" + d.String()
+		default:
+			return nil, fmt.Errorf("action %q host_paths: %s is neither a file nor a directory", spec.ID, p)
+		}
+	}
+	return paths, nil
+}
+
+func hashHostFile(path string) (cas.Digest, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return cas.Digest{}, err
+	}
+	defer f.Close()
+	return cas.ComputeDigest(f)
 }
 
 // openProjectFile allows project-relative paths and absolute paths lexically

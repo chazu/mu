@@ -68,9 +68,21 @@ type Action struct {
 
 	// Toolchain is the merged artifact set (sandbox-root-relative path → CAS
 	// digest) of the scratch toolchains the action names. The executor
-	// unpacks it into the sandbox root; bin/ is on the sandbox PATH. A non-nil
-	// Toolchain sandboxes a pure action even when MU_SANDBOX is off.
+	// unpacks it into the sandbox root; bin/ is on the sandbox PATH.
 	Toolchain map[string]cas.Digest
+
+	// ToolchainModes holds permission bits for Toolchain files; a file
+	// without an entry is unpacked 0755. ToolchainLinks maps sandbox-root
+	// paths to relative, in-tree symlink targets the sandbox recreates. Both
+	// are visible to the command, so both enter the action key.
+	ToolchainModes map[string]uint32
+	ToolchainLinks map[string]string
+
+	// HostPaths maps absolute host paths granted read+exec inside the
+	// sandbox to an identity of what they pointed at when planned:
+	// "file:<digest>" for a regular file, "dir" for a directory (the
+	// directory's contents are trusted, not hashed). Both enter the action key.
+	HostPaths map[string]string
 
 	// InputPaths maps file input names to their project-relative,
 	// slash-separated paths. A sandboxed action finds each such input at

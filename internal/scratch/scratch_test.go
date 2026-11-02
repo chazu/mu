@@ -616,16 +616,19 @@ func TestBuild_RawBinaryInstalledUnderToolchainName(t *testing.T) {
 	}
 }
 
-// Toolchain archives may carry in-tree symlinks. They are extracted (so verify
-// can run through them) but never read into CAS; the build warns instead.
-func TestBuild_InTreeSymlinkIsSkippedWithWarning(t *testing.T) {
+// Toolchain archives may carry in-tree symlinks, including the toolchain
+// binary itself (bin/x -> ../libexec/x). They are recorded as links, never
+// read into CAS, and file modes are recorded alongside the digests.
+func TestBuild_InTreeSymlinksAndModesRecorded(t *testing.T) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
 	body := "#!/bin/sh\necho linked 1.0\n"
-	tw.WriteHeader(&tar.Header{Name: "bin/linked", Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
+	tw.WriteHeader(&tar.Header{Name: "libexec/linked", Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
 	tw.Write([]byte(body))
-	tw.WriteHeader(&tar.Header{Name: "bin/alias", Linkname: "linked", Typeflag: tar.TypeSymlink})
+	tw.WriteHeader(&tar.Header{Name: "share/README", Mode: 0o644, Size: 2, Typeflag: tar.TypeReg})
+	tw.Write([]byte("hi"))
+	tw.WriteHeader(&tar.Header{Name: "bin/linked", Linkname: "../libexec/linked", Typeflag: tar.TypeSymlink})
 	tw.Close()
 	gw.Close()
 	archive := buf.Bytes()
@@ -646,11 +649,17 @@ func TestBuild_InTreeSymlinkIsSkippedWithWarning(t *testing.T) {
 	if err != nil || manifest == nil {
 		t.Fatalf("Lookup = %v, %v", manifest, err)
 	}
-	if _, ok := manifest.Artifacts["bin/alias"]; ok || len(manifest.Artifacts) != 1 {
-		t.Fatalf("artifacts = %v, want only bin/linked", manifest.Artifacts)
+	if _, ok := manifest.Artifacts["bin/linked"]; ok || len(manifest.Artifacts) != 2 {
+		t.Fatalf("artifacts = %v, want libexec/linked and share/README", manifest.Artifacts)
 	}
-	if !strings.Contains(warnings.String(), "bin/alias") {
-		t.Fatalf("no warning for skipped symlink: %q", warnings.String())
+	if manifest.Symlinks["bin/linked"] != "../libexec/linked" {
+		t.Fatalf("symlinks = %v", manifest.Symlinks)
+	}
+	if manifest.Modes["libexec/linked"] != 0o755 || manifest.Modes["share/README"] != 0o644 {
+		t.Fatalf("modes = %v", manifest.Modes)
+	}
+	if warnings.Len() != 0 {
+		t.Fatalf("unexpected warning: %q", warnings.String())
 	}
 }
 
@@ -671,15 +680,18 @@ func TestStoreArtifactsDoesNotReadThroughSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := newTestBuilder(t)
-	artifacts, skipped, err := b.storeArtifacts(context.Background(), dir)
+	tree, err := b.storeArtifacts(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("storeArtifacts: %v", err)
 	}
-	if len(artifacts) != 1 || artifacts["bin/tool"] == "" {
-		t.Fatalf("artifacts = %v, want only bin/tool", artifacts)
+	if len(tree.artifacts) != 1 || tree.artifacts["bin/tool"] == "" {
+		t.Fatalf("artifacts = %v, want only bin/tool", tree.artifacts)
 	}
-	if strings.Join(skipped, ",") != "bin/leak,bindir" {
-		t.Fatalf("skipped = %v", skipped)
+	if strings.Join(tree.skipped, ",") != "bin/leak" {
+		t.Fatalf("skipped = %v", tree.skipped)
+	}
+	if len(tree.links) != 1 || tree.links["bindir"] != "bin" {
+		t.Fatalf("links = %v, want the in-tree bindir -> bin", tree.links)
 	}
 	if has, _ := b.Store.Has(context.Background(), cas.NewSHA256(sha256Hex([]byte("PRIVATE KEY")))); has {
 		t.Fatal("symlink target content was stored in CAS")

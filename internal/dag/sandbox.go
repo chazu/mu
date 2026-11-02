@@ -14,20 +14,22 @@ import (
 	"github.com/chazu/mu/internal/sandbox"
 )
 
-// SandboxEnvVar opts every pure action into the sandbox when set to "1".
-// Until plugins stop depending on host-installed tools (mu-oa1.3, mu-oa1.4)
-// the sandbox is off by default; actions that name scratch toolchains are
-// sandboxed regardless, since their tools exist only inside the sandbox.
-const SandboxEnvVar = "MU_SANDBOX"
-
-// SandboxEnabled reports whether MU_SANDBOX=1 is set in mu's environment.
-func SandboxEnabled() bool { return os.Getenv(SandboxEnvVar) == "1" }
-
-// Sandboxed reports whether the executor runs a in the sandbox. Impure
-// actions (side effects on the host) always run on the host. Pure actions run
-// in the sandbox when MU_SANDBOX=1 or when they name scratch toolchains.
+// Sandboxed reports whether the executor runs a in the sandbox: every pure
+// action does. Impure actions (side effects on the host) run on the host, and
+// so do sealed-output actions, which are impure by definition (the coordinator
+// marks them so; this guards actions built directly).
 func (a *Action) Sandboxed() bool {
-	return !a.Impure && (a.Toolchain != nil || SandboxEnabled())
+	return !a.Impure && len(a.SealedOutputs) == 0
+}
+
+// Isolation names the isolation the executor applies to a on this host:
+// "seatbelt", "namespace" or "copy" for a pure (sandboxed) action, "none" for
+// an impure one. Build manifests record it per action.
+func (a *Action) Isolation() string {
+	if !a.Sandboxed() {
+		return "none"
+	}
+	return sandbox.DetectedLevel().String()
 }
 
 // projectBase is the directory the sandbox's work tree mirrors: the project
@@ -89,8 +91,9 @@ func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env, sealedF
 	}
 	defer sb.Cleanup()
 	sb.Stdout = e.SubprocessStdout
+	sb.HostPaths = sortedKeys(a.HostPaths)
 
-	if err := sb.UnpackToolchain(ctx, a.Toolchain); err != nil {
+	if err := sb.UnpackToolchain(ctx, a.Toolchain, a.ToolchainModes, a.ToolchainLinks); err != nil {
 		return -1, fmt.Errorf("unpack toolchain: %w", err)
 	}
 	if err := e.materializeInputs(ctx, sb, a); err != nil {

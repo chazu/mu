@@ -19,6 +19,12 @@ type ManifestAction struct {
 	Cached   bool              `json:"cached"`
 	ExitCode int               `json:"exit_code"`
 	Outputs  map[string]string `json:"outputs,omitempty"` // name -> digest string
+	// Isolation is how mu isolates the action on the building host:
+	// "seatbelt", "namespace" or "copy" for pure (sandboxed) actions, "none"
+	// for impure ones. Copy isolation enforces neither network:false nor
+	// filesystem confinement. A cached action did not run; its value is the
+	// isolation this host applies to it.
+	Isolation string `json:"isolation,omitempty"`
 }
 
 // Manifest is the structured output of a build run.
@@ -49,6 +55,8 @@ func NewManifest(result *BuildResult, execResult *dag.ExecuteResult, targets []c
 			ID:       s.ID,
 			Cached:   s.Cached,
 			ExitCode: s.ExitCode,
+
+			Isolation: s.Isolation,
 		}
 		if len(s.Outputs) > 0 {
 			ma.Outputs = make(map[string]string, len(s.Outputs))
@@ -64,6 +72,8 @@ func NewManifest(result *BuildResult, execResult *dag.ExecuteResult, targets []c
 			ID:       s.ID,
 			Cached:   false,
 			ExitCode: s.ExitCode,
+
+			Isolation: s.Isolation,
 		}
 		if len(s.Outputs) > 0 {
 			ma.Outputs = make(map[string]string, len(s.Outputs))

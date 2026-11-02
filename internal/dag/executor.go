@@ -28,6 +28,10 @@ type ActionStatus struct {
 	// from cache, 1 if executed successfully on the first try, >1 if
 	// retries happened. Only meaningful for actions with Retries > 0.
 	Attempts int
+
+	// Isolation is Action.Isolation(): how the action is isolated on this
+	// host ("seatbelt", "namespace", "copy", or "none" for impure actions).
+	Isolation string
 }
 
 // ExecuteResult holds the outcome of a full DAG execution.
@@ -136,6 +140,7 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 			defer wg.Done()
 			for a := range ready {
 				status := e.executeAction(ctx, a)
+				status.Isolation = a.Isolation()
 				done <- status
 			}
 		}()

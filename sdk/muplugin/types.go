@@ -125,6 +125,13 @@ type ActionSpec struct {
 	// run in the sandbox, impure actions run on the host.
 	Toolchains []string `json:"toolchains,omitempty"`
 
+	// HostPaths grants absolute host paths (files or directories) read and
+	// exec access inside the sandbox, for tools that cannot be scratch
+	// toolchains (e.g. a Homebrew install). Each path and an identity of what
+	// it points at enter the action key: a file's content digest, or only the
+	// path for a directory (you are trusting that host directory).
+	HostPaths []string `json:"host_paths,omitempty"`
+
 	// TimeoutS is the per-attempt wall-clock timeout in seconds. 0 = no
 	// timeout (legacy). Applies to all actions regardless of Network.
 	TimeoutS int `json:"timeout_s,omitempty"`

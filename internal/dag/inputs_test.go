@@ -25,8 +25,9 @@ func runProducerConsumer(t *testing.T, store cas.Store, workDir, content string,
 	}
 	producer := &dag.Action{
 		ID: "produce", Command: []string{"sh", "-c", "cp seed.txt mid.txt"},
-		Inputs:  map[string]cas.Digest{"seed.txt": seed},
-		Outputs: []string{"mid.txt"}, Env: map[string]string{}, WorkDir: workDir, Impure: producerImpure,
+		Inputs:     map[string]cas.Digest{"seed.txt": seed},
+		InputPaths: map[string]string{"seed.txt": "seed.txt"},
+		Outputs:    []string{"mid.txt"}, Env: map[string]string{}, WorkDir: workDir, Impure: producerImpure,
 	}
 	consumer := &dag.Action{
 		ID: "consume", Command: []string{"sh", "-c", "cp mid.txt out.txt"},
@@ -34,6 +35,10 @@ func runProducerConsumer(t *testing.T, store cas.Store, workDir, content string,
 		InputSources: map[string]dag.InputSource{"in": src},
 		Outputs:      []string{"out.txt"}, Env: map[string]string{}, WorkDir: workDir,
 		DependsOn: []string{"produce"},
+	}
+	if src.OutputPath != "" {
+		// Where the sandboxed consumer finds the named output.
+		consumer.InputPaths = map[string]string{"in": src.OutputPath}
 	}
 	g := dag.NewGraph()
 	if err := g.AddAction(producer); err != nil {

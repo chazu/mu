@@ -150,6 +150,7 @@ type planAction struct {
 	Retries           int               `json:"retries,omitempty"`
 	RetryBackoffMs    int               `json:"retry_backoff_ms,omitempty"`
 	Toolchain         map[string]string `json:"toolchain,omitempty"`
+	HostPaths         map[string]string `json:"host_paths,omitempty"`  // granted host path -> identity
 	InputPaths        map[string]string `json:"input_paths,omitempty"` // input name -> project-relative path
 	Sandboxed         bool              `json:"sandboxed,omitempty"`
 }
@@ -195,7 +196,7 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 			SealedOutputs: a.SealedOutputs, SealedOutputModes: a.SealedOutputModes,
 			Network: a.Network, WorkDir: a.WorkDir, ProjectRoot: a.ProjectRoot, Impure: a.Impure,
 			TimeoutS: a.TimeoutS, Retries: a.Retries, RetryBackoffMs: a.RetryBackoffMs,
-			Toolchain: toolchain, InputPaths: a.InputPaths, Sandboxed: a.Sandboxed(),
+			Toolchain: toolchain, HostPaths: a.HostPaths, InputPaths: a.InputPaths, Sandboxed: a.Sandboxed(),
 		})
 	}
 

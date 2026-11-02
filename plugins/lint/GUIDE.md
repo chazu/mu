@@ -27,11 +27,23 @@ CONFIG FIELDS
                  ...); when set it replaces it, so include PATH.
   working_dir    Working directory for the command, relative to the
                  project root (optional; becomes the action's work_dir).
+  toolchains     Scratch toolchains the command needs, e.g. ["go"]
+                 (optional). Naming any makes the check pure: it runs in
+                 mu's sandbox with only its sources and those toolchains,
+                 and its result is cached. Ignored with fix: true.
+  network        Allow network access (optional, default false), e.g. so
+                 a sandboxed `go vet` can download modules.
 
 EXAMPLES
 
   Go vet:
     {"command": ["go", "vet", "./..."]}
+
+  Go vet in the sandbox with the project's "go" scratch toolchain
+  (sources must then cover go.mod, go.sum, every package and its
+  go:embed files):
+    {"command": ["go", "vet", "./..."], "toolchains": ["go"],
+     "network": true, "env": {"GOTOOLCHAIN": "local", "GOFLAGS": "-modcacherw"}}
 
   Gofmt check (`gofmt -l` exits 0 even when it lists files, so wrap
   it to fail on any output):
@@ -61,9 +73,11 @@ EXAMPLES
 
 ACTIONS GENERATED
 
-  lint    Runs command (or fix_command when fix is true) in the
-          project tree. The action is impure, so it is never cached and
-          re-runs on every build; a non-zero exit fails the build.
+  lint    Runs command (or fix_command when fix is true). Without
+          toolchains (and always for a fix) it runs in the project tree
+          as an impure action, never cached, re-run on every build. With
+          toolchains it is a pure, sandboxed, cached action. A non-zero
+          exit fails the build.
 
 CAPABILITIES
 

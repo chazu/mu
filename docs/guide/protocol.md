@@ -145,6 +145,18 @@ ACTION SPEC FIELDS
                       raw binary "<name>" lands at bin/<name>) and hashed into
                       the action key. Naming one sandboxes the action. An
                       unknown name is a plan error. See `mu guide sandbox`.
+  host_paths          []string — absolute, clean host paths (files or
+                      directories) granted read+exec inside the sandbox, for
+                      tools that cannot be scratch toolchains (optional).
+                      Seatbelt allows each path (and its symlink-resolved
+                      real path); Linux namespaces bind-mount it read-only at
+                      the same path; copy isolation needs no grant. "/" is
+                      refused. Identity in the action key: the path plus,
+                      for a file, its content digest (taken at plan time);
+                      for a directory, only the path — granting a directory
+                      means trusting whatever it holds, so prefer granting
+                      specific files or a scratch toolchain when the tool's
+                      version must invalidate the cache.
   timeout_s           int — per-attempt wall-clock timeout in seconds (optional).
   retries             int — additional attempts on failure (network actions only).
   retry_backoff_ms    int — sleep between retries.

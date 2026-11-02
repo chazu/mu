@@ -28,7 +28,7 @@ type Builder struct {
 	Store    cas.Store
 	Registry *coordinator.ToolchainRegistry
 	CacheDir string    // directory for downloaded archives and extracted trees
-	Warnings io.Writer // non-fatal notices (skipped symlinks); nil means os.Stderr
+	Warnings io.Writer // non-fatal notices (skipped out-of-tree symlinks); nil means os.Stderr
 }
 
 // Build processes all toolchains in cfg. For each toolchain it checks the
@@ -110,23 +110,25 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	}
 
 	// Build manifest by walking extracted files and storing each in CAS.
-	artifacts, skipped, err := b.storeArtifacts(ctx, extractDir)
+	tree, err := b.storeArtifacts(ctx, extractDir)
 	if err != nil {
 		return fmt.Errorf("store artifacts: %w", err)
 	}
-	if len(skipped) > 0 {
+	if len(tree.skipped) > 0 {
 		w := b.Warnings
 		if w == nil {
 			w = os.Stderr
 		}
-		fmt.Fprintf(w, "warning: toolchain %s %s: %d symlink(s) not stored (toolchain manifests hold regular files only): %s\n",
-			name, version, len(skipped), strings.Join(skipped, ", "))
+		fmt.Fprintf(w, "warning: toolchain %s %s: %d symlink(s) leaving the toolchain tree not stored: %s\n",
+			name, version, len(tree.skipped), strings.Join(tree.skipped, ", "))
 	}
 
 	manifest := &coordinator.ToolchainManifest{
 		Name:      name,
 		Version:   version,
-		Artifacts: artifacts,
+		Artifacts: tree.artifacts,
+		Modes:     tree.modes,
+		Symlinks:  tree.links,
 	}
 
 	if err := b.Registry.Register(ctx, manifest); err != nil {
@@ -136,18 +138,29 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	return nil
 }
 
-// storeArtifacts walks dir and stores each regular file in CAS, returning a
-// map of slash-separated relative path -> CAS digest string. Symlinks are
+// storedTree is a toolchain tree as recorded in its manifest: slash-separated
+// relative paths of regular files (CAS digest strings and permission bits) and
+// of in-tree symlinks (their relative targets). skipped lists symlinks that
+// leave the tree, which are not recorded.
+type storedTree struct {
+	artifacts map[string]string
+	modes     map[string]uint32
+	links     map[string]string
+	skipped   []string
+}
+
+// storeArtifacts walks dir and stores each regular file in CAS. Symlinks are
 // never read through (an archive could point one at ~/.ssh and get its
-// content into CAS); the manifest cannot represent links, so they are
-// returned in skipped instead.
-func (b *Builder) storeArtifacts(ctx context.Context, dir string) (artifacts map[string]string, skipped []string, err error) {
+// content into CAS): a relative link that stays inside the tree is recorded
+// as a link, so the sandbox can recreate it; any other link is skipped.
+func (b *Builder) storeArtifacts(ctx context.Context, dir string) (tree storedTree, err error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, nil, err
+		return tree, err
 	}
 	defer root.Close()
-	artifacts = make(map[string]string)
+	tree.artifacts = make(map[string]string)
+	tree.modes = make(map[string]uint32)
 	err = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -156,7 +169,18 @@ func (b *Builder) storeArtifacts(ctx context.Context, dir string) (artifacts map
 		case d.IsDir():
 			return nil
 		case d.Type()&fs.ModeSymlink != 0:
-			skipped = append(skipped, rel)
+			target, err := root.Readlink(rel)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", rel, err)
+			}
+			if filepath.IsAbs(target) || !filepath.IsLocal(filepath.Join(filepath.Dir(rel), target)) {
+				tree.skipped = append(tree.skipped, rel)
+				return nil
+			}
+			if tree.links == nil {
+				tree.links = make(map[string]string)
+			}
+			tree.links[rel] = target
 			return nil
 		case !d.Type().IsRegular():
 			return fmt.Errorf("%s: unsupported file type %s", rel, d.Type())
@@ -166,18 +190,20 @@ func (b *Builder) storeArtifacts(ctx context.Context, dir string) (artifacts map
 			return fmt.Errorf("open %s: %w", rel, err)
 		}
 		defer f.Close()
-		if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		info, err := f.Stat()
+		if err != nil || !info.Mode().IsRegular() {
 			return fmt.Errorf("open %s: not a regular file", rel)
 		}
 		dgst, err := b.Store.Put(ctx, f)
 		if err != nil {
 			return fmt.Errorf("put %s: %w", rel, err)
 		}
-		artifacts[rel] = dgst.String()
+		tree.artifacts[rel] = dgst.String()
+		tree.modes[rel] = uint32(info.Mode().Perm())
 		return nil
 	})
-	sort.Strings(skipped)
-	return artifacts, skipped, err
+	sort.Strings(tree.skipped)
+	return tree, err
 }
 
 // verify runs "<name> --version" and checks for a zero exit code.

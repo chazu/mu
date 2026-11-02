@@ -23,8 +23,8 @@ func TestCorruptCachedBlobReexecutes(t *testing.T) {
 		t.Helper()
 		g := dag.NewGraph()
 		if err := g.AddAction(&dag.Action{
-			ID: "A", Command: []string{"sh", "-c", "printf fresh > " + out},
-			Outputs: []string{out}, Env: map[string]string{}, WorkDir: workDir,
+			ID: "A", Command: []string{"sh", "-c", "printf fresh > out.txt"},
+			Outputs: []string{"out.txt"}, Env: map[string]string{}, WorkDir: workDir,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func TestCorruptCachedBlobReexecutes(t *testing.T) {
 	if first.Cached {
 		t.Fatal("cold build hit cache")
 	}
-	blob, err := store.BlobPath(first.Outputs[out])
+	blob, err := store.BlobPath(first.Outputs["out.txt"])
 	if err != nil {
 		t.Fatal(err)
 	}

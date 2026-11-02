@@ -18,8 +18,11 @@ func fakeDigest(s string) string {
 }
 
 func staticToolchains(m map[string]map[string]string) ToolchainLookup {
-	return func(_ context.Context, name string) (map[string]string, error) {
-		return m[name], nil
+	return func(_ context.Context, name string) (*ToolchainManifest, error) {
+		if m[name] == nil {
+			return nil, nil
+		}
+		return &ToolchainManifest{Name: name, Artifacts: m[name]}, nil
 	}
 }
 
@@ -43,6 +46,40 @@ func TestResolveToolchainsMergesArtifacts(t *testing.T) {
 	}
 	if !actions[0].Sandboxed() {
 		t.Fatal("an action naming toolchains must be sandboxed")
+	}
+}
+
+// Modes and symlinks from the manifest reach the action; a raw binary's
+// mode follows it to bin/<name>.
+func TestResolveToolchainsModesAndSymlinks(t *testing.T) {
+	lookup := func(_ context.Context, name string) (*ToolchainManifest, error) {
+		switch name {
+		case "tool":
+			return &ToolchainManifest{
+				Artifacts: map[string]string{"libexec/tool": fakeDigest("tool"), "share/doc": fakeDigest("doc")},
+				Modes:     map[string]uint32{"libexec/tool": 0o755, "share/doc": 0o644},
+				Symlinks:  map[string]string{"bin/tool": "../libexec/tool"},
+			}, nil
+		case "raw":
+			return &ToolchainManifest{Artifacts: map[string]string{"raw": fakeDigest("raw")}, Modes: map[string]uint32{"raw": 0o755}}, nil
+		}
+		return nil, nil
+	}
+	actions, err := Resolve(context.Background(), []plugin.ActionSpec{{
+		ID: "a", Command: []string{"tool"}, Toolchains: []string{"tool", "raw"},
+	}}, t.TempDir(), nil, nil, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := actions[0]
+	if a.ToolchainLinks["bin/tool"] != "../libexec/tool" || len(a.ToolchainLinks) != 1 {
+		t.Fatalf("links = %v", a.ToolchainLinks)
+	}
+	if a.ToolchainModes["share/doc"] != 0o644 || a.ToolchainModes["bin/raw"] != 0o755 {
+		t.Fatalf("modes = %v", a.ToolchainModes)
+	}
+	if _, ok := a.Toolchain["bin/tool"]; ok {
+		t.Fatal("a symlink was resolved into a file artifact")
 	}
 }
 
@@ -112,11 +149,11 @@ func TestToolchainLookupUsesRegistryAndConfig(t *testing.T) {
 		{Name: "zig", From: "scratch", Config: config.ToolchainConfig{Version: "0.1"}},
 	}}}
 	lookup := c.toolchainLookup(registry)
-	if got, err := lookup(context.Background(), "go"); err != nil || got["bin/go"] != fakeDigest("go") {
+	if got, err := lookup(context.Background(), "go"); err != nil || got.Artifacts["bin/go"] != fakeDigest("go") {
 		t.Fatalf("registered toolchain: %v, %v", got, err)
 	}
 	// A fresh registry finds the CAS receipt by configured version.
-	if got, err := c.toolchainLookup(NewToolchainRegistry(store))(context.Background(), "go"); err != nil || got["bin/go"] == "" {
+	if got, err := c.toolchainLookup(NewToolchainRegistry(store))(context.Background(), "go"); err != nil || got.Artifacts["bin/go"] == "" {
 		t.Fatalf("receipt lookup: %v, %v", got, err)
 	}
 	if got, err := lookup(context.Background(), "nope"); err != nil || got != nil {

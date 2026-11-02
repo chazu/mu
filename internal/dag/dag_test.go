@@ -341,22 +341,25 @@ func newStore(t *testing.T) cas.Store {
 
 func TestExecutorLinearChain(t *testing.T) {
 	workDir := t.TempDir()
-	outA := filepath.Join(workDir, "a.txt")
 	outB := filepath.Join(workDir, "b.txt")
 
 	g := dag.NewGraph()
 	_ = g.AddAction(&dag.Action{
 		ID:      "A",
-		Command: []string{"sh", "-c", "echo hello > " + outA},
-		Outputs: []string{outA},
+		Command: []string{"sh", "-c", "echo hello > a.txt"},
+		Outputs: []string{"a.txt"},
 		WorkDir: workDir,
 	})
+	// Pure actions are sandboxed, so B reads A's output as a declared input.
 	_ = g.AddAction(&dag.Action{
-		ID:        "B",
-		Command:   []string{"sh", "-c", "cat " + outA + " > " + outB},
-		Outputs:   []string{outB},
-		DependsOn: []string{"A"},
-		WorkDir:   workDir,
+		ID:           "B",
+		Command:      []string{"sh", "-c", "cat a.txt > b.txt"},
+		Inputs:       map[string]cas.Digest{"a": {}},
+		InputSources: map[string]dag.InputSource{"a": {ProducerID: "A", OutputPath: "a.txt"}},
+		InputPaths:   map[string]string{"a": "a.txt"},
+		Outputs:      []string{"b.txt"},
+		DependsOn:    []string{"A"},
+		WorkDir:      workDir,
 	})
 
 	exec := &dag.Executor{Store: newStore(t), Workers: 2}
@@ -382,15 +385,14 @@ func TestExecutorLinearChain(t *testing.T) {
 
 func TestExecutorCacheHit(t *testing.T) {
 	workDir := t.TempDir()
-	outA := filepath.Join(workDir, "a.txt")
 
 	store := newStore(t)
 	makeGraph := func() *dag.Graph {
 		g := dag.NewGraph()
 		_ = g.AddAction(&dag.Action{
 			ID:      "A",
-			Command: []string{"sh", "-c", "echo cached > " + outA},
-			Outputs: []string{outA},
+			Command: []string{"sh", "-c", "echo cached > a.txt"},
+			Outputs: []string{"a.txt"},
 			WorkDir: workDir,
 		})
 		return g

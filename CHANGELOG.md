@@ -7,6 +7,16 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **Every pure action runs in the sandbox.** `MU_SANDBOX` is gone: pure
+  actions see only their declared inputs, named scratch toolchains (now
+  with file modes and in-tree symlinks), granted `host_paths` and system
+  directories; impure actions run on the host. `network: false` and
+  filesystem confinement are kernel-enforced under Seatbelt and Linux
+  namespaces; with copy isolation mu warns once, and build manifests record
+  each action's `isolation`. Pure actions must declare relative outputs.
+  The go plugin and `//lint` targets build with the scratch go toolchain
+  (1.26.10) inside the sandbox, downloading modules with `network: true`;
+  the go plugin's separate `mod-download` action is gone.
 - **`pass` and `keypair-gen` are Go plugins that must be built.** Their
   `plugin.bb` files are gone and each manifest's entrypoint is a compiled
   binary named `plugin`, which is not committed. Build it before a project

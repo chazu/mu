@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +132,23 @@ func TestNewManifestValidJSON(t *testing.T) {
 	}
 	if len(roundTrip.Actions) != 3 {
 		t.Errorf("round-trip Actions count = %d, want 3", len(roundTrip.Actions))
+	}
+}
+
+func TestNewManifestRecordsIsolation(t *testing.T) {
+	execResult := &dag.ExecuteResult{
+		Completed: []dag.ActionStatus{{ID: "pure", Isolation: "seatbelt"}, {ID: "apply", Isolation: "none"}},
+		Failed:    []dag.ActionStatus{{ID: "bad", ExitCode: 1, Isolation: "copy"}},
+	}
+	manifest := NewManifest(&BuildResult{ExecResult: execResult}, execResult, nil, 0)
+	data, err := json.Marshal(manifest.Actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"id":"pure"`, `"isolation":"seatbelt"`, `"isolation":"none"`, `"isolation":"copy"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("manifest actions %s lack %s", data, want)
+		}
 	}
 }
 

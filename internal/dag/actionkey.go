@@ -21,8 +21,8 @@ import (
 // digests identify upstream content. Timeout/retry policy does not identify a
 // successful build's artifacts. The checkout location does not either: only
 // the project-relative work directory is hashed (v4), never the project root.
-// Whether the action runs sandboxed is hashed, so enabling MU_SANDBOX does not
-// reuse results produced on the bare host.
+// Whether the action runs sandboxed is hashed, so results produced on the bare
+// host by older mu versions (before every pure action was sandboxed) never hit.
 func ComputeActionKey(a *Action) cas.ActionKey {
 	h := sha256.New()
 	field := func(parts ...string) {
@@ -57,6 +57,15 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	}
 	for _, name := range sortedKeys(a.Toolchain) {
 		field("toolchain", name, a.Toolchain[name].String())
+	}
+	for _, name := range sortedKeys(a.ToolchainModes) {
+		field("toolchain_mode", name, strconv.FormatUint(uint64(a.ToolchainModes[name]), 8))
+	}
+	for _, name := range sortedKeys(a.ToolchainLinks) {
+		field("toolchain_link", name, a.ToolchainLinks[name])
+	}
+	for _, path := range sortedKeys(a.HostPaths) {
+		field("host_path", path, a.HostPaths[path])
 	}
 	field("sandbox", strconv.FormatBool(a.Sandboxed()))
 	for _, name := range sortedStrings(a.Outputs) {

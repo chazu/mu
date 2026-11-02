@@ -29,15 +29,6 @@ func TestActionKey_PureDefaultEqualsExplicitCleanEnvironment(t *testing.T) {
 	}
 }
 
-func TestActionKey_BareAndEmptySandboxDiffer(t *testing.T) {
-	t.Setenv(dag.SandboxEnvVar, "") // with MU_SANDBOX=1 both would be sandboxed
-	a, b := baseAction(), baseAction()
-	b.Toolchain = map[string]cas.Digest{}
-	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
-		t.Fatal("bare and sandbox execution have the same key")
-	}
-}
-
 func TestActionKey_DelimitersCannotAliasFields(t *testing.T) {
 	cases := []struct {
 		name string
@@ -62,6 +53,9 @@ func TestActionKey_ExecutionDeclarationsAffectKey(t *testing.T) {
 		"outputs":    func(a *dag.Action) { a.Outputs = []string{"new.txt"} },
 		"toolchain":  func(a *dag.Action) { a.Toolchain = map[string]cas.Digest{"bin/cc": cas.NewSHA256("cc")} },
 		"input_path": func(a *dag.Action) { a.InputPaths = map[string]string{"src": "extra.c"} },
+		"host_path":  func(a *dag.Action) { a.HostPaths = map[string]string{"/opt/tools": "dir"} },
+		"tool_mode":  func(a *dag.Action) { a.ToolchainModes = map[string]uint32{"bin/cc": 0o644} },
+		"tool_link":  func(a *dag.Action) { a.ToolchainLinks = map[string]string{"bin/cc": "../libexec/cc"} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, b := baseAction(), baseAction()
@@ -70,6 +64,15 @@ func TestActionKey_ExecutionDeclarationsAffectKey(t *testing.T) {
 				t.Fatal("changed declaration did not invalidate the key")
 			}
 		})
+	}
+}
+
+func TestActionKey_HostPathIdentityAffectsKey(t *testing.T) {
+	a, b := baseAction(), baseAction()
+	a.HostPaths = map[string]string{"/opt/tool": "file:" + cas.NewSHA256("v1").String()}
+	b.HostPaths = map[string]string{"/opt/tool": "file:" + cas.NewSHA256("v2").String()}
+	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {
+		t.Fatal("changed host file content did not invalidate the key")
 	}
 }
 

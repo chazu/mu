@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/chazu/mu/internal/cas"
 )
@@ -31,6 +32,36 @@ const (
 	IsolationNamespace                       // Linux user/mount/PID/net namespaces
 )
 
+// String names the level as build manifests record it.
+func (l IsolationLevel) String() string {
+	switch l {
+	case IsolationSeatbelt:
+		return "seatbelt"
+	case IsolationNamespace:
+		return "namespace"
+	default:
+		return "copy"
+	}
+}
+
+var (
+	detectOnce sync.Once
+	detected   IsolationLevel
+)
+
+// DetectedLevel is the isolation sandboxes get on this host, probed once per
+// process. When it is copy isolation, a one-time warning goes to stderr: the
+// sandbox then confines nothing.
+func DetectedLevel() IsolationLevel {
+	detectOnce.Do(func() {
+		detected = detectIsolation()
+		if detected == IsolationCopy {
+			fmt.Fprintln(os.Stderr, "mu: sandbox: kernel isolation unavailable on this host; network:false and filesystem confinement are NOT enforced")
+		}
+	})
+	return detected
+}
+
 // Sandbox manages a temporary rootfs for executing a build action.
 type Sandbox struct {
 	rootDir   string         // the temp directory serving as our rootfs
@@ -42,6 +73,12 @@ type Sandbox struct {
 	// Stdout overrides where the sandboxed command's stdout is written.
 	// Nil means os.Stdout.
 	Stdout io.Writer
+
+	// HostPaths are absolute host paths (files or directories) the command
+	// may read and execute: Seatbelt allows them in the profile, Linux
+	// namespaces bind-mount them read-only at the same path. Copy isolation
+	// confines nothing, so they need no grant there.
+	HostPaths []string
 }
 
 // Level returns the actual isolation level achieved by this sandbox.
@@ -65,7 +102,7 @@ func New(store cas.Store) (*Sandbox, error) {
 	}
 
 	// Create standard subdirectories.
-	for _, d := range []string{"bin", "work", "out", "tmp"} {
+	for _, d := range []string{"bin", "work", "out", "tmp", "home"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			os.RemoveAll(root)
 			return nil, fmt.Errorf("sandbox: create subdir %s: %w", d, err)
@@ -76,7 +113,7 @@ func New(store cas.Store) (*Sandbox, error) {
 		rootDir:   root,
 		workDir:   filepath.Join(root, "work"),
 		store:     store,
-		isolation: detectIsolation(),
+		isolation: DetectedLevel(),
 	}, nil
 }
 
@@ -95,31 +132,67 @@ func (s *Sandbox) WorkDir() string {
 // masquerade as an action input, and the others are mount points or
 // runtime-managed (tmp/, out/, sealed/, and Linux's dev/ and proc/).
 var reservedRootDirs = map[string]bool{
-	"work": true, "out": true, "tmp": true, "sealed": true,
+	"work": true, "out": true, "tmp": true, "home": true, "sealed": true,
 	"dev": true, "proc": true, ".pivot_root": true,
 }
 
-// UnpackToolchain extracts all artifacts from a toolchain manifest into the
-// sandbox's rootfs. Each artifact is fetched from CAS by digest and written
-// to its relative path under the root directory.
-func (s *Sandbox) UnpackToolchain(ctx context.Context, artifacts map[string]cas.Digest) error {
+// UnpackToolchain lays a toolchain tree out in the sandbox's rootfs. Each
+// artifact is fetched from CAS by digest and written to its relative path
+// under the root directory with its recorded permission bits (0755 when
+// modes has no entry). Then each symlink in links is recreated; its target
+// must be relative and resolve inside the tree.
+func (s *Sandbox) UnpackToolchain(ctx context.Context, artifacts map[string]cas.Digest, modes map[string]uint32, links map[string]string) error {
 	for relPath, dgst := range artifacts {
-		if err := s.unpackBlob(ctx, relPath, dgst); err != nil {
+		mode := os.FileMode(0o755)
+		if m, ok := modes[relPath]; ok {
+			mode = os.FileMode(m).Perm()
+		}
+		if err := s.unpackBlob(ctx, relPath, dgst, mode); err != nil {
 			return fmt.Errorf("sandbox: unpack %s: %w", relPath, err)
+		}
+	}
+	// Links come last, so no file is ever written through one.
+	for relPath, target := range links {
+		if err := s.unpackLink(relPath, target); err != nil {
+			return fmt.Errorf("sandbox: unpack symlink %s: %w", relPath, err)
 		}
 	}
 	return nil
 }
 
-// unpackBlob fetches a blob from CAS and writes it to relPath under rootDir.
-func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Digest) error {
-	// Guard against path traversal.
+// toolchainDest checks that relPath is a local path outside the reserved
+// sandbox directories and returns its host path under rootDir.
+func (s *Sandbox) toolchainDest(relPath string) (string, error) {
 	dest := filepath.Join(s.rootDir, relPath)
 	if !filepath.IsLocal(relPath) || !strings.HasPrefix(dest, s.rootDir+string(filepath.Separator)) {
-		return fmt.Errorf("path traversal: %s", relPath)
+		return "", fmt.Errorf("path traversal: %s", relPath)
 	}
 	if first, _, _ := strings.Cut(filepath.ToSlash(filepath.Clean(relPath)), "/"); reservedRootDirs[first] {
-		return fmt.Errorf("toolchain path %s is inside reserved sandbox directory %s/", relPath, first)
+		return "", fmt.Errorf("toolchain path %s is inside reserved sandbox directory %s/", relPath, first)
+	}
+	return dest, nil
+}
+
+// unpackLink creates the symlink relPath -> target under rootDir.
+func (s *Sandbox) unpackLink(relPath, target string) error {
+	dest, err := s.toolchainDest(relPath)
+	if err != nil {
+		return err
+	}
+	if filepath.IsAbs(target) || !filepath.IsLocal(filepath.Join(filepath.Dir(filepath.Clean(relPath)), target)) {
+		return fmt.Errorf("target %q leaves the toolchain tree", target)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(target, dest)
+}
+
+// unpackBlob fetches a blob from CAS and writes it to relPath under rootDir.
+func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Digest, mode os.FileMode) error {
+	dest, err := s.toolchainDest(relPath)
+	if err != nil {
+		return err
 	}
 	if s.store == nil {
 		return fmt.Errorf("no CAS store to fetch %s", dgst)
@@ -135,14 +208,18 @@ func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Diges
 	}
 	defer rc.Close()
 
-	// Toolchain manifests (internal/scratch) record path → digest only, no
-	// file modes, so every unpacked file is executable. The store's reader
-	// verifies the digest at EOF, which io.Copy reads to.
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	// The store's reader verifies the digest at EOF, which io.Copy reads to.
+	// The recorded mode is applied with Chmod below.
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		return err
+	}
+	// Chmod, not the create mode, so the umask cannot change the bits.
+	if err := f.Chmod(mode); err != nil {
 		f.Close()
 		return err
 	}
@@ -396,10 +473,14 @@ func (s *Sandbox) buildEnv(env map[string]string) []string {
 		merged["PATH"] = binDir
 	}
 
-	// Set TMPDIR to sandbox's tmp directory for hermetic temp file creation.
-	if _, ok := merged["TMPDIR"]; !ok {
-		merged["TMPDIR"] = filepath.Join(s.rootDir, "tmp")
-	}
+	// TMPDIR is always the sandbox's tmp/: the only temp directory the
+	// command may write to.
+	merged["TMPDIR"] = filepath.Join(s.rootDir, "tmp")
+
+	// HOME is always the sandbox's empty, writable home/: a host HOME would
+	// be unreadable under kernel isolation, and tools deriving caches from
+	// it (Go's GOCACHE and GOPATH, for one) need somewhere to write.
+	merged["HOME"] = filepath.Join(s.rootDir, "home")
 
 	result := make([]string, 0, len(merged))
 	for k, v := range merged {

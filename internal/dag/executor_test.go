@@ -119,7 +119,6 @@ func TestBareActionRelativeOutputInWorkDir(t *testing.T) {
 
 func TestImpureActionSkipsCacheStorage(t *testing.T) {
 	workDir := t.TempDir()
-	outA := filepath.Join(workDir, "a.txt")
 
 	store := newStore(t)
 
@@ -127,8 +126,8 @@ func TestImpureActionSkipsCacheStorage(t *testing.T) {
 	g1 := dag.NewGraph()
 	_ = g1.AddAction(&dag.Action{
 		ID:      "A",
-		Command: []string{"sh", "-c", "echo impure > " + outA},
-		Outputs: []string{outA},
+		Command: []string{"sh", "-c", "echo impure > a.txt"},
+		Outputs: []string{"a.txt"},
 		Impure:  true,
 		WorkDir: workDir,
 	})
@@ -147,8 +146,8 @@ func TestImpureActionSkipsCacheStorage(t *testing.T) {
 	g2 := dag.NewGraph()
 	_ = g2.AddAction(&dag.Action{
 		ID:      "A",
-		Command: []string{"sh", "-c", "echo impure > " + outA},
-		Outputs: []string{outA},
+		Command: []string{"sh", "-c", "echo impure > a.txt"},
+		Outputs: []string{"a.txt"},
 		Impure:  false,
 		WorkDir: workDir,
 	})
@@ -171,8 +170,8 @@ func TestSealedInputsInjectedIntoEnv(t *testing.T) {
 	g := dag.NewGraph()
 	_ = g.AddAction(&dag.Action{
 		ID:      "deploy",
-		Command: []string{"sh", "-c", "echo $SECRET_TOKEN > " + outFile},
-		Outputs: []string{outFile},
+		Command: []string{"sh", "-c", "echo $SECRET_TOKEN > secret.txt"},
+		Outputs: []string{"secret.txt"},
 		WorkDir: workDir,
 		Env:     map[string]string{"OTHER": "value"},
 		SealedInputs: map[string]string{
@@ -207,7 +206,6 @@ func TestSealedInputsInjectedIntoEnv(t *testing.T) {
 
 func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	workDir := t.TempDir()
-	outFile := filepath.Join(workDir, "out.txt")
 
 	store := newStore(t)
 
@@ -215,8 +213,8 @@ func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	g1 := dag.NewGraph()
 	_ = g1.AddAction(&dag.Action{
 		ID:      "A",
-		Command: []string{"sh", "-c", "echo hello > " + outFile},
-		Outputs: []string{outFile},
+		Command: []string{"sh", "-c", "echo hello > out.txt"},
+		Outputs: []string{"out.txt"},
 		WorkDir: workDir,
 		SealedInputs: map[string]string{
 			"TOKEN": "pass:deploy/token",
@@ -234,6 +232,9 @@ func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Execute: %v", err)
 	}
+	if len(res1.Completed) != 1 {
+		t.Fatalf("first run did not complete: %+v", res1)
+	}
 	if res1.Completed[0].Cached {
 		t.Error("first run should not be cached")
 	}
@@ -243,8 +244,8 @@ func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	g2 := dag.NewGraph()
 	_ = g2.AddAction(&dag.Action{
 		ID:      "A",
-		Command: []string{"sh", "-c", "echo hello > " + outFile},
-		Outputs: []string{outFile},
+		Command: []string{"sh", "-c", "echo hello > out.txt"},
+		Outputs: []string{"out.txt"},
 		WorkDir: workDir,
 		SealedInputs: map[string]string{
 			"TOKEN": "pass:deploy/token",
@@ -261,6 +262,9 @@ func TestSealedInputsExcludedFromCacheKey(t *testing.T) {
 	res2, err := exec2.Execute(context.Background(), g2)
 	if err != nil {
 		t.Fatalf("second Execute: %v", err)
+	}
+	if len(res2.Completed) != 1 {
+		t.Fatalf("second run did not complete: %+v", res2)
 	}
 	if !res2.Completed[0].Cached {
 		t.Error("second run should be cached — sealed inputs must not affect cache key")
@@ -283,9 +287,10 @@ func TestSealedInputsFileMode(t *testing.T) {
 		ID: "deploy",
 		// Capture: file path, file contents, file mode.
 		Command: []string{"sh", "-c",
-			statCommand + ` "$SECRET_KEY" > ` + outFile + `; ` +
-				`echo --- >> ` + outFile + `; ` +
-				`cat "$SECRET_KEY" >> ` + outFile},
+			statCommand + ` "$SECRET_KEY" > captured; ` +
+				`echo --- >> captured; ` +
+				`cat "$SECRET_KEY" >> captured`},
+		Outputs: []string{"captured"},
 		WorkDir: workDir,
 		SealedInputs: map[string]string{
 			"SECRET_KEY": "pass:raw:hosts/key",
@@ -339,7 +344,8 @@ func TestSealedInputsFileModeDirCleanup(t *testing.T) {
 	g := dag.NewGraph()
 	_ = g.AddAction(&dag.Action{
 		ID:      "deploy",
-		Command: []string{"sh", "-c", `printf '%s' "$KEY" > ` + pathOut},
+		Command: []string{"sh", "-c", `printf '%s' "$KEY" > path`},
+		Outputs: []string{"path"},
 		WorkDir: workDir,
 		SealedInputs: map[string]string{
 			"KEY": "pass:raw:x",
@@ -414,7 +420,8 @@ func TestSealedInputsEnvModeStillWorks(t *testing.T) {
 	g := dag.NewGraph()
 	_ = g.AddAction(&dag.Action{
 		ID:      "deploy",
-		Command: []string{"sh", "-c", `printf '%s' "$T" > ` + outFile},
+		Command: []string{"sh", "-c", `printf '%s' "$T" > out.txt`},
+		Outputs: []string{"out.txt"},
 		WorkDir: workDir,
 		SealedInputs: map[string]string{
 			"T": "pass:t",
@@ -630,13 +637,12 @@ func TestSealedOutputsRefAffectsActionKey(t *testing.T) {
 
 func TestSealedInputsNoResolvedSecretsIsNoOp(t *testing.T) {
 	workDir := t.TempDir()
-	outFile := filepath.Join(workDir, "out.txt")
 
 	g := dag.NewGraph()
 	_ = g.AddAction(&dag.Action{
 		ID:      "A",
-		Command: []string{"sh", "-c", "echo ok > " + outFile},
-		Outputs: []string{outFile},
+		Command: []string{"sh", "-c", "echo ok > out.txt"},
+		Outputs: []string{"out.txt"},
 		WorkDir: workDir,
 	})
 
@@ -678,15 +684,14 @@ func TestSealedInputResolverSkipsDependencyCancelledAction(t *testing.T) {
 
 func TestPureActionStillCaches(t *testing.T) {
 	workDir := t.TempDir()
-	outA := filepath.Join(workDir, "a.txt")
 
 	store := newStore(t)
 	makeGraph := func() *dag.Graph {
 		g := dag.NewGraph()
 		_ = g.AddAction(&dag.Action{
 			ID:      "A",
-			Command: []string{"sh", "-c", "echo pure > " + outA},
-			Outputs: []string{outA},
+			Command: []string{"sh", "-c", "echo pure > a.txt"},
+			Outputs: []string{"a.txt"},
 			Impure:  false,
 			WorkDir: workDir,
 		})
@@ -699,6 +704,9 @@ func TestPureActionStillCaches(t *testing.T) {
 	res1, err := exec.Execute(context.Background(), makeGraph())
 	if err != nil {
 		t.Fatalf("first Execute: %v", err)
+	}
+	if len(res1.Completed) != 1 {
+		t.Fatalf("first run did not complete: %+v", res1)
 	}
 	if res1.Completed[0].Cached {
 		t.Error("first run should not be cached")

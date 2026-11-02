@@ -16,16 +16,22 @@
 ;;   env          - complete environment for the command (optional; when
 ;;                  unset, the impure action inherits mu's environment)
 ;;   working_dir  - working directory for the command (optional)
+;;   toolchains   - scratch toolchains the command needs, e.g. ["go"]
+;;                  (optional). Naming any makes the action pure: it runs
+;;                  in mu's sandbox, sees only its sources, and is cached.
+;;                  Ignored with fix: a fix runs on the host, using PATH.
+;;   network      - allow network access (optional, default false), e.g.
+;;                  for `go vet` to download modules.
 ;;
-;; Sources are declared as the action's inputs. The action is impure
-;; (it runs in the project tree and is never cached), so a lint target
-;; re-runs on every build; a non-zero exit fails the build.
+;; Sources are declared as the action's inputs. Without toolchains the
+;; action is impure (it runs in the project tree and is never cached), so
+;; a lint target re-runs on every build; a non-zero exit fails the build.
 
 (require '[cheshire.core :as json])
 
 (defn handle-discover []
   {"name"             "lint"
-   "version"          "0.2.0"
+   "version"          "0.3.0"
    "protocol_version" 1
    "description"      "Run linter or code-quality commands against source files"
    "capabilities"     ["discover" "plan"]
@@ -38,7 +44,10 @@
                        "fix"         {"type" "boolean"
                                       "description" "Plan fix_command instead of command (rewrites sources)"}
                        "env"         {"type" "object" "description" "Complete environment for the lint process (default: inherit mu's)"}
-                       "working_dir" {"type" "string" "description" "Working directory for the lint command"}}})
+                       "working_dir" {"type" "string" "description" "Working directory for the lint command"}
+                       "toolchains"  {"type" "array" "items" {"type" "string"}
+                                      "description" "Scratch toolchains the command needs; makes the action pure (sandboxed, cached)"}
+                       "network"     {"type" "boolean" "description" "Allow network access"}}})
 
 (defn handle-plan [req]
   (let [target  (get req "target")
@@ -50,6 +59,8 @@
                   (get config "command"))
         env     (get config "env")
         workdir (get config "working_dir")
+        ;; A fix rewrites the project tree, so it always runs on the host.
+        tools   (when-not fix? (get config "toolchains"))
 
         inputs (into {} (map (fn [s] [s s]) sources))]
 
@@ -66,8 +77,9 @@
                  "inputs"     inputs
                  "outputs"    []
                  "depends_on" []
-                 "network"    false
-                 "impure"     true}
+                 "network"    (true? (get config "network"))
+                 "impure"     (empty? tools)}
+          (seq tools) (assoc "toolchains" tools)
           (seq env) (assoc "env" env)
           (seq workdir) (assoc "work_dir" workdir))]
        "declared_outputs" {}})))

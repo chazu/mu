@@ -40,6 +40,7 @@ func TestExecutor_RetrySucceedsAfterTransientFailures(t *testing.T) {
 	_ = g.AddAction(&dag.Action{
 		ID:             "flaky",
 		Command:        []string{"sh", script},
+		Impure:         true, // the attempt counter lives on the host
 		Network:        true,
 		Retries:        3,
 		RetryBackoffMs: 1,
@@ -70,6 +71,7 @@ func TestExecutor_RetryExhaustedReportsFailure(t *testing.T) {
 	_ = g.AddAction(&dag.Action{
 		ID:             "doomed",
 		Command:        []string{"sh", script},
+		Impure:         true, // the attempt counter lives on the host
 		Network:        true,
 		Retries:        2,
 		RetryBackoffMs: 1,

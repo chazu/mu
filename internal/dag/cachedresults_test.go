@@ -21,6 +21,7 @@ func chainGraph(t *testing.T, workDir string) *dag.Graph {
 		{ID: "consume", Command: []string{"sh", "-c", "cp mid.txt out.txt"},
 			Inputs:       map[string]cas.Digest{"in": {}},
 			InputSources: map[string]dag.InputSource{"in": {ProducerID: "produce", OutputPath: "mid.txt"}},
+			InputPaths:   map[string]string{"in": "mid.txt"}, // where the sandboxed consumer finds it
 			Outputs:      []string{"out.txt"}, Env: map[string]string{}, WorkDir: workDir, DependsOn: []string{"produce"}},
 		{ID: "side-effect", Command: []string{"true"}, Impure: true, Env: map[string]string{}, WorkDir: workDir},
 	} {

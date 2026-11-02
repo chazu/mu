@@ -12,22 +12,69 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
-const sandboxInitArg = "__sandbox_init__"
+const (
+	sandboxInitArg  = "__sandbox_init__"
+	sandboxProbeArg = "__sandbox_probe__"
+)
 
 // Re-exec works in both the CLI and Go test binaries importing this package.
 func init() {
 	if IsSandboxInit() {
 		RunInit()
 	}
+	if len(os.Args) >= 2 && os.Args[1] == sandboxProbeArg {
+		// In fresh namespaces: can this process make the mounts RunInit
+		// needs? (AppArmor-restricted user namespaces cannot.)
+		if err := syscall.Mount("", "/", "", syscall.MS_REC|syscall.MS_PRIVATE, ""); err != nil {
+			os.Exit(1)
+		}
+		if err := syscall.Mount("tmpfs", os.TempDir(), "tmpfs", 0, ""); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 }
 
+// detectIsolation probes for namespace support by re-executing itself in the
+// namespaces execIsolated uses: the sysctl alone does not tell, since e.g.
+// Ubuntu 24.04 lets unprivileged processes create user namespaces but denies
+// them mounts via AppArmor.
 func detectIsolation() IsolationLevel {
-	if userNamespacesAvailable() {
-		return IsolationNamespace
+	if !userNamespacesAvailable() {
+		return IsolationCopy
 	}
-	return IsolationCopy
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/proc/self/exe", sandboxProbeArg)
+	cmd.SysProcAttr = namespaceAttr(false)
+	if err := cmd.Run(); err != nil {
+		return IsolationCopy
+	}
+	return IsolationNamespace
+}
+
+// namespaceAttr creates the user, mount, PID, IPC, UTS and (unless network)
+// network namespaces sandboxed commands run in, mapping the caller to root.
+func namespaceAttr(network bool) *syscall.SysProcAttr {
+	cloneFlags := syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS |
+		syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS
+	if !network {
+		cloneFlags |= syscall.CLONE_NEWNET
+	}
+	return &syscall.SysProcAttr{
+		Cloneflags: uintptr(cloneFlags),
+		UidMappings: []syscall.SysProcIDMap{
+			{ContainerID: 0, HostID: os.Getuid(), Size: 1},
+		},
+		GidMappings: []syscall.SysProcIDMap{
+			{ContainerID: 0, HostID: os.Getgid(), Size: 1},
+		},
+		GidMappingsEnableSetgroups: false,
+		Pdeathsig:                  syscall.SIGKILL,
+	}
 }
 
 func userNamespacesAvailable() bool {
@@ -45,12 +92,13 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 	}
 
 	cfg := initConfig{
-		RootDir: s.rootDir,
-		WorkDir: s.workDir,
-		Cwd:     s.VisiblePath(filepath.Join("work", s.cwdRel)),
-		Command: command,
-		Env:     s.namespaceEnv(env),
-		Network: network,
+		RootDir:   s.rootDir,
+		WorkDir:   s.workDir,
+		Cwd:       s.VisiblePath(filepath.Join("work", s.cwdRel)),
+		Command:   command,
+		Env:       s.namespaceEnv(env),
+		Network:   network,
+		HostPaths: s.HostPaths,
 	}
 
 	cfgJSON, err := json.Marshal(cfg)
@@ -58,27 +106,11 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 		return -1, fmt.Errorf("sandbox: marshal init config: %w", err), true
 	}
 
-	cloneFlags := syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS |
-		syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS
-	if !network {
-		cloneFlags |= syscall.CLONE_NEWNET
-	}
-
 	cmd := exec.CommandContext(ctx, "/proc/self/exe", sandboxInitArg)
 	cmd.Stdin = strings.NewReader(string(cfgJSON))
 	cmd.Stdout = s.stdoutWriter()
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: uintptr(cloneFlags),
-		UidMappings: []syscall.SysProcIDMap{
-			{ContainerID: 0, HostID: os.Getuid(), Size: 1},
-		},
-		GidMappings: []syscall.SysProcIDMap{
-			{ContainerID: 0, HostID: os.Getgid(), Size: 1},
-		},
-		GidMappingsEnableSetgroups: false,
-		Pdeathsig:                  syscall.SIGKILL,
-	}
+	cmd.SysProcAttr = namespaceAttr(network)
 
 	err = cmd.Run()
 	exitCode := -1
@@ -95,7 +127,7 @@ func (s *Sandbox) namespaceEnv(env map[string]string) []string {
 	result := s.buildEnv(env)
 	for i, entry := range result {
 		name, _, _ := strings.Cut(entry, "=")
-		if name == "PATH" || name == "TMPDIR" {
+		if name == "PATH" || name == "TMPDIR" || name == "HOME" {
 			result[i] = strings.ReplaceAll(entry, s.rootDir+"/", "/")
 		}
 	}
@@ -110,6 +142,8 @@ type initConfig struct {
 	Command []string `json:"command"`
 	Env     []string `json:"env"`
 	Network bool     `json:"network"`
+	// HostPaths are bind-mounted read-only at the same path in the new root.
+	HostPaths []string `json:"host_paths,omitempty"`
 }
 
 // RunInit is called early in main() when os.Args[1] == "__sandbox_init__".
@@ -149,6 +183,46 @@ func RunInit() {
 		fatal("mount private /proc: %v", err)
 	}
 
+	// System directories, read-only, so host shells and dynamically linked
+	// tools work. A usrmerge symlink (/lib -> usr/lib) is recreated as a
+	// link. A directory a toolchain already provides (go ships lib/) keeps
+	// the toolchain's copy, and so does the sandbox's own bin/.
+	for _, p := range systemPaths {
+		dst := filepath.Join(cfg.RootDir, p)
+		info, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Lstat(dst); err == nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(p); err == nil {
+				os.Symlink(target, dst)
+			}
+			continue
+		}
+		if err := bindReadOnly(p, dst); err != nil {
+			fatal("mount system path %s: %v", p, err)
+		}
+	}
+	// #!/bin/sh scripts need /bin/sh; bin/ is the toolchain directory, so
+	// bind the host shell there unless a toolchain provides one.
+	if _, err := os.Lstat(filepath.Join(cfg.RootDir, "bin", "sh")); os.IsNotExist(err) {
+		if _, err := os.Stat("/bin/sh"); err == nil {
+			if err := bindReadOnly("/bin/sh", filepath.Join(cfg.RootDir, "bin", "sh")); err != nil {
+				fatal("mount /bin/sh: %v", err)
+			}
+		}
+	}
+
+	// Granted host paths, read-only at the same path inside the new root.
+	for _, p := range cfg.HostPaths {
+		if err := bindReadOnly(p, filepath.Join(cfg.RootDir, p)); err != nil {
+			fatal("grant host path %s: %v", p, err)
+		}
+	}
+
 	// 5. pivot_root
 	putold := filepath.Join(cfg.RootDir, ".pivot_root")
 	os.MkdirAll(putold, 0o700)
@@ -166,13 +240,14 @@ func RunInit() {
 	os.RemoveAll("/.pivot_root")
 
 	// Separate writable mounts before making the root mount read-only.
-	for _, dir := range []string{"/work", "/out", "/tmp"} {
-		if err := syscall.Mount(dir, dir, "", syscall.MS_BIND, ""); err != nil {
+	// Recursive, so read-only grants nested under them stay visible.
+	for _, dir := range []string{"/work", "/out", "/tmp", "/home"} {
+		if err := syscall.Mount(dir, dir, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
 			fatal("bind writable %s: %v", dir, err)
 		}
 	}
 	// 8. Make most of the filesystem read-only
-	makeReadOnly([]string{"/work", "/out", "/tmp", "/dev"})
+	makeReadOnly([]string{"/work", "/out", "/tmp", "/home", "/dev"})
 	cwd := cfg.Cwd
 	if cwd == "" {
 		cwd = "/work"
@@ -204,6 +279,43 @@ func RunInit() {
 	if err := syscall.Exec(argv0, cfg.Command, cfg.Env); err != nil {
 		fatal("exec %s: %v", argv0, err)
 	}
+}
+
+// systemPaths are the host directories every namespace sandbox sees
+// read-only (the Linux counterpart of the Seatbelt profile's system reads).
+var systemPaths = []string{"/usr", "/lib", "/lib32", "/lib64", "/libx32", "/sbin", "/etc"}
+
+// bindReadOnly bind-mounts the host path src at dst (creating a mount point
+// of the same kind) and remounts it read-only.
+func bindReadOnly(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		err = os.MkdirAll(dst, 0o755)
+	} else if err = os.MkdirAll(filepath.Dir(dst), 0o755); err == nil {
+		var f *os.File
+		if f, err = os.OpenFile(dst, os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			err = f.Close()
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err := syscall.Mount(src, dst, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+		return err
+	}
+	// A user namespace may not clear flags locked on the source mount
+	// (nosuid, nodev, ...), so the read-only remount carries them over.
+	flags := uintptr(syscall.MS_REMOUNT | syscall.MS_BIND | syscall.MS_RDONLY)
+	var st syscall.Statfs_t
+	if syscall.Statfs(dst, &st) == nil {
+		const keep = syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC |
+			syscall.MS_NOATIME | syscall.MS_NODIRATIME | syscall.MS_RELATIME
+		flags |= uintptr(st.Flags) & keep
+	}
+	return syscall.Mount("", dst, "", flags, "")
 }
 
 func setupMinimalDev(rootfs string) {

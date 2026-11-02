@@ -23,12 +23,15 @@ toolchains: [{
 		sha256:  "91499b3f430038f9b40e433215256a6e5392942780dca9984d493d2bcca7055d"
 	}
 }, {
+	// The go and lint plugins run go inside the sandbox from this toolchain;
+	// it must satisfy go.mod's `go` line. Toolchain configs name one archive,
+	// so this pins darwin-arm64 (sha256 from go.dev/dl/?mode=json).
 	toolchain: "go"
 	from:      "scratch"
 	config: {
-		version:      "1.25.8"
-		url:          "https://go.dev/dl/go1.25.8.darwin-arm64.tar.gz"
-		sha256:       "c6547959f5dbe8440bf3da972bd65ba900168de5e7ab01464fbdc7ac8375c21c"
+		version:      "1.26.10"
+		url:          "https://go.dev/dl/go1.26.10.darwin-arm64.tar.gz"
+		sha256:       "0b5183492292ada170f9b561a834863808dd02edba599e4ad0e89899330020b3"
 		strip_prefix: "go"
 	}
 }]
@@ -51,13 +54,21 @@ targets: [{
 }, {
 	target:    "//lint/go-vet"
 	toolchain: "lint"
-	sources: ["cmd/**/*.go", "internal/**/*.go", "sdk/**/*.go", "plugins/**/*.go"]
-	config: command: ["go", "vet", "./..."]
+	// Sandboxed: vet sees only these files, so they must cover every package
+	// of the root module plus its go:embed files. Modules are downloaded.
+	sources: ["go.mod", "go.sum", "cmd/**/*.go", "internal/**/*.go", "internal/**/*.cue", "sdk/**/*.go", "plugins/**/*.go", "examples/*.go", "examples/plugins/**/*.go", "docs/guide/*.go", "docs/guide/*.md"]
+	config: {
+		command: ["go", "vet", "./..."]
+		toolchains: ["go"]
+		network: true
+		env: {GOTOOLCHAIN: "local", GOFLAGS: "-modcacherw"}
+	}
 }, {
 	target:    "//lint/gofmt"
 	toolchain: "lint"
-	sources: ["cmd/**/*.go", "internal/**/*.go", "sdk/**/*.go", "plugins/**/*.go"]
+	sources: ["cmd/**/*.go", "internal/**/*.go", "sdk/**/*.go", "plugins/**/*.go", "examples/**/*.go"]
 	config: {
+		toolchains: ["go"]
 		// `gofmt -l` exits 0 even when it lists files, so fail explicitly.
 		command: ["sh", "-c", "out=$(gofmt -l cmd internal sdk plugins examples) || exit 1; [ -z \"$out\" ] || { echo \"$out\"; exit 1; }"]
 		// Planned only with `fix: true`; plain `mu build` never rewrites sources.
