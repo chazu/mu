@@ -56,7 +56,7 @@ targets: [{
 	toolchain: "lint"
 	// Sandboxed: vet sees only these files, so they must cover every package
 	// of the root module plus its go:embed files. Modules are downloaded.
-	sources: ["go.mod", "go.sum", "cmd/**/*.go", "internal/**/*.go", "internal/**/*.cue", "sdk/**/*.go", "plugins/**/*.go", "plugins/host/gather.sh", "examples/*.go", "examples/plugins/**/*.go", "docs/guide/*.go", "docs/guide/*.md"]
+	sources: ["go.mod", "go.sum", "cmd/**/*.go", "internal/**/*.go", "internal/**/*.cue", "sdk/**/*.go", "plugins/**/*.go", "examples/*.go", "examples/plugins/**/*.go", "docs/guide/*.go", "docs/guide/*.md"]
 	config: {
 		command: ["go", "vet", "./..."]
 		toolchains: ["go"]
