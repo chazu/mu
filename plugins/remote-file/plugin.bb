@@ -201,9 +201,10 @@
        "command"       ["bash" "-c" wrapper]
        "inputs"        {"src" src}
        "outputs"       []
-       "env"           (cond-> {"PATH" "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
-                         (System/getenv "SSH_AUTH_SOCK") (assoc "SSH_AUTH_SOCK" (System/getenv "SSH_AUTH_SOCK"))
-                         (System/getenv "HOME")          (assoc "HOME" (System/getenv "HOME")))
+       "env"           {"PATH" "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+       ;; Names only: host values (agent socket, home) must not enter
+       ;; the plan or the action key.
+       "env_passthrough" ["HOME" "SSH_AUTH_SOCK"]
        "sealed_inputs" sealed
        "network"       true
        "impure"        true

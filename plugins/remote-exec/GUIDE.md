@@ -30,6 +30,12 @@ No `observe`. A command isn't a resource with state.
 | `impure` | bool | `true` | pass-through; set `false` to enable cache-on-deps |
 | `sealed_output_files` | map[string]string | (unset) | sealed_output NAME → absolute remote path; see Sealed outputs |
 
+## Environment
+
+The action's env is fixed (`PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`);
+`HOME` and `SSH_AUTH_SOCK` are passed through by name (`env_passthrough`) so
+ssh finds its config and agent without host values entering the cache key.
+
 ## Sealed inputs
 
 - `SSH_PASS` — optional; required when `sudo: true`. Single-line; use `env`

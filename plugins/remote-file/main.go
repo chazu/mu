@@ -218,25 +218,22 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 	env := map[string]string{
 		"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
 	}
-	if v := os.Getenv("SSH_AUTH_SOCK"); v != "" {
-		env["SSH_AUTH_SOCK"] = v
-	}
-	if v := os.Getenv("HOME"); v != "" {
-		env["HOME"] = v
-	}
 
 	sealed := req.Target.SealedInputs
 
 	action := muplugin.ActionSpec{
-		ID:           "push",
-		Command:      []string{"bash", "-c", wrapper},
-		Inputs:       map[string]string{"src": src},
-		Outputs:      []string{},
-		Env:          env,
-		SealedInputs: sealed,
-		Network:      true,
-		Impure:       true,
-		DependsOn:    []string{},
+		ID:      "push",
+		Command: []string{"bash", "-c", wrapper},
+		Inputs:  map[string]string{"src": src},
+		Outputs: []string{},
+		Env:     env,
+		// Names only: host values (agent socket, home) must not enter
+		// the plan or the action key.
+		EnvPassthrough: []string{"HOME", "SSH_AUTH_SOCK"},
+		SealedInputs:   sealed,
+		Network:        true,
+		Impure:         true,
+		DependsOn:      []string{},
 	}
 
 	return muplugin.PlanResponse{

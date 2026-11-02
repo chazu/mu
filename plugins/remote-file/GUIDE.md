@@ -31,6 +31,12 @@ mode, and owner. SSH-based. Idempotent via `mu build` (always re-asserts).
 
 Exactly one file. Zero or more than one → plan error.
 
+## Environment
+
+The action's env is fixed (`PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`);
+`HOME` and `SSH_AUTH_SOCK` are passed through by name (`env_passthrough`) so
+ssh finds its config and agent without host values entering the cache key.
+
 ## Sealed inputs
 
 - `SSH_PASS` — optional. If absent, falls back to ssh-agent (`BatchMode=yes`).

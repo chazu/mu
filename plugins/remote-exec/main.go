@@ -25,7 +25,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,23 +101,20 @@ func plan(_ context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, e
 	env := map[string]string{
 		"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
 	}
-	if v := os.Getenv("SSH_AUTH_SOCK"); v != "" {
-		env["SSH_AUTH_SOCK"] = v
-	}
-	if v := os.Getenv("HOME"); v != "" {
-		env["HOME"] = v
-	}
 
 	action := muplugin.ActionSpec{
-		ID:           "exec",
-		Command:      []string{"bash", "-c", wrapper},
-		Inputs:       map[string]string{},
-		Outputs:      []string{},
-		Env:          env,
-		SealedInputs: sealedInputs,
-		Network:      true,
-		Impure:       impure,
-		DependsOn:    []string{},
+		ID:      "exec",
+		Command: []string{"bash", "-c", wrapper},
+		Inputs:  map[string]string{},
+		Outputs: []string{},
+		Env:     env,
+		// Names only: host values (agent socket, home) must not enter
+		// the plan or the action key.
+		EnvPassthrough: []string{"HOME", "SSH_AUTH_SOCK"},
+		SealedInputs:   sealedInputs,
+		Network:        true,
+		Impure:         impure,
+		DependsOn:      []string{},
 	}
 	if len(sealedModes) > 0 {
 		action.SealedInputModes = sealedModes
