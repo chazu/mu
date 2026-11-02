@@ -35,7 +35,6 @@ type Plugin struct {
 
 	// Optional method handlers. A non-nil handler implies the capability;
 	// leaving it nil hides the capability from discover.
-	Observe       func(ctx context.Context, req ObserveRequest) (ObserveResponse, error)
 	ResolveSecret func(ctx context.Context, ref string) (string, error)
 	StoreSecret   func(ctx context.Context, req StoreSecretRequest) error
 }
@@ -115,22 +114,6 @@ func (p *Plugin) dispatch(ctx context.Context, req Request) any {
 			out.Outputs = map[string]string{}
 		}
 		return out
-	case "observe":
-		if p.Observe == nil {
-			return ObserveResponse{Error: "observe: capability not supported"}
-		}
-		if req.Target == nil {
-			return ObserveResponse{Error: "observe: missing target"}
-		}
-		out, err := p.Observe(ctx, ObserveRequest{
-			Target:             *req.Target,
-			ToolchainArtifacts: req.ToolchainArtifacts,
-			Secrets:            req.Secrets,
-		})
-		if err != nil {
-			return ObserveResponse{Error: err.Error()}
-		}
-		return out
 	case "resolve_secret":
 		if p.ResolveSecret == nil {
 			return ResolveSecretResponse{Error: "resolve_secret: capability not supported"}
@@ -164,9 +147,6 @@ func (p *Plugin) discover() DiscoverResponse {
 	caps := []string{"discover"}
 	if p.Plan != nil {
 		caps = append(caps, "plan")
-	}
-	if p.Observe != nil {
-		caps = append(caps, "observe")
 	}
 	if p.ResolveSecret != nil {
 		caps = append(caps, "resolve_secret")

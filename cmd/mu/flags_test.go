@@ -67,16 +67,6 @@ func TestFlagsAnywhere(t *testing.T) {
 			wantFlag: map[string]string{"plan": "true", "jobs": "3"},
 		},
 		{
-			cmd: "observe",
-			variants: [][]string{
-				{"--ndjson", "--config", "x/mu.cue", "//a"},
-				{"//a", "--ndjson", "--config", "x/mu.cue"},
-				{"--config=x/mu.cue", "//a", "--ndjson"},
-			},
-			wantArgs: []string{"//a"},
-			wantFlag: map[string]string{"ndjson": "true", "config": "x/mu.cue"},
-		},
-		{
 			cmd: "targets",
 			variants: [][]string{
 				{"--json", "--dot", "//cmd/..."},

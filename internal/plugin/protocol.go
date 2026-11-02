@@ -18,7 +18,6 @@ type (
 	Request               = muplugin.Request
 	DiscoverResponse      = muplugin.DiscoverResponse
 	SchemaRef             = muplugin.SchemaRef
-	ObserveResponse       = muplugin.ObserveResponse
 	PlanResponse          = muplugin.PlanResponse
 	TargetInfo            = muplugin.TargetInfo
 	DepInfo               = muplugin.DepInfo
@@ -38,7 +37,6 @@ const (
 var (
 	NewDiscoverRequest      = muplugin.NewDiscoverRequest
 	NewPlanRequest          = muplugin.NewPlanRequest
-	NewObserveRequest       = muplugin.NewObserveRequest
 	NewResolveSecretRequest = muplugin.NewResolveSecretRequest
 	NewStoreSecretRequest   = muplugin.NewStoreSecretRequest
 )

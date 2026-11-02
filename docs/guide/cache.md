@@ -257,7 +257,6 @@ REGISTRY OUTAGES AND LOCAL OPERATION
   To bypass registry probes and dependency downloads immediately:
 
     mu build --offline //target
-    mu observe --offline //target
     mu scratch --offline
 
   --offline uses local/cached CUE modules and source/toolchain artifacts. Missing

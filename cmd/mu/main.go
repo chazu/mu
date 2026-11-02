@@ -56,7 +56,8 @@ func run(cmd string, args []string) int {
 	case "plugin", "p":
 		return runPlugin(args)
 	case "observe":
-		return runObserve(args)
+		fmt.Fprintln(os.Stderr, `mu: "observe" was removed; mu is a build tool and no longer does drift detection`)
+		return exitUsage
 	case "verify":
 		return runVerify(args)
 	case "guide":
@@ -96,7 +97,6 @@ Commands:
   cache      Inspect the local CAS cache
   targets    List targets and their dependency chains (alias t)
   plugin (p) List and inspect plugins
-  observe    Check current state of targets (drift detection)
   verify     Re-hash CAS blobs, check schema namespace conventions, report issues
   guide      Quick-reference guides for mu features
   version    Print the mu version

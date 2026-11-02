@@ -54,10 +54,10 @@ func TestTargetInfoSealedOutputModesJSONRoundTrip(t *testing.T) {
 
 func TestHasCapability_WithCapabilities(t *testing.T) {
 	resp := &plugin.DiscoverResponse{
-		Capabilities: []string{"discover", "plan", "observe"},
+		Capabilities: []string{"discover", "plan", "store_secret"},
 	}
-	if !resp.HasCapability("observe") {
-		t.Error("expected observe capability")
+	if !resp.HasCapability("store_secret") {
+		t.Error("expected store_secret capability")
 	}
 	if resp.HasCapability("nonexistent") {
 		t.Error("unexpected nonexistent capability")
@@ -72,126 +72,8 @@ func TestHasCapability_EmptyDefaultsToDiscoverPlan(t *testing.T) {
 	if !resp.HasCapability("plan") {
 		t.Error("expected plan as default capability")
 	}
-	if resp.HasCapability("observe") {
-		t.Error("observe should not be a default capability")
-	}
-}
-
-func TestObserveResponseJSONRoundTrip(t *testing.T) {
-	resp := plugin.ObserveResponse{
-		Current: map[string]any{
-			"active":  true,
-			"enabled": true,
-			"unit":    "victoriametrics",
-		},
-	}
-
-	data, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var got plugin.ObserveResponse
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	if got.Current == nil {
-		t.Fatal("expected non-nil Current")
-	}
-	if got.Current["active"] != true {
-		t.Errorf("Current[active] = %v, want true", got.Current["active"])
-	}
-}
-
-func TestValidateRecordObserveResponse(t *testing.T) {
-	tests := []struct {
-		name    string
-		resp    plugin.ObserveResponse
-		wantErr string
-	}{
-		{
-			name: "records with schema discriminators",
-			resp: plugin.ObserveResponse{
-				Current: map[string]any{
-					"records": []any{
-						map[string]any{"_schema": "aws.ec2.instance", "instance_id": "i-123"},
-						map[string]any{"_schema": "aws.ec2.vpc", "vpc_id": "vpc-123"},
-					},
-				},
-			},
-		},
-		{
-			name: "empty records are valid",
-			resp: plugin.ObserveResponse{
-				Current: map[string]any{"records": []any{}},
-			},
-		},
-		{
-			name: "error response",
-			resp: plugin.ObserveResponse{Error: "AWS CLI unavailable"},
-		},
-		{
-			name:    "current required",
-			resp:    plugin.ObserveResponse{},
-			wantErr: "current is required",
-		},
-		{
-			name: "records required",
-			resp: plugin.ObserveResponse{
-				Current: map[string]any{"resources": []any{}},
-			},
-			wantErr: "current.records is required",
-		},
-		{
-			name: "record must be object",
-			resp: plugin.ObserveResponse{
-				Current: map[string]any{"records": []any{"not-an-object"}},
-			},
-			wantErr: "current.records[0] must be an object",
-		},
-		{
-			name: "schema discriminator required",
-			resp: plugin.ObserveResponse{
-				Current: map[string]any{"records": []any{map[string]any{"id": "123"}}},
-			},
-			wantErr: "current.records[0]._schema must be a non-empty string",
-		},
-		{
-			name: "error cannot carry partial current",
-			resp: plugin.ObserveResponse{
-				Error:   "partial failure",
-				Current: map[string]any{"records": []any{}},
-			},
-			wantErr: "error response must not include current",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := plugin.ValidateRecordObserveResponse(tt.resp)
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("ValidateRecordObserveResponse: %v", err)
-				}
-				return
-			}
-			if err == nil || err.Error() != tt.wantErr {
-				t.Fatalf("error = %v, want %q", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestNewObserveRequest(t *testing.T) {
-	target := plugin.TargetInfo{Name: "//k8s/api", Toolchain: "k8s"}
-	req := plugin.NewObserveRequest(target, map[string]string{"bin/kubectl": "sha256:abc"}, nil)
-
-	if req.Method != "observe" {
-		t.Errorf("Method = %q, want observe", req.Method)
-	}
-	if req.Target.Name != "//k8s/api" {
-		t.Errorf("Target.Name = %q, want //k8s/api", req.Target.Name)
+	if resp.HasCapability("resolve_secret") {
+		t.Error("resolve_secret should not be a default capability")
 	}
 }
 
@@ -333,8 +215,8 @@ func TestHasCapability_UnaffectedByOutputSchema(t *testing.T) {
 	if !resp.HasCapability("plan") {
 		t.Error("expected plan capability")
 	}
-	if resp.HasCapability("observe") {
-		t.Error("observe should not be present")
+	if resp.HasCapability("resolve_secret") {
+		t.Error("resolve_secret should not be present")
 	}
 }
 

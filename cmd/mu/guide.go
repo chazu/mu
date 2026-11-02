@@ -29,8 +29,6 @@ func runGuide(args []string) int {
 		printGuidePlugins()
 	case "build":
 		printGuideBuild()
-	case "observe":
-		printGuideObserve()
 	case "cache":
 		printGuideCache()
 	case "secrets":
@@ -91,7 +89,6 @@ func printGuideOverview()        { printTopic("overview") }
 func printGuideMuJSON()          { printTopic("mu.cue") }
 func printGuideBuild()           { printTopic("build") }
 func printGuidePlugins()         { printTopic("plugins") }
-func printGuideObserve()         { printTopic("observe") }
 func printGuideCache()           { printTopic("cache") }
 func printGuideSecrets()         { printTopic("secrets") }
 func printGuideSecretGen()       { printTopic("secret-gen") }

@@ -49,7 +49,6 @@ CAPABILITY DERIVATION
   fields are non-nil on Plugin:
 
     Plan           adds "plan" (required for build/convergence plugins)
-    Observe        adds "observe"
     ResolveSecret  adds "resolve_secret"
     StoreSecret    adds "store_secret"
 
@@ -66,10 +65,9 @@ THE PLUGIN STRUCT
       OutputSchema               *SchemaRef
       OutputSchemas              []SchemaRef
 
-      Plan          func(ctx, PlanRequest) (PlanResponse, error)        // optional
-      Observe       func(ctx, ObserveRequest) (ObserveResponse, error)  // optional
-      ResolveSecret func(ctx, ref string) (string, error)               // optional
-      StoreSecret   func(ctx, StoreSecretRequest) error                 // optional
+      Plan          func(ctx, PlanRequest) (PlanResponse, error)  // optional
+      ResolveSecret func(ctx, ref string) (string, error)         // optional
+      StoreSecret   func(ctx, StoreSecretRequest) error           // optional
   }
 
   Methods:
@@ -136,7 +134,6 @@ PORTING A BB PLUGIN
     (case (get req "method") ...)              SDK dispatch
     (defn discover-response [] {...})          Plugin{Name, Version, ...}
     (defn plan-response [req] {...})           Plan: func(ctx, req) {...}
-    (defn observe-response [req] {...})        Observe: func(ctx, req) {...}
     (json/generate-string)                     handled by SDK
     (read-line) loop                           handled by SDK
 

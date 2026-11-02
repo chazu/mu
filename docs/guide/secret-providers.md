@@ -183,8 +183,7 @@ SECRETS section. Recommended subsections (drop any that don't apply):
     rotation behavior.
 
 See plugins/pass/GUIDE.md for a provider example, and
-plugins/host/GUIDE.md / plugins/remote-exec/GUIDE.md for consumer
-examples.
+plugins/remote-exec/GUIDE.md for a consumer example.
 
 ────────────────────────────────────────────────────────────────────
 SEE ALSO

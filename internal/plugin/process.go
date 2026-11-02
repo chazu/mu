@@ -330,6 +330,9 @@ func ValidateDiscoverResponse(resp DiscoverResponse) error {
 	if len(resp.Capabilities) > 0 {
 		seen := make(map[string]struct{}, len(resp.Capabilities))
 		for _, capability := range resp.Capabilities {
+			if why, ok := removedCapabilities[capability]; ok {
+				return fmt.Errorf("capability %q was removed: %s", capability, why)
+			}
 			if _, ok := validCapabilities[capability]; !ok {
 				return fmt.Errorf("unknown capability %q", capability)
 			}
@@ -364,10 +367,15 @@ func ValidateDiscoverResponse(resp DiscoverResponse) error {
 	return nil
 }
 
+// removedCapabilities names methods mu no longer sends, with the reason
+// shown when a plugin still advertises one.
+var removedCapabilities = map[string]string{
+	"observe": "mu is a build tool and no longer has `mu observe`; drop it from discover capabilities",
+}
+
 var validCapabilities = map[string]struct{}{
 	"discover":       {},
 	"plan":           {},
-	"observe":        {},
 	"resolve_secret": {},
 	"store_secret":   {},
 }
@@ -410,29 +418,6 @@ const DefaultResolveSecretTimeout = 30 * time.Second
 // DefaultStoreSecretTimeout is the default timeout for store_secret requests.
 // Symmetric with resolve_secret — backends should respond quickly.
 const DefaultStoreSecretTimeout = 30 * time.Second
-
-// DefaultObserveTimeout is the default timeout for observe requests.
-const DefaultObserveTimeout = 5 * time.Minute
-
-// Observe sends an observe request and returns the response.
-// If the plugin returns an error (e.g., "unknown method"), this is returned
-// as a normal error — the Manager handles fallback to an empty response.
-func (p *Process) Observe(ctx context.Context, target TargetInfo, toolchainArtifacts map[string]string, secrets map[string]string) (*ObserveResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultObserveTimeout)
-	defer cancel()
-
-	var resp ObserveResponse
-	req := NewObserveRequest(target, toolchainArtifacts, secrets)
-	if err := p.send(ctx, req, &resp); err != nil {
-		return nil, err
-	}
-
-	if resp.Error != "" {
-		return nil, fmt.Errorf("plugin %q: observe error: %s", p.name, resp.Error)
-	}
-
-	return &resp, nil
-}
 
 // ResolveSecret sends a resolve_secret request and returns the resolved value.
 // The returned value must never be logged, cached, or stored in CAS.

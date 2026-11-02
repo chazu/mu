@@ -162,6 +162,11 @@ func rejectRemovedFields(val cue.Value, path string) error {
 			name, _ := t.LookupPath(cue.ParsePath("target")).String()
 			return fmt.Errorf("%s: target %q: sealed_routing was removed; strict routing is always on — delete the field", path, name)
 		}
+		if tc, _ := t.LookupPath(cue.ParsePath("toolchain")).String(); tc == "shell" &&
+			t.LookupPath(cue.MakePath(cue.Str("config"), cue.Str("observe_command"))).Exists() {
+			name, _ := t.LookupPath(cue.ParsePath("target")).String()
+			return fmt.Errorf("%s: target %q: observe_command was removed; mu no longer does drift detection — delete the field", path, name)
+		}
 	}
 	return nil
 }

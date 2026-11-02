@@ -221,7 +221,7 @@ func TestValidateDiscoverResponse(t *testing.T) {
 			resp: plugin.DiscoverResponse{
 				Name:         "aws",
 				Version:      "0.1.0",
-				Capabilities: []string{"discover", "observe"},
+				Capabilities: []string{"discover", "plan"},
 				OutputSchemas: []plugin.SchemaRef{
 					{ResourceType: "aws.ec2.instance", Module: "mu/aws", Version: "v1"},
 					{ResourceType: "aws.ec2.vpc", Module: "mu/aws", Version: "v1"},
@@ -252,9 +252,9 @@ func TestValidateDiscoverResponse(t *testing.T) {
 		{
 			name: "discover capability required when capabilities are explicit",
 			resp: plugin.DiscoverResponse{
-				Name:         "observer",
+				Name:         "planner",
 				Version:      "0.1.0",
-				Capabilities: []string{"observe"},
+				Capabilities: []string{"plan"},
 			},
 			wantErr: "capabilities must include discover",
 		},
@@ -263,9 +263,18 @@ func TestValidateDiscoverResponse(t *testing.T) {
 			resp: plugin.DiscoverResponse{
 				Name:         "unknown",
 				Version:      "0.1.0",
-				Capabilities: []string{"discover", "observe", "teleport"},
+				Capabilities: []string{"discover", "plan", "teleport"},
 			},
 			wantErr: "unknown capability",
+		},
+		{
+			name: "removed observe capability rejected",
+			resp: plugin.DiscoverResponse{
+				Name:         "observer",
+				Version:      "0.1.0",
+				Capabilities: []string{"discover", "observe"},
+			},
+			wantErr: `capability "observe" was removed`,
 		},
 		{
 			name: "duplicate capability rejected",
@@ -341,33 +350,6 @@ func TestProcessPlan(t *testing.T) {
 	}
 	if resp.Outputs["mock_output"] != "out.txt" {
 		t.Errorf("Outputs[mock_output] = %q, want out.txt", resp.Outputs["mock_output"])
-	}
-}
-
-func TestProcessRecordObserverContract(t *testing.T) {
-	p := startTestPlugin(t, "mock_observer.sh")
-	resp, err := p.Discover(context.Background())
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if !resp.HasCapability("observe") {
-		t.Fatalf("capabilities = %v, want observe", resp.Capabilities)
-	}
-
-	observed, err := p.Observe(context.Background(), plugin.TargetInfo{
-		Name:      "//fixture",
-		Toolchain: "mock-observer",
-	}, nil, nil)
-	if err != nil {
-		t.Fatalf("Observe: %v", err)
-	}
-	if err := plugin.ValidateRecordObserveResponse(*observed); err != nil {
-		t.Fatalf("ValidateRecordObserveResponse: %v", err)
-	}
-	records := observed.Current["records"].([]any)
-	record := records[0].(map[string]any)
-	if record["_schema"] != "mock.record" {
-		t.Errorf("record _schema = %v, want mock.record", record["_schema"])
 	}
 }
 

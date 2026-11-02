@@ -34,15 +34,12 @@ WRITING A PLUGIN
 
   A plugin is any executable that reads NDJSON on stdin and writes NDJSON
   on stdout. It must implement "discover". Plugins that build or converge
-  targets implement "plan"; observer-only and secret-provider plugins may omit
-  it.
-  Optionally it can implement "observe", "resolve_secret", and
-  "store_secret".
+  targets implement "plan"; secret-provider plugins may omit it.
+  Optionally it can implement "resolve_secret" and "store_secret".
 
   Capabilities:
     discover         (required)  Identify the plugin and its protocol version.
     plan             (optional)  Translate a target into action specs.
-    observe          (optional)  Report current state for drift detection.
     resolve_secret   (optional)  Read a secret value by ref.
     store_secret     (optional)  Write a secret value by ref.
 
@@ -91,8 +88,7 @@ WRITING A PLUGIN
     Canonical example: examples/plugins/hello-go/.
 
     In-tree Go plugins: plugins/{file,pass,keypair-gen,remote-exec,
-    remote-file}. (plugins/host/main.go is an unflipped port of an
-    observe-only plugin that is being deleted.)
+    remote-file}.
 
   OTHER LANGUAGES
 
@@ -138,7 +134,6 @@ WRITING A PLUGIN
       (case (get req "method") ...)          SDK dispatches automatically
       (defn discover-response [] {...})      Plugin{Name, Version, ...}
       (defn plan-response [req] {...})       Plan: func(ctx, req) {...}
-      (defn observe-response [req] {...})    Observe: func(ctx, req) {...}
       (json/generate-string)                 SDK handles all encoding
       (json/parse-string line)               SDK handles all decoding
       (read-line) loop                       SDK dispatch loop
@@ -255,8 +250,8 @@ OFFICIAL SOURCE-PACKAGE CATALOG
   releases. Install a pinned or latest catalog package from inside a mu
   project:
 
-    mu plugin install aws
-    mu plugin install aws@0.1.0
+    mu plugin install k8s
+    mu plugin install k8s@0.4.0
 
   Installation downloads the immutable release asset, verifies its SHA-256,
   builds source-only packages when the catalog declares a build command,
@@ -267,7 +262,7 @@ OFFICIAL SOURCE-PACKAGE CATALOG
   writes the same metadata to `mu-plugin.json` inside the extracted bundle so
   downstream tools can inspect an installed package without its source tree.
 
-  To update a plugin, install the newer version: `mu plugin install aws`
+  To update a plugin, install the newer version: `mu plugin install k8s`
   installs the latest release and rewrites its mu.cue and mu.lock entries.
   Override the catalog for a mirror or local test server with
   `--catalog URL` or `MU_PLUGIN_CATALOG`. The URL must serve the generated
@@ -302,7 +297,7 @@ PLUGIN GUIDES
   surfaced by 'mu plugin info' automatically — your GUIDE.md should
   cover everything info CAN'T tell them. Use this skeleton:
 
-    mu guide plugin <name> — <one-line role: "AWS observer", "k8s applier", ...>
+    mu guide plugin <name> — <one-line role: "k8s applier", "pass secret provider", ...>
 
     <2–4 sentence summary: what it does, what it does NOT do, and the
     stable contract it offers>
@@ -336,14 +331,10 @@ PLUGIN GUIDES
       - State which actions claim which sealed names (mu rejects
         undeclared or unclaimed names at plan time).
 
-    OBSERVATION OUTPUT (omit if no observe capability)
-      Sketch the shape of the JSON the plugin returns. If you ship
-      a CUE output_schema, name it here and link to the schema file.
-
     EXAMPLES
       One worked end-to-end example per major use case (one's fine
       if there's only one). Show the target, the plugins[] entry,
-      and the 'mu build' / 'mu observe' invocation.
+      and the 'mu build' invocation.
 
     TROUBLESHOOTING (optional but appreciated)
       The two or three failure modes you keep seeing in support.
@@ -355,7 +346,6 @@ PLUGIN GUIDES
 
     plugins/pass/GUIDE.md         secret provider, ref grammar, modes
     plugins/sops/GUIDE.md         file-based provider, write policy
-    plugins/host/GUIDE.md         observer, sealed-input file mode
     plugins/remote-exec/GUIDE.md  consumer + emitter, sealed_output_files
     plugins/keypair-gen/GUIDE.md  generator, two-name sealed_outputs contract
 

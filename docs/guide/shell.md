@@ -22,7 +22,9 @@ CONFIG FIELDS
   network           bool (optional, default false) — allow network access.
   impure            bool (optional, default true) — skip CAS cache.
   outputs           []string (optional) — declared output files.
-  observe_command   []string (optional) — command for drift detection.
+
+  observe_command was removed along with mu observe; a config that still
+  sets it fails to load.
 
 AGGREGATION TARGETS
 

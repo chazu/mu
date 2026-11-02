@@ -20,7 +20,6 @@ import (
 //   - network:         bool (optional, default false) — allow network access
 //   - impure:          bool (optional, default true) — skip CAS cache
 //   - outputs:         []string (optional) — declared output files
-//   - observe_command: []string (optional) — command for drift detection
 func ShellPlan(target config.Target) ([]plugin.ActionSpec, map[string]string, error) {
 	cfg := target.Config
 	if cfg == nil {
