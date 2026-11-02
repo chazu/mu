@@ -2,14 +2,13 @@ package config
 
 // ProjectConfig is the top-level configuration loaded from mu.cue.
 type ProjectConfig struct {
-	Targets      []Target       `json:"targets,omitempty"`
-	Toolchains   []Toolchain    `json:"toolchains,omitempty"`
-	Cache        *CacheConfig   `json:"cache,omitempty"`
-	Publish      *PublishConfig `json:"publish,omitempty"`
-	Plugins      []PluginDef    `json:"plugins,omitempty"`
-	Preprocessor *Preprocessor  `json:"preprocessor,omitempty"`
-	Secrets      *SecretsConfig `json:"secrets,omitempty"`
-	Advice       []AdviceDef    `json:"advice,omitempty"`
+	Targets    []Target       `json:"targets,omitempty"`
+	Toolchains []Toolchain    `json:"toolchains,omitempty"`
+	Cache      *CacheConfig   `json:"cache,omitempty"`
+	Publish    *PublishConfig `json:"publish,omitempty"`
+	Plugins    []PluginDef    `json:"plugins,omitempty"`
+	Secrets    *SecretsConfig `json:"secrets,omitempty"`
+	Advice     []AdviceDef    `json:"advice,omitempty"`
 
 	// PluginDirs is populated by the loader — directories (relative to
 	// project root) whose mu.cue contains a "plugin" key. These are
@@ -49,10 +48,6 @@ type Target struct {
 	SealedRouting     string            `json:"sealed_routing,omitempty"`      // empty = convenience routing; "strict" = explicit action claims
 	Plan              []any             `json:"plan,omitempty"`                // pith plan program (alternative to plugin planning)
 	Transform         []any             `json:"transform,omitempty"`           // pith transform program (runs after deps complete)
-	// Optional BRICK classification metadata. PUDL validates these fields.
-	// mu does not validate these — pudl enforces BRICK constraints via CUE.
-	Kind       string `json:"kind,omitempty"`       // "relationship", "interface", "component", "kit"
-	Implements string `json:"implements,omitempty"` // interface this component satisfies
 }
 
 // Toolchain describes a build toolchain and its base environment.
@@ -94,13 +89,6 @@ type AdviceDef struct {
 	Phases       []string          `json:"phases,omitempty"`        // lifecycle phases: "after-build", etc.
 	Config       map[string]any    `json:"config,omitempty"`        // plugin-specific configuration
 	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // name → secret ref for advice secrets
-}
-
-// Preprocessor configures a file preprocessor that transforms non-JSON
-// config files into JSON before loading.
-type Preprocessor struct {
-	Extension string   `json:"extension"`
-	Command   []string `json:"command"`
 }
 
 // PluginManifest is the "plugin" key in a plugin directory's mu.cue.

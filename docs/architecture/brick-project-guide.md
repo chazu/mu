@@ -1,8 +1,8 @@
 # BRICK project guide
 
 This is the current project layout for repositories that use both mu and PUDL.
-BRICK metadata is optional; `mu.cue` and registered `#SystemModel` definitions
-are the executable/configuration surfaces.
+BRICK metadata is optional and lives only in PUDL schemas; `mu.cue` and
+registered `#SystemModel` definitions are the executable/configuration surfaces.
 
 ## Suggested layout
 

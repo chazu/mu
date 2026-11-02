@@ -46,7 +46,7 @@ func FindProjectRoot(startDir string) (string, error) {
 
 // Load reads the project configuration rooted at projectRoot. It loads
 // mu.cue at the root, then walks subdirectories merging any per-package
-// mu.cue files it finds (or the preprocessor extension when configured).
+// mu.cue files it finds.
 func Load(projectRoot string) (*ProjectConfig, error) { return LoadOffline(projectRoot, false) }
 
 // LoadOffline uses cached/local CUE modules without contacting a registry.
@@ -70,10 +70,6 @@ func LoadOffline(projectRoot string, offline bool) (*ProjectConfig, error) {
 // mergeSubdirConfigs walks projectRoot looking for per-package mu.cue
 // files and merges each one into cfg.
 //
-// When the root config declares a preprocessor, the walker uses the
-// preprocessor's extension (mu.<ext>) exclusively and ignores mu.cue in
-// subdirectories. This preserves the existing preprocessor contract.
-//
 // WalkDir (unlike Walk) does not follow symlinks, preventing infinite
 // loops from cyclic symlinks and config injection from outside the
 // project root. In addition, we explicitly skip:
@@ -84,12 +80,6 @@ func LoadOffline(projectRoot string, offline bool) (*ProjectConfig, error) {
 // Symlinked mu.cue files inside otherwise-real subdirectories are
 // filtered out via Lstat + Mode().IsRegular().
 func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool) error {
-	usePP := cfg.Preprocessor != nil && cfg.Preprocessor.Extension != "" && len(cfg.Preprocessor.Command) > 0
-	var ppFileName string
-	if usePP {
-		ppFileName = "mu." + cfg.Preprocessor.Extension
-	}
-
 	return filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -109,29 +99,11 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 			return filepath.SkipDir
 		}
 
-		var subFile, kind string
-		if usePP {
-			pp := filepath.Join(path, ppFileName)
-			if info, err := os.Lstat(pp); err == nil && info.Mode().IsRegular() {
-				subFile = pp
-				kind = "pp"
-			}
-		} else if hasMuCue(path) {
-			subFile = filepath.Join(path, configFileCUE)
-			kind = configFileCUE
-		}
-		if subFile == "" {
+		if !hasMuCue(path) {
 			return nil
 		}
-
-		var partial *ProjectConfig
-		var err error
-		switch kind {
-		case "pp":
-			partial, err = Preprocess(cfg.Preprocessor, subFile)
-		case configFileCUE:
-			partial, err = cueDecoder{offline: len(offline) > 0 && offline[0]}.Decode(path)
-		}
+		subFile := filepath.Join(path, configFileCUE)
+		partial, err := cueDecoder{offline: len(offline) > 0 && offline[0]}.Decode(path)
 		if err != nil {
 			return fmt.Errorf("loading %s: %w", subFile, err)
 		}
@@ -141,11 +113,9 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 			return fmt.Errorf("computing relative path for %s: %w", subFile, err)
 		}
 
-		if kind == configFileCUE {
-			raw, _ := os.ReadFile(subFile)
-			if IsCuePluginDir(raw) {
-				cfg.PluginDirs = append(cfg.PluginDirs, relDir)
-			}
+		raw, _ := os.ReadFile(subFile)
+		if IsCuePluginDir(raw) {
+			cfg.PluginDirs = append(cfg.PluginDirs, relDir)
 		}
 
 		prefix := "//" + filepath.ToSlash(relDir)

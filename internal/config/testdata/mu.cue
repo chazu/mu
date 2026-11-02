@@ -54,7 +54,6 @@ targets: [
 	{
 		target:    "//lint"
 		toolchain: "shell"
-		kind:      "kit"
 		sources: []
 		deps: ["//lint/go-vet", "//lint/gofmt"]
 		config: {

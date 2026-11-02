@@ -30,7 +30,6 @@ TOP-LEVEL KEYS
   cache         Cache configuration (optional).
   secrets       Project-wide secret policy, e.g. writable_refs (optional).
                 See 'mu guide secrets'.
-  preprocessor  Config preprocessor for non-CUE/JSON formats (optional).
 
 TARGET FIELDS
 
@@ -54,9 +53,6 @@ TARGET FIELDS
                        (optional, default overwrite).
   sealed_routing       "strict" — require actions to claim target-level
                        sealed declarations explicitly (optional).
-  kind                 BRICK classification: "relationship",
-                       "interface", "component", "kit" (optional).
-  implements           Interface this component satisfies (optional).
 
 TARGET NAMING
 
@@ -91,17 +87,6 @@ STRICT SEALED ROUTING
   action resolves its inputs immediately before execution. Without
   sealed_routing, the existing target-to-action convenience behavior remains
   in effect. PUDL-generated targets use strict mode.
-
-PREPROCESSOR
-
-  For other config formats (YAML, TOML), define a preprocessor:
-
-  preprocessor: {
-      extension: ".yaml"
-      command: ["yq", "-o", "json"]
-  }
-
-  mu pipes files with matching extension through the command before parsing.
 
 CACHE CONFIG
 

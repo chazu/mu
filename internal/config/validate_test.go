@@ -320,52 +320,6 @@ func TestValidate_ValidCacheBackends(t *testing.T) {
 	}
 }
 
-// --- Preprocessor validation ---
-
-func TestValidate_MissingPreprocessorExtension(t *testing.T) {
-	cfg := &ProjectConfig{
-		Preprocessor: &Preprocessor{
-			Extension: "",
-			Command:   []string{"jsonnet"},
-		},
-	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for missing preprocessor extension")
-	}
-	if !strings.Contains(err.Error(), "missing required field \"extension\"") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
-}
-
-func TestValidate_MissingPreprocessorCommand(t *testing.T) {
-	cfg := &ProjectConfig{
-		Preprocessor: &Preprocessor{
-			Extension: ".jsonnet",
-			Command:   nil,
-		},
-	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for missing preprocessor command")
-	}
-	if !strings.Contains(err.Error(), "missing required field \"command\"") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
-}
-
-func TestValidate_ValidPreprocessor(t *testing.T) {
-	cfg := &ProjectConfig{
-		Preprocessor: &Preprocessor{
-			Extension: ".jsonnet",
-			Command:   []string{"jsonnet"},
-		},
-	}
-	if err := Validate(cfg); err != nil {
-		t.Fatalf("expected valid preprocessor config, got: %v", err)
-	}
-}
-
 func TestValidate_FullValidConfig(t *testing.T) {
 	cfg := &ProjectConfig{
 		Targets: []Target{
@@ -381,10 +335,6 @@ func TestValidate_FullValidConfig(t *testing.T) {
 			Backends: []CacheBackend{
 				{Type: "disk", Path: "/tmp/cache"},
 			},
-		},
-		Preprocessor: &Preprocessor{
-			Extension: ".jsonnet",
-			Command:   []string{"jsonnet"},
 		},
 	}
 	if err := Validate(cfg); err != nil {

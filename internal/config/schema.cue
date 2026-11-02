@@ -16,8 +16,7 @@ package mu
 	cache?:   #CacheConfig
 	publish?: #PublishConfig
 	plugins?: [...#PluginDef]
-	preprocessor?: #Preprocessor
-	secrets?:      #SecretsConfig
+	secrets?: #SecretsConfig
 	...
 }
 
@@ -65,8 +64,6 @@ package mu
 	sealed_outputs?: {[string]: string}
 	sealed_output_modes?: {[string]: "create" | "overwrite" | "create_if_absent"}
 	sealed_routing?: "strict"
-	kind?:           "relationship" | "interface" | "component" | "kit" | ""
-	implements?:     string
 	...
 }
 
@@ -149,13 +146,6 @@ package mu
 	read_repair?:   bool
 	write_through?: bool
 	push?:          #CachePush
-	...
-}
-
-// #Preprocessor transforms non-JSON config files into JSON before loading.
-#Preprocessor: {
-	extension: string & !=""
-	command: [string, ...string]
 	...
 }
 

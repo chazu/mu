@@ -283,3 +283,27 @@ func TestLoad_SkipsHiddenAndTestdata(t *testing.T) {
 		t.Fatalf("expected 1 target (root only), got %d", len(cfg.Targets))
 	}
 }
+
+func TestLoad_RejectsRemovedPreprocessor(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "mu.cue"), minimalCueRoot("//app")+`
+preprocessor: {extension: "json", command: ["cat"]}
+`)
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "preprocessor was removed") {
+		t.Fatalf("Load error = %v, want \"preprocessor was removed\"", err)
+	}
+}
+
+func TestLoad_RejectsRemovedKindImplements(t *testing.T) {
+	for _, field := range []string{`kind: "kit"`, `implements: "//iface"`} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+			`targets: [{target: "x", toolchain: "shell", sources: [], `+field+`}]`)
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "kind/implements were removed") {
+			t.Fatalf("%s: Load error = %v, want \"kind/implements were removed\"", field, err)
+		}
+	}
+}

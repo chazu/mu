@@ -8,12 +8,9 @@ import (
 )
 
 // ManifestTarget describes a target that was part of the build.
-// Carries BRICK classification metadata for round-tripping to pudl.
 type ManifestTarget struct {
-	Name       string `json:"name"`
-	Toolchain  string `json:"toolchain"`
-	Kind       string `json:"kind,omitempty"`       // BRICK kind (set by pudl)
-	Implements string `json:"implements,omitempty"` // BRICK interface (set by pudl)
+	Name      string `json:"name"`
+	Toolchain string `json:"toolchain"`
 }
 
 // ManifestAction describes a single action's outcome in a build manifest.
@@ -77,14 +74,11 @@ func NewManifest(result *BuildResult, execResult *dag.ExecuteResult, targets []c
 		actions = append(actions, ma)
 	}
 
-	// Build target list with BRICK metadata.
 	manifestTargets := make([]ManifestTarget, 0, len(targets))
 	for _, t := range targets {
 		manifestTargets = append(manifestTargets, ManifestTarget{
-			Name:       t.Name,
-			Toolchain:  t.Toolchain,
-			Kind:       t.Kind,
-			Implements: t.Implements,
+			Name:      t.Name,
+			Toolchain: t.Toolchain,
 		})
 	}
 

@@ -221,26 +221,40 @@ func (p *Plugin) discover() DiscoverResponse {
 	return resp
 }
 
-// SecretBackend is the interface for plugins that act purely as secret
-// providers. Implementing this and passing the result to SecretPlugin
-// is a one-liner alternative to setting ResolveSecret + StoreSecret on
-// a Plugin directly.
-type SecretBackend interface {
+// SecretResolver is the read side of a secret provider. Every backend
+// passed to SecretPlugin must implement it.
+type SecretResolver interface {
 	Resolve(ctx context.Context, ref string) (string, error)
+}
+
+// SecretStorer is the optional write side of a secret provider. A backend
+// that does not implement it is read-only: SecretPlugin then omits
+// store_secret from the discover capabilities, so mu rejects any
+// sealed_output routed to it at plan time rather than at execution.
+type SecretStorer interface {
 	Store(ctx context.Context, ref, value, mode string) error
 }
 
-// SecretPlugin wraps a SecretBackend into a Plugin ready for .Main().
+// SecretBackend is a read-write secret provider.
+type SecretBackend interface {
+	SecretResolver
+	SecretStorer
+}
+
+// SecretPlugin wraps a secret backend into a Plugin ready for .Main().
 // Name and Version are required; everything else is wired automatically.
-// The resulting plugin can be registered solely for secret resolution and
-// does not advertise a plan capability.
-func SecretPlugin(name, version string, backend SecretBackend) *Plugin {
-	return &Plugin{
+// The plugin advertises resolve_secret, plus store_secret only when the
+// backend also implements SecretStorer. It does not advertise plan.
+func SecretPlugin(name, version string, backend SecretResolver) *Plugin {
+	p := &Plugin{
 		Name:          name,
 		Version:       version,
 		ResolveSecret: backend.Resolve,
-		StoreSecret: func(ctx context.Context, req StoreSecretRequest) error {
-			return backend.Store(ctx, req.Ref, req.Value, req.Mode)
-		},
 	}
+	if storer, ok := backend.(SecretStorer); ok {
+		p.StoreSecret = func(ctx context.Context, req StoreSecretRequest) error {
+			return storer.Store(ctx, req.Ref, req.Value, req.Mode)
+		}
+	}
+	return p
 }

@@ -81,19 +81,24 @@ THE PLUGIN STRUCT
 
 SECRET-PROVIDER SHORTCUT
 
-  Implement SecretBackend and pass it to SecretPlugin:
+  Implement a backend and pass it to SecretPlugin:
 
-    type SecretBackend interface {
+    type SecretResolver interface {               // required
         Resolve(ctx context.Context, ref string) (string, error)
+    }
+    type SecretStorer interface {                 // optional
         Store(ctx context.Context, ref, value, mode string) error
     }
+    // SecretBackend = SecretResolver + SecretStorer
 
     func main() {
         muplugin.SecretPlugin("pass", "0.1.0", &myPassBackend{}).Main()
     }
 
-  The resulting plugin advertises resolve_secret + store_secret
-  automatically and does not advertise plan.
+  The resulting plugin advertises resolve_secret, plus store_secret
+  only if the backend implements SecretStorer, and does not advertise
+  plan. A read-only backend (Resolve only) therefore makes mu reject
+  any sealed_output routed to it at plan time, not at execution.
 
 TESTING WITHOUT A SUBPROCESS
 

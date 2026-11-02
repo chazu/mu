@@ -121,16 +121,6 @@ func Validate(cfg *ProjectConfig) error {
 		}
 	}
 
-	// Validate preprocessor.
-	if cfg.Preprocessor != nil {
-		if cfg.Preprocessor.Extension == "" {
-			errs = append(errs, "preprocessor: missing required field \"extension\"")
-		}
-		if len(cfg.Preprocessor.Command) == 0 {
-			errs = append(errs, "preprocessor: missing required field \"command\"")
-		}
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  %s", strings.Join(errs, "\n  "))
 	}

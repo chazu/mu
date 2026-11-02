@@ -1,7 +1,7 @@
 # BRICK ecosystem: current mu and PUDL boundaries
 
-BRICK metadata is an optional classification layer shared by mu targets and
-PUDL schemas. It does not create a second executor or an implicit translation
+BRICK metadata is an optional classification layer on PUDL schemas; mu
+targets do not carry it. It does not create a second executor or an implicit translation
 pipeline.
 
 ## Ownership
@@ -13,9 +13,8 @@ pipeline.
 | Secret provider resolution and storage | mu |
 | Durable model/run-set provenance | PUDL |
 
-Mu does not validate BRICK contracts. PUDL may use the optional `kind` and
-`implements` metadata when it classifies or reports resources; mu preserves
-those fields in target/manifest metadata while executing the target normally.
+Mu does not know about BRICK. Its targets and build manifests have no `kind`
+or `implements` fields; a mu.cue that sets them fails to load.
 
 ## Current workflow
 

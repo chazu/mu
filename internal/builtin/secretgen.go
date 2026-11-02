@@ -20,8 +20,8 @@ import (
 //   - ref         (string, required) — destination secret ref, e.g.
 //     "pass:registry/admin". Must be of the form scheme:path.
 //   - derivation  ([]string, required) — argv whose stdout becomes the
-//     stored value. Trailing newlines are stripped before
-//     storing.
+//     stored value. A non-zero exit or an empty value fails the
+//     action, so nothing is stored.
 //   - mode        (string, optional) — "create" | "overwrite" |
 //     "create_if_absent" (default).
 //   - env         (map[string]string, optional) — extra env for the
@@ -78,18 +78,30 @@ func SecretGenPlan(target config.Target) ([]plugin.ActionSpec, map[string]string
 	// stdout into the side-channel file and (optionally) trim a single
 	// trailing newline. Quoting argv via printf %q keeps spaces and weird
 	// characters safe.
+	//
+	// Both paths must fail the action (so nothing is stored) when the
+	// derivation exits non-zero or emits nothing. errexit does not fire
+	// inside a command substitution, so the default path chains the
+	// sentinel with && — a failing derivation then skips the sentinel and
+	// the substitution's status propagates to the assignment.
 	argv := derivationToShell(derivation)
 	const outName = "VALUE"
+	const emptyErr = `{ echo 'secret-gen: derivation produced an empty value' >&2; exit 1; }`
 	var script string
 	if keepNewline {
-		script = fmt.Sprintf(`set -eu; %s > "$MU_SEALED_OUT_DIR/%s"`, argv, outName)
+		script = fmt.Sprintf(`set -eu
+%s > "$MU_SEALED_OUT_DIR/%s"
+[ -s "$MU_SEALED_OUT_DIR/%s" ] || %s`, argv, outName, outName, emptyErr)
 	} else {
 		// Capture, strip exactly one trailing newline if present, write.
+		// The trailing "x" sentinel keeps $(...) from stripping every
+		// trailing newline.
 		script = fmt.Sprintf(`set -eu
-v=$(%s; printf x)
+v=$(%s && printf x) || exit $?
 v=${v%%x}
 v=${v%%$'\n'}
-printf '%%s' "$v" > "$MU_SEALED_OUT_DIR/%s"`, argv, outName)
+[ -n "$v" ] || %s
+printf '%%s' "$v" > "$MU_SEALED_OUT_DIR/%s"`, argv, emptyErr, outName)
 	}
 
 	action := plugin.ActionSpec{
