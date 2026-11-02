@@ -104,7 +104,7 @@ Native Go plugins need to ship as binaries. Three viable distribution modes; thi
 | Mode | How | When to use |
 |------|-----|-------------|
 | **Build in-tree** | `plugins/<name>/mu.cue` declares a `go` build target. `mu build //plugins/<name>` produces the binary; the plugin manifest's `entrypoint` points at the built artifact. | Users who already have mu + the go toolchain. The reference path. |
-| **OCI push/pull** | `mu plugin push` (already implemented) publishes the plugin to a registry. Users `mu plugin add <name> --digest sha256:...`. | Sharing across projects without building locally. |
+| **OCI push/pull** | OCI plugin publishing (since removed; the GitHub release catalog is now the only distribution channel) published the plugin to a registry. Users `mu plugin add <name> --digest sha256:...`. | Sharing across projects without building locally. |
 | **Prebuilt release** | GitHub release contains `mu-plugin-<name>-<os>-<arch>` binaries; mu fetches by URL+SHA on first use. | Bootstrap when neither go toolchain nor mu CAS is populated. |
 
 **Bootstrap problem:** Today, building any Go binary requires the `go` toolchain, which mu scratch-builds. Building a Go plugin to *replace* a bb plugin needs the go toolchain to already be available. Resolution:

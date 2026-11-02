@@ -676,63 +676,7 @@ func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, 
 		return result, err
 	}
 
-	// Bundle any plugin directories whose targets were built.
-	if err := c.bundlePlugins(ctx, targetNames); err != nil {
-		return result, fmt.Errorf("coordinator: bundling plugins: %w", err)
-	}
-
 	return result, nil
-}
-
-// bundlePlugins checks if any of the built targets belong to a plugin
-// directory (as declared by PluginDirs from the config loader). For each
-// match, it bundles the directory into CAS via the plugin resolver.
-func (c *Coordinator) bundlePlugins(ctx context.Context, targetNames []string) error {
-	if len(c.Config.PluginDirs) == 0 {
-		return nil
-	}
-
-	// Expand wildcards in target names to get actual target names. No
-	// error on zero matches here — bundling is a side effect of a
-	// already-validated build invocation.
-	tnames := make([]string, 0, len(c.Config.Targets))
-	for _, t := range c.Config.Targets {
-		tnames = append(tnames, t.Name)
-	}
-	expanded, _ := expandTargetWildcards(targetNames, tnames, false)
-
-	// Check which plugin directories had targets built.
-	home, _ := os.UserHomeDir()
-	resolver := &PluginResolver{
-		Store:       c.Store,
-		ProjectRoot: c.ProjectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
-	}
-
-	for _, pluginDir := range c.Config.PluginDirs {
-		prefix := "//" + filepath.ToSlash(pluginDir)
-		for _, tname := range expanded {
-			if strings.HasPrefix(tname, prefix) {
-				// This plugin directory had a target built — bundle it.
-				manifest, err := config.LoadPluginManifest(filepath.Join(c.ProjectRoot, pluginDir))
-				if err != nil {
-					return fmt.Errorf("plugin dir %s: %w", pluginDir, err)
-				}
-				dirPath := filepath.Join(c.ProjectRoot, pluginDir)
-				dgst, err := resolver.bundleDir(ctx, dirPath, manifest.Plugin.Files)
-				if err != nil {
-					return fmt.Errorf("bundle %s: %w", pluginDir, err)
-				}
-				// Extract so it's ready for use.
-				name := filepath.Base(pluginDir)
-				if _, err := resolver.extractDirFromCAS(ctx, name, dgst); err != nil {
-					return fmt.Errorf("extract %s: %w", pluginDir, err)
-				}
-				break // only bundle once per plugin dir
-			}
-		}
-	}
-	return nil
 }
 
 // ObserveResult holds the observation result for a single target.

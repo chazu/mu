@@ -71,11 +71,3 @@ PREREQUISITES
 CAPABILITIES
 
   discover, observe
-
-CONTRACT FIXTURE
-
-  Run the deterministic observer fixture without contacting AWS:
-
-    MU_AWS_FIXTURE=1 \
-      PATH="$PWD/plugins/aws/testdata/bin:$PATH" \
-      mu plugin test plugins/aws

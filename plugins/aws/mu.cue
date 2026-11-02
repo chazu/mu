@@ -11,12 +11,3 @@ plugin: {
 		path:    "schemas/mu/aws"
 	}]
 }
-targets: [{
-	target:    "build"
-	toolchain: "shell"
-	sources: ["plugin.bb"]
-	config: {
-		command: ["true"]
-		impure: false
-	}
-}]

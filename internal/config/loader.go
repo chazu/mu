@@ -126,11 +126,6 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 			return fmt.Errorf("computing relative path for %s: %w", subFile, err)
 		}
 
-		raw, _ := os.ReadFile(subFile)
-		if IsCuePluginDir(raw) {
-			cfg.PluginDirs = append(cfg.PluginDirs, relDir)
-		}
-
 		prefix := "//" + filepath.ToSlash(relDir)
 		prefix = strings.TrimSuffix(prefix, "/.")
 

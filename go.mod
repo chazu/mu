@@ -16,11 +16,10 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	golang.org/x/term v0.42.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819 // indirect
+	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect

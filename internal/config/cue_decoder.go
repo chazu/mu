@@ -166,20 +166,6 @@ func rejectRemovedFields(val cue.Value, path string) error {
 	return nil
 }
 
-// IsCuePluginDir reports whether the given mu.cue file (raw bytes)
-// contains a top-level "plugin" field. This mirrors IsPluginDir for the
-// JSON decoder and is used by callers (e.g. the project loader) to
-// decide whether a sub-tree mu.cue is a plugin manifest.
-func IsCuePluginDir(data []byte) bool {
-	ctx := cuecontext.New()
-	v := ctx.CompileBytes(data, cue.Filename("mu.cue"))
-	if v.Err() != nil {
-		return false
-	}
-	p := v.LookupPath(cue.ParsePath("plugin"))
-	return p.Exists()
-}
-
 // compileSchemaDefs compiles the embedded schema.cue in the given context
 // and returns the root value together with the #ProjectConfig and
 // #PluginConfig definitions.

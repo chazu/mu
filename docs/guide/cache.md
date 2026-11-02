@@ -202,7 +202,7 @@ AUTHENTICATION
   On a TTY, username/password are prompted interactively when omitted.
 
   Credential storage is asymmetric:
-    Writes (login, cache push, plugin push)
+    Writes (login, cache push, build --publish)
       Stored in ~/.mu/credentials.json (Docker-format JSON, plaintext).
       mu deliberately avoids the Docker credential chain for writes so it
       never needs a credential-helper binary (e.g. docker-credential-desktop).
@@ -223,21 +223,18 @@ PLUGIN STORAGE
   CAS directly. Built plugin bundles are extracted to ~/.mu/plugins/<name>/.
   Directory bundles use bundle-<full-sha256> and are published only after
   successful extraction. Interrupted extraction leaves no reusable bundle.
-  Older bundles are retained for running processes. Plugin push selects the
-  build's resolved digest rather than combining cached versions.
+  Older bundles are retained for running processes.
 
 REMOTE METADATA BUDGETS
 
-  OCI manifests and action-result configs are limited to 8 MiB each. Plugin
-  configs and plugin indexes are limited to 4 MiB each. These budgets are
-  independent of large artifact layer blobs. A representative 20,000-output
+  OCI manifests and action-result configs are limited to 8 MiB each. These
+  budgets are independent of large artifact layer blobs. A representative 20,000-output
   action config fits within its budget.
 
   Declared oversized descriptors fail before fetch. Actual transfer bytes,
   including trailing whitespace, are also bounded before JSON decoding, so
   inaccurate sizes cannot bypass the limit. Errors identify the metadata kind
-  and byte budget; split oversized output sets or plugin indexes into smaller
-  artifacts. Native code rejects trailing JSON and closes streams on failure.
+  and byte budget; split oversized output sets into smaller artifacts. Native code rejects trailing JSON and closes streams on failure.
 
 REGISTRY OUTAGES AND LOCAL OPERATION
 

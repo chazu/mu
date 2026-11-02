@@ -6,12 +6,3 @@ plugin: {
 	files: ["plugin.bb", "gather.sh"]
 	guide: "GUIDE.md"
 }
-targets: [{
-	target:    "build"
-	toolchain: "shell"
-	sources: ["plugin.bb", "gather.sh"]
-	config: {
-		command: ["true"]
-		impure: false
-	}
-}]
