@@ -175,7 +175,6 @@ Rules:
 
 - **Use `mu/<x>` only when you are the author of plugin `<x>`.** The
   segment after `mu/` must match the plugin's directory name.
-  `mu verify` warns when a plugin declares a `mu/<other>` namespace.
 - **Use `pudl/...` only for first-party pudl schemas.** Plugins should
   not invent or shadow `pudl/...` packages.
 - **Anything else is fair game** for third-party or experimental work.

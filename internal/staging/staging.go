@@ -71,7 +71,6 @@ func DefaultRules(home, tmp string) []Rule {
 		{Dir: filepath.Join(cache, "ingest")},
 		{Dir: filepath.Join(mu, "plugins"), Prefixes: []string{".bundle-", ".plugin-"}, Depth: 1},
 		{Dir: filepath.Join(mu, "toolchains"), Prefixes: []string{".tool-"}, Depth: 2},
-		{Dir: filepath.Join(mu, "schemas"), Prefixes: []string{".tmp-"}, Depth: 8},
 		{Dir: mu, Prefixes: []string{".discover-cache-"}},
 		{Dir: tmp, Prefixes: []string{
 			"mu-cas-replay-", "mu-oci-blob-", "mu-plugin-fetch-", "mu-plugin-install-",

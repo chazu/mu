@@ -132,12 +132,3 @@ func TestOfflineMissingRequiredPluginFailsWithoutSubstitution(t *testing.T) {
 		t.Fatalf("offline publish was not rejected: %d, %s", code, output)
 	}
 }
-
-func TestExplicitRemoteDiscoveryDoesNotReportOutageAsEmptySuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
-	defer server.Close()
-	root := outageFixture(t, strings.TrimPrefix(server.URL, "http://")+"/cache", false, []map[string]any{}, nil)
-	if code := runPluginList([]string{"--config", filepath.Join(root, "mu.cue"), "--remote", "--json"}); code != exitFail {
-		t.Fatalf("unavailable registry reported success: %d", code)
-	}
-}

@@ -9,11 +9,6 @@ type ProjectConfig struct {
 	Plugins    []PluginDef    `json:"plugins,omitempty"`
 	Secrets    *SecretsConfig `json:"secrets,omitempty"`
 	Advice     []AdviceDef    `json:"advice,omitempty"`
-
-	// PluginDirs is populated by the loader — directories (relative to
-	// project root) whose mu.cue contains a "plugin" key. These are
-	// bundled into CAS after their build targets complete.
-	PluginDirs []string `json:"-"`
 }
 
 // SecretsConfig holds project-wide policy for the secret subsystem.

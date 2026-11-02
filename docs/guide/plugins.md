@@ -201,7 +201,6 @@ BUILDING AND DISTRIBUTING PLUGINS
                                  cached). Works outside any mu project.
   mu plugin status               Reconcile declared plugins against the
                                  local cache (ok / missing / stale / local).
-  mu plugin push                 Publish a plugin to a configured OCI cache.
 
 OFFICIAL SOURCE-PACKAGE CATALOG
 
@@ -236,9 +235,9 @@ OFFICIAL SOURCE-PACKAGE CATALOG
   catalog JSON; package assets are still fetched from the HTTPS asset URLs
   recorded in that catalog.
 
-  Local `script:` plugins, digest references, direct command plugins, and OCI
-  plugin push/pull remain supported. Catalog installation is a source-package
-  distribution path layered on top of the same CAS resolver.
+  The catalog is the only plugin distribution channel. Local `script:`
+  plugins, digest references, and direct command plugins resolve through the
+  same CAS resolver.
 
 PLUGIN GUIDES
 
@@ -362,9 +361,6 @@ OUTPUT SCHEMAS (optional, for plugins whose output flows into pudl)
     pudl/...         first-party pudl schemas
     mu/<plugin>      schemas authored by the plugin's authors
     anything else    third-party / user-defined
-
-  'mu verify' warns when a plugin claims a mu/<x> namespace whose <x>
-  doesn't match its directory name.
 
   Full plugin-author guide: docs/plugin-output-schemas.md.
 

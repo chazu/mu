@@ -141,9 +141,9 @@ mu scratch    Build toolchains from scratch
 mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
 mu target     List and inspect targets
 mu graph      Show dependency chains (ASCII/DOT/JSON)
-mu plugin     Search, install, update, list, inspect, add, push, test plugins
+mu plugin     Search, install, update, list, inspect, add plugins
 mu observe    Drift detection (pipe --json into pudl)
-mu verify     Validate CAS integrity + schema namespaces
+mu verify     Validate CAS integrity
 mu guide      Quick-reference help topics
 mu version
 ```
