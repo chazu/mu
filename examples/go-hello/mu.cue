@@ -14,7 +14,7 @@ plugins: [{
 	script: "../../plugins/go/plugin.bb"
 }]
 targets: [{
-	target:    "hello"
+	target:    "//hello"
 	toolchain: "go"
 	sources: ["go.mod", "go.sum", "cmd/hello/main.go"]
 	config: {
