@@ -212,7 +212,10 @@
                                 "inputs"     inputs
                                 "outputs"    []
                                 "depends_on" []
-                                "env"        {}
+                                ;; No "env": these impure actions inherit
+                                ;; mu's environment (PATH, HOME, KUBECONFIG).
+                                ;; An "env": {} would run kubectl in an empty
+                                ;; environment.
                                 "network"    true
                                 "impure"     true}
                                (attach-sealed-inputs sealed sealed-modes))
@@ -224,7 +227,6 @@
                                           "inputs"         {}
                                           "outputs"        []
                                           "depends_on"     ["apply"]
-                                          "env"            {}
                                           "network"        true
                                           "impure"         true
                                           "sealed_outputs" sealed-out}

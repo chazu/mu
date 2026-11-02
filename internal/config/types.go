@@ -8,12 +8,6 @@ type ProjectConfig struct {
 	Publish    *PublishConfig `json:"publish,omitempty"`
 	Plugins    []PluginDef    `json:"plugins,omitempty"`
 	Secrets    *SecretsConfig `json:"secrets,omitempty"`
-	Advice     []AdviceDef    `json:"advice,omitempty"`
-
-	// PluginDirs is populated by the loader — directories (relative to
-	// project root) whose mu.cue contains a "plugin" key. These are
-	// bundled into CAS after their build targets complete.
-	PluginDirs []string `json:"-"`
 }
 
 // SecretsConfig holds project-wide policy for the secret subsystem.
@@ -45,8 +39,6 @@ type Target struct {
 	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name → delivery mode: "env" (default) or "file"
 	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name → secret ref; action writes to $MU_SEALED_OUT_DIR/<name>
 	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"` // file name → store mode: create, overwrite, or create_if_absent
-	Plan              []any             `json:"plan,omitempty"`                // pith plan program (alternative to plugin planning)
-	Transform         []any             `json:"transform,omitempty"`           // pith transform program (runs after deps complete)
 }
 
 // Toolchain describes a build toolchain and its base environment.
@@ -77,17 +69,6 @@ type PluginDef struct {
 	URL     string   `json:"url,omitempty"`
 	SHA256  string   `json:"sha256,omitempty"`
 	Digest  string   `json:"digest,omitempty"`
-}
-
-// AdviceDef declares an advice plugin and its configuration.
-// Advice plugins are observers — they react to build lifecycle events
-// (e.g., posting results to a webhook) but do not produce build actions.
-// Advice errors are non-fatal to the build.
-type AdviceDef struct {
-	Plugin       string            `json:"plugin"`                  // plugin name (must match a plugin in plugins[])
-	Phases       []string          `json:"phases,omitempty"`        // lifecycle phases: "after-build", etc.
-	Config       map[string]any    `json:"config,omitempty"`        // plugin-specific configuration
-	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // name → secret ref for advice secrets
 }
 
 // PluginManifest is the "plugin" key in a plugin directory's mu.cue.

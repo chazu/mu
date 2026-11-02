@@ -129,7 +129,7 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 		Retries:           2,
 		RetryBackoffMs:    250,
 		Toolchain:         map[string]cas.Digest{"bin/apply": toolDigest},
-		Sources:           []string{"desired.json"},
+		InputPaths:        map[string]string{"desired.json": "desired.json"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 			Retries           int               `json:"retries"`
 			RetryBackoffMs    int               `json:"retry_backoff_ms"`
 			Toolchain         map[string]string `json:"toolchain"`
-			Sources           []string          `json:"sources"`
+			InputPaths        map[string]string `json:"input_paths"`
 		} `json:"actions"`
 	}
 	if err := json.Unmarshal(payload, &plan); err != nil {
@@ -221,31 +221,7 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 	if !action.Network || !action.Impure || action.WorkDir != "deploy" || action.TimeoutS != 30 || action.Retries != 2 || action.RetryBackoffMs != 250 {
 		t.Errorf("execution policy fields were not preserved: %#v", action)
 	}
-	if len(action.Command) != 2 || len(action.Outputs) != 1 || len(action.DependsOn) != 1 || action.Env["MODE"] != "test" || len(action.Sources) != 1 {
+	if len(action.Command) != 2 || len(action.Outputs) != 1 || len(action.DependsOn) != 1 || action.Env["MODE"] != "test" || action.InputPaths["desired.json"] != "desired.json" {
 		t.Errorf("action projection incomplete: %#v", action)
-	}
-}
-
-func TestPlanJSONProjectsBodyAndEweExecutionForms(t *testing.T) {
-	eweDigest, err := cas.ParseDigest("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-	if err != nil {
-		t.Fatal(err)
-	}
-	graph := dag.NewGraph()
-	if err := graph.AddAction(&dag.Action{ID: "//app:body", Body: []any{"apply"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := graph.AddAction(&dag.Action{ID: "//app:ewe", EweRef: eweDigest}); err != nil {
-		t.Fatal(err)
-	}
-	document := newPlanJSONDocument(&coordinator.PlanResult{Graph: graph}, []string{"//app"})
-	if len(document.Actions) != 2 {
-		t.Fatalf("actions = %d, want 2", len(document.Actions))
-	}
-	if len(document.Actions[0].Body) != 1 || document.Actions[0].Command != nil {
-		t.Errorf("body action projection = %#v", document.Actions[0])
-	}
-	if document.Actions[1].EweDigest != eweDigest.String() || document.Actions[1].Command != nil {
-		t.Errorf("ewe action projection = %#v", document.Actions[1])
 	}
 }

@@ -76,7 +76,8 @@ store_secret
 
   The mode comes from sealed_output_modes. Target authors may declare it in
   mu.cue, and action plugins forward the per-name mode onto each ActionSpec at
-  plan time. Missing modes default to "overwrite". Validate the effective mode
+  plan time. Missing modes default to "overwrite" (secret-gen targets
+  default to "create_if_absent"). Validate the effective mode
   and reject anything else explicitly.
 
   Like resolve_secret, never log the value. If your backend's CLI
@@ -124,8 +125,8 @@ DELIVERY MODE GUIDANCE
   - Short single-line secrets (passwords, tokens) → env mode.
   - Multi-line / binary / >4 KB secrets (SSH keys, kubeconfigs,
     GCP service-account JSON) → recommend 'file' in your GUIDE.md.
-  - Sandbox-pinned (toolchain-built) actions reject file mode.
-    Document this if your action runs sandboxed.
+  - File mode works in sandboxed actions too: the file is written
+    inside the sandbox root and removed when the command exits.
 
 NETWORK + IMPURE
 
@@ -178,8 +179,7 @@ SECRETS section. Recommended subsections (drop any that don't apply):
     which sealed_output_modes are meaningful.
   - Ref grammar (providers only): full syntax, sub-prefixes, examples.
   - A worked writable_refs pattern users can paste into mu.cue.
-  - Caveats: forced-impure actions, sandbox + file-mode incompat,
-    rotation behavior.
+  - Caveats: forced-impure actions, rotation behavior.
 
 See plugins/pass/GUIDE.md for a provider example, and
 plugins/host/GUIDE.md / plugins/remote-exec/GUIDE.md for consumer
@@ -192,5 +192,6 @@ SEE ALSO
   mu guide secrets              User-facing reference.
   mu guide secret-gen           secret-gen toolchain (calls store_secret).
   mu guide protocol             Wire format for resolve_secret / store_secret.
-  docs/secrets-write-policy.md  writable_refs allow-list.
-  docs/sealed-input-delivery-modes.md   env vs file delivery details.
+                                ('mu guide secrets' also covers the
+                                writable_refs allow-list and env vs
+                                file delivery.)

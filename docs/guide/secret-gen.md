@@ -14,38 +14,63 @@ BASIC USAGE
 
   target: "//secrets/admin-pass"
   toolchain: "secret-gen"
-  sealed_outputs:      {VALUE: "pass:registry/admin"}
-  sealed_output_modes: {VALUE: "create_if_absent"}
+  sealed_outputs: {VALUE: "pass:registry/admin"}
+  // sealed_output_modes: {VALUE: "create_if_absent"}  (the default)
   config: {
-      ref:        "pass:registry/admin"
       derivation: ["openssl", "rand", "-base64", "24"]
-      // mode defaults to "create_if_absent"
   }
 
-  The secret-gen action claims a sealed output named VALUE with
-  config.ref and config.mode. Sealed routing is strict, so the target
-  must declare that same output: sealed_outputs: {VALUE: <ref>} and
-  sealed_output_modes: {VALUE: <mode>} (the target-level mode default
-  is "overwrite", so state create_if_absent explicitly). Any
-  sealed_inputs the target declares are claimed by the action and
-  available to the derivation.
+  The destination is named in one place: the target's sealed_outputs,
+  which must have exactly one entry. Its name is free (VALUE by
+  convention); its ref has the form scheme:path, and the scheme must
+  resolve to a plugin declaring the store_secret capability. The mode
+  comes from sealed_output_modes for that name and defaults to
+  create_if_absent for secret-gen (other toolchains default to
+  overwrite). Any sealed_inputs the target declares are claimed by the
+  action and available to the derivation.
+
+  config.ref and config.mode were removed; setting either fails
+  planning with a message naming the sealed_outputs /
+  sealed_output_modes entry to write instead.
+
+HOW IT WORKS
+
+  A secret-gen target plans into exactly one action:
+
+    1. The action runs the derivation argv under bash.
+    2. Its stdout is captured and, by default, one trailing newline
+       is stripped.
+    3. The value is written to $MU_SEALED_OUT_DIR/<NAME>, where NAME
+       is the target's sealed_outputs key — a per-action 0700
+       directory the executor creates.
+    4. After the action exits successfully, mu reads that file and
+       routes it through the provider's store_secret with the
+       selected mode.
+    5. The directory is removed whether or not the action succeeded,
+       and the value buffer is zeroed after routing.
+
+TARGET FIELDS
+
+  sealed_outputs       (required) Exactly one entry: name -> ref.
+  sealed_output_modes  (optional) name -> "create" | "overwrite" |
+                       "create_if_absent" (default).
 
 CONFIG FIELDS
 
-  ref         (required) Destination secret ref, of the form
-              scheme:path. The scheme must resolve to a plugin
-              declaring the store_secret capability.
   derivation  (required) []string — argv whose stdout becomes the
               stored value. If it exits non-zero, or its output is
               empty (after the optional newline strip), the build
               fails and nothing is stored.
-  mode        (optional) "create" | "overwrite" | "create_if_absent"
-              (default).
   env         (optional) Extra env vars for the derivation.
   keep_trailing_newline  (optional, default false) If false, strip
               a single trailing newline from the derivation's
               stdout before storing (the right thing for openssl
-              rand, uuidgen, etc.).
+              rand, uuidgen, etc.). Set true when the trailing
+              newline matters, e.g. a PEM block whose consumers
+              expect it.
+
+  sources, outputs, and network are not used and are ignored if
+  present. The derivation runs without network access.
 
 PICKING A MODE
 
@@ -77,10 +102,8 @@ WORKED EXAMPLE — bootstrap zot's admin password
           target:    "//secrets/zot-admin"
           toolchain: "secret-gen"
           sources: []
-          sealed_outputs:      {VALUE: "pass:registry/admin"}
-          sealed_output_modes: {VALUE: "create_if_absent"}
+          sealed_outputs: {VALUE: "pass:registry/admin"}
           config: {
-              ref:        "pass:registry/admin"
               derivation: ["openssl", "rand", "-base64", "32"]
           }
       },
@@ -104,7 +127,7 @@ WORKED EXAMPLE — bootstrap zot's admin password
 
 COOKBOOK — common derivations
 
-  All examples below assume mode: create_if_absent (the default) and
+  All examples below assume the create_if_absent mode (the default) and
   scheme: pass:. Swap "pass:..." for "sops:<file>#<key>" to land in a
   SOPS-encrypted file instead.
 
@@ -130,15 +153,13 @@ COOKBOOK — common derivations
       // env-supplied plaintext keeps it off the argv. Pair this with a
       // secret-gen target that produces RAW_PASS into pass:foo/raw.
       config: {
-          ref:        "pass:registry/htpasswd-line"
           derivation: ["sh", "-c",
                        "htpasswd -nbBC 12 admin \"$RAW_PASS\""]
           env: {RAW_PASS: ""}    // runner overrides via sealed_inputs below
       }
-      sealed_inputs:       {RAW_PASS: "pass:registry/raw-pass"}
-      sealed_input_modes:  {RAW_PASS: "env"}
-      sealed_outputs:      {VALUE: "pass:registry/htpasswd-line"}
-      sealed_output_modes: {VALUE: "create_if_absent"}
+      sealed_inputs:      {RAW_PASS: "pass:registry/raw-pass"}
+      sealed_input_modes: {RAW_PASS: "env"}
+      sealed_outputs:     {VALUE: "pass:registry/htpasswd-line"}
 
   Diceware-style passphrase (requires 'diceware' or similar; example
   uses pwgen):
@@ -165,12 +186,22 @@ COOKBOOK — common derivations
 WHAT SECRET-GEN IS NOT
 
   - Not a generic "run-once" toolchain. It only handles the
-    derive-then-store pattern.
+    derive-then-store pattern. To mint something that lives in the
+    filesystem, use shell with outputs.
   - Not a way to read a secret. Use sealed_inputs for that.
   - Not aware of the value. mu sees the bytes only briefly,
-    in memory, between the side-channel read and store_secret.
+    in memory, between the side-channel read and store_secret. They
+    are never written outside the per-action directory, logged, or
+    hashed into the cache key.
+
+PROVIDER SUPPORT
+
+  The destination scheme must map to a registered plugin that
+  declares store_secret. Bundled: pass (plugins/pass) and sops
+  (plugins/sops). To add a backend, implement store_secret; see
+  'mu guide secret-providers'.
 
 SEE ALSO
 
-  mu guide secrets         The full secrets reference.
-  docs/secret-gen-toolchain.md   In-depth design notes.
+  mu guide secrets           The full secrets reference.
+  mu guide secret-providers  Implementing store_secret.

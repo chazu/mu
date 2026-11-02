@@ -16,10 +16,10 @@ import (
 
 func TestSecretGenPlan_DefaultsToCreateIfAbsent(t *testing.T) {
 	target := config.Target{
-		Name:      "//secrets/admin-pass",
-		Toolchain: "secret-gen",
+		Name:          "//secrets/admin-pass",
+		Toolchain:     "secret-gen",
+		SealedOutputs: map[string]string{"VALUE": "pass:registry/admin"},
 		Config: map[string]any{
-			"ref":        "pass:registry/admin",
 			"derivation": []any{"openssl", "rand", "-base64", "24"},
 		},
 	}
@@ -48,8 +48,8 @@ func TestSecretGenPlan_ClaimsTargetSealedInputs(t *testing.T) {
 		Toolchain:        "secret-gen",
 		SealedInputs:     map[string]string{"RAW_PASS": "pass:registry/raw"},
 		SealedInputModes: map[string]string{"RAW_PASS": "env"},
+		SealedOutputs:    map[string]string{"VALUE": "pass:registry/htpasswd"},
 		Config: map[string]any{
-			"ref":        "pass:registry/htpasswd",
 			"derivation": []any{"sh", "-c", `printf '%s' "$RAW_PASS"`},
 		},
 	}
@@ -63,32 +63,113 @@ func TestSecretGenPlan_ClaimsTargetSealedInputs(t *testing.T) {
 	}
 }
 
-func TestSecretGenPlan_RejectsBadRef(t *testing.T) {
+// The single sealed_outputs entry names the destination under any name;
+// its sealed_output_modes entry, when present, overrides the default.
+func TestSecretGenPlan_SealedOutputNameAndMode(t *testing.T) {
 	target := config.Target{
-		Name:      "//x",
-		Toolchain: "secret-gen",
-		Config: map[string]any{
-			"ref":        "no-scheme",
-			"derivation": []any{"true"},
-		},
+		Name:              "//x",
+		Toolchain:         "secret-gen",
+		SealedOutputs:     map[string]string{"OUT": "pass:x/y"},
+		SealedOutputModes: map[string]string{"OUT": "overwrite"},
+		Config:            map[string]any{"derivation": []any{"echo", "hunter2"}},
 	}
-	if _, _, err := SecretGenPlan(target); err == nil {
-		t.Fatal("expected error for ref without scheme")
+	actions, _, err := SecretGenPlan(target)
+	if err != nil {
+		t.Fatalf("SecretGenPlan: %v", err)
+	}
+	a := actions[0]
+	if a.SealedOutputs["OUT"] != "pass:x/y" || a.SealedOutputModes["OUT"] != "overwrite" || len(a.SealedOutputs) != 1 {
+		t.Fatalf("claims = %v / %v, want OUT -> pass:x/y overwrite", a.SealedOutputs, a.SealedOutputModes)
+	}
+	dir := t.TempDir()
+	cmd := exec.CommandContext(context.Background(), a.Command[0], a.Command[1:]...)
+	cmd.Env = append([]string{}, "MU_SEALED_OUT_DIR="+dir, "PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated script failed: %v\noutput: %s", err, out)
+	}
+	if got := readFile(t, dir+"/OUT"); got != "hunter2" {
+		t.Errorf("stored value = %q, want hunter2", got)
 	}
 }
 
-func TestSecretGenPlan_RejectsUnknownMode(t *testing.T) {
-	target := config.Target{
-		Name:      "//x",
-		Toolchain: "secret-gen",
-		Config: map[string]any{
-			"ref":        "pass:x/y",
-			"derivation": []any{"true"},
-			"mode":       "wat",
-		},
+func TestSecretGenDefaults_DoesNotMutateTarget(t *testing.T) {
+	modes := map[string]string{}
+	target := config.Target{SealedOutputs: map[string]string{"VALUE": "pass:x"}, SealedOutputModes: modes}
+	got := SecretGenDefaults(target)
+	if got.SealedOutputModes["VALUE"] != plugin.StoreSecretModeCreateIfAbsent {
+		t.Errorf("default mode = %q, want create_if_absent", got.SealedOutputModes["VALUE"])
 	}
-	if _, _, err := SecretGenPlan(target); err == nil {
-		t.Fatal("expected error for invalid mode")
+	if len(modes) != 0 {
+		t.Errorf("caller's modes map mutated: %v", modes)
+	}
+}
+
+func TestSecretGenPlan_Rejects(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outputs map[string]string
+		modes   map[string]string
+		cfg     map[string]any
+		want    string
+	}{
+		{
+			name: "config.ref removed",
+			cfg:  map[string]any{"ref": "pass:x/y", "derivation": []any{"true"}},
+			want: `config.ref was removed; declare sealed_outputs: {VALUE: "pass:x/y"}`,
+		},
+		{
+			name:    "config.ref removed even with sealed_outputs",
+			outputs: map[string]string{"VALUE": "pass:x/y"},
+			cfg:     map[string]any{"ref": "pass:x/y", "derivation": []any{"true"}},
+			want:    "config.ref was removed",
+		},
+		{
+			name:    "config.mode removed",
+			outputs: map[string]string{"VALUE": "pass:x/y"},
+			cfg:     map[string]any{"mode": "overwrite", "derivation": []any{"true"}},
+			want:    `config.mode was removed; declare sealed_output_modes: {VALUE: "overwrite"}`,
+		},
+		{
+			name: "no sealed_outputs",
+			cfg:  map[string]any{"derivation": []any{"true"}},
+			want: "exactly one sealed_outputs entry",
+		},
+		{
+			name:    "two sealed_outputs",
+			outputs: map[string]string{"A": "pass:a", "B": "pass:b"},
+			cfg:     map[string]any{"derivation": []any{"true"}},
+			want:    "exactly one sealed_outputs entry",
+		},
+		{
+			name:    "ref without scheme",
+			outputs: map[string]string{"VALUE": "no-scheme"},
+			cfg:     map[string]any{"derivation": []any{"true"}},
+			want:    "scheme:path",
+		},
+		{
+			name:    "unknown mode",
+			outputs: map[string]string{"VALUE": "pass:x/y"},
+			modes:   map[string]string{"VALUE": "wat"},
+			cfg:     map[string]any{"derivation": []any{"true"}},
+			want:    "must be one of",
+		},
+		{
+			name:    "path-like output name",
+			outputs: map[string]string{"../VALUE": "pass:x/y"},
+			cfg:     map[string]any{"derivation": []any{"true"}},
+			want:    "plain file name",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := SecretGenPlan(config.Target{
+				Name: "//x", Toolchain: "secret-gen",
+				SealedOutputs: tc.outputs, SealedOutputModes: tc.modes, Config: tc.cfg,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -97,10 +178,10 @@ func TestSecretGenPlan_RejectsUnknownMode(t *testing.T) {
 // derivation (echo's default behavior) is stripped before storing.
 func TestSecretGenPlan_DerivationStdoutTrimmed(t *testing.T) {
 	target := config.Target{
-		Name:      "//x",
-		Toolchain: "secret-gen",
+		Name:          "//x",
+		Toolchain:     "secret-gen",
+		SealedOutputs: map[string]string{"VALUE": "pass:x/y"},
 		Config: map[string]any{
-			"ref":        "pass:x/y",
 			"derivation": []any{"echo", "hunter2"},
 		},
 	}
@@ -128,10 +209,10 @@ func TestSecretGenPlan_DerivationStdoutTrimmed(t *testing.T) {
 
 func TestSecretGenPlan_KeepTrailingNewline(t *testing.T) {
 	target := config.Target{
-		Name:      "//x",
-		Toolchain: "secret-gen",
+		Name:          "//x",
+		Toolchain:     "secret-gen",
+		SealedOutputs: map[string]string{"VALUE": "pass:x/y"},
 		Config: map[string]any{
-			"ref":                   "pass:x/y",
 			"derivation":            []any{"echo", "hunter2"},
 			"keep_trailing_newline": true,
 		},
@@ -160,7 +241,10 @@ func TestSecretGenPlan_KeepTrailingNewline(t *testing.T) {
 // failure error (nil on success).
 func runSecretGen(t *testing.T, cfg map[string]any) ([]string, error) {
 	t.Helper()
-	actions, _, err := SecretGenPlan(config.Target{Name: "//x", Toolchain: "secret-gen", Config: cfg})
+	actions, _, err := SecretGenPlan(config.Target{
+		Name: "//x", Toolchain: "secret-gen",
+		SealedOutputs: map[string]string{"VALUE": "pass:x/y"}, Config: cfg,
+	})
 	if err != nil {
 		t.Fatalf("SecretGenPlan: %v", err)
 	}
@@ -223,7 +307,6 @@ func TestSecretGenExecute(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stored, err := runSecretGen(t, map[string]any{
-				"ref":                   "pass:x/y",
 				"derivation":            tc.derivation,
 				"keep_trailing_newline": tc.keepNewline,
 			})

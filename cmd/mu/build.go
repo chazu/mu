@@ -7,22 +7,19 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chazu/mu/internal/coordinator"
 	"github.com/chazu/mu/internal/dag"
-	"github.com/chazu/mu/internal/scratch"
 )
 
 func runBuild(args []string) int {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("build", fs)
+	cli := newCLIContext("build", fs, useConfig, useJSON, useVerbose, useOffline)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
-	noDiscoverCache := fs.Bool("no-discover-cache", false, "bypass the plugin discover response cache (force live discover)")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
 	publish := fs.Bool("publish", false, "after a successful build, publish each target's outputs as an artifact (config.publish)")
@@ -57,7 +54,6 @@ func runBuild(args []string) int {
 	if code, ok := cli.Resolve(resolveOpts{
 		NeedConfig:     true,
 		NeedStore:      true,
-		NoCache:        *noCache,
 		ValidateConfig: true,
 	}); !ok {
 		return code
@@ -66,34 +62,14 @@ func runBuild(args []string) int {
 	ctx, stop := signal.NotifyContext(cli.networkContext(context.Background()), os.Interrupt)
 	defer stop()
 
-	registry := coordinator.NewToolchainRegistry(cli.Store)
-	home, _ := os.UserHomeDir()
-
-	c := &coordinator.Coordinator{
-		NoCache:           *noCache,
-		ProjectRoot:       cli.ProjectRoot,
-		Config:            cli.Config,
-		Store:             cli.Store,
-		ToolchainRegistry: registry,
-		Workers:           *jobs,
-		NoDiscoverCache:   *noDiscoverCache,
-		Verbose:           cli.Verbose,
-	}
-
+	opts := coordinatorOpts{Workers: *jobs, NoCache: *noCache}
 	// When emitting a manifest to stdout, redirect action subprocess
 	// stdout to stderr so colored tofu/terraform logs don't contaminate
 	// the JSON manifest downstream pipelines consume.
 	if *emitManifest {
-		c.SubprocessStdout = os.Stderr
+		opts.SubprocessStdout = os.Stderr
 	}
-
-	if len(cli.Config.Toolchains) > 0 && cli.Store != nil {
-		c.Builder = &scratch.Builder{
-			Store:    cli.Store,
-			Registry: registry,
-			CacheDir: filepath.Join(home, ".mu", "cache"),
-		}
-	}
+	c := newCoordinator(cli, opts)
 
 	// --plan mode: plan only, print the DAG, exit.
 	if *planOnly {
@@ -156,8 +132,6 @@ type planAction struct {
 	ActionKey         string            `json:"action_key,omitempty"`     // absent while inputs are pending
 	PendingInputs     []string          `json:"pending_inputs,omitempty"` // inputs produced by upstream actions
 	Command           []string          `json:"command"`
-	Body              []any             `json:"body,omitempty"`
-	EweDigest         string            `json:"ewe_digest,omitempty"`
 	Inputs            map[string]string `json:"inputs"`
 	Outputs           []string          `json:"outputs"`
 	DependsOn         []string          `json:"depends_on"`
@@ -175,7 +149,8 @@ type planAction struct {
 	Retries           int               `json:"retries,omitempty"`
 	RetryBackoffMs    int               `json:"retry_backoff_ms,omitempty"`
 	Toolchain         map[string]string `json:"toolchain,omitempty"`
-	Sources           []string          `json:"sources,omitempty"`
+	InputPaths        map[string]string `json:"input_paths,omitempty"` // input name -> project-relative path
+	Sandboxed         bool              `json:"sandboxed,omitempty"`
 }
 
 type planJSONDocument struct {
@@ -206,10 +181,6 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 		for name, digest := range a.Toolchain {
 			toolchain[name] = digest.String()
 		}
-		eweDigest := ""
-		if !a.EweRef.IsZero() {
-			eweDigest = a.EweRef.String()
-		}
 		// An action consuming upstream outputs has no meaningful key until
 		// those outputs exist; report which inputs are pending instead.
 		actionKey, pending := "", a.PendingInputs()
@@ -218,13 +189,12 @@ func newPlanJSONDocument(plan *coordinator.PlanResult, targets []string) planJSO
 		}
 		out = append(out, planAction{
 			ID: a.ID, ActionKey: actionKey, PendingInputs: pending,
-			Command: a.Command, Body: a.Body, EweDigest: eweDigest,
-			Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env, EnvPassthrough: a.EnvPassthrough,
+			Command: a.Command, Inputs: inputs, Outputs: outputs, DependsOn: deps, Env: a.Env, EnvPassthrough: a.EnvPassthrough,
 			SealedInputs: a.SealedInputs, SealedInputModes: a.SealedInputModes,
 			SealedOutputs: a.SealedOutputs, SealedOutputModes: a.SealedOutputModes,
 			Network: a.Network, WorkDir: a.WorkDir, ProjectRoot: a.ProjectRoot, Impure: a.Impure,
 			TimeoutS: a.TimeoutS, Retries: a.Retries, RetryBackoffMs: a.RetryBackoffMs,
-			Toolchain: toolchain, Sources: a.Sources,
+			Toolchain: toolchain, InputPaths: a.InputPaths, Sandboxed: a.Sandboxed(),
 		})
 	}
 

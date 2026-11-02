@@ -5,14 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/cas/oci"
-	"github.com/chazu/mu/internal/coordinator"
 	"github.com/chazu/mu/internal/dag"
-	"github.com/chazu/mu/internal/scratch"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 // runCachePush publishes the local cache results of the named targets
@@ -29,7 +25,7 @@ import (
 func runCachePush(args []string) int {
 	fs := flag.NewFlagSet("cache push", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	c := newCLIContext("cache push", fs)
+	c := newCLIContext("cache push", fs, useConfig, useVerbose, useOffline)
 	dryRun := fs.Bool("dry-run", false, "list the action results that would be pushed, without pushing")
 	if code, ok := parseFlags(fs, args, "cache push [flags] [target...]"); !ok {
 		return code
@@ -55,7 +51,7 @@ func runCachePush(args []string) int {
 	}
 
 	ctx := c.networkContext(context.Background())
-	plan, err := planningCoordinator(c).Plan(ctx, targets)
+	plan, err := newCoordinator(c, coordinatorOpts{}).Plan(ctx, targets)
 	if err != nil {
 		return c.fail(exitFail, "%v", err)
 	}
@@ -148,28 +144,6 @@ func localDiskStore(store cas.Store) *cas.DiskStore {
 	return nil
 }
 
-// planningCoordinator returns a coordinator that can plan c's project the
-// way `mu build` does.
-func planningCoordinator(c *cliContext) *coordinator.Coordinator {
-	registry := coordinator.NewToolchainRegistry(c.Store)
-	co := &coordinator.Coordinator{
-		ProjectRoot:       c.ProjectRoot,
-		Config:            c.Config,
-		Store:             c.Store,
-		ToolchainRegistry: registry,
-		Verbose:           c.Verbose,
-	}
-	if len(c.Config.Toolchains) > 0 {
-		home, _ := os.UserHomeDir()
-		co.Builder = &scratch.Builder{
-			Store:    c.Store,
-			Registry: registry,
-			CacheDir: filepath.Join(home, ".mu", "cache"),
-		}
-	}
-	return co
-}
-
 // resolvePushRef returns cache.push ("host/namespace/repo") from the loaded
 // config, or a user-actionable error if it is missing.
 func resolvePushRef(c *cliContext) (string, int, bool) {
@@ -179,11 +153,4 @@ func resolvePushRef(c *cliContext) (string, int, bool) {
   cache: { push: "<host>/<namespace>/<repo>" }`), false
 	}
 	return c.Config.Cache.Push, exitOK, true
-}
-
-// newPushRepository opens a registry repository through the shared
-// constructor. It remains only for the OCI plugin commands, which are being
-// removed (mu-x57.4); new code calls oci.NewRepository directly.
-func newPushRepository(ref string) (*remote.Repository, error) {
-	return oci.NewRepository(ref)
 }

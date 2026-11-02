@@ -200,30 +200,6 @@ func TestCueDecoder_RejectsRemovedCacheFields(t *testing.T) {
 	}
 }
 
-// TestIsCuePluginDir exercises the probe helper that parallels
-// IsPluginDir for the JSON decoder.
-func TestIsCuePluginDir(t *testing.T) {
-	pluginData, err := os.ReadFile("testdata/plugin/mu.cue")
-	if err != nil {
-		t.Fatalf("read plugin fixture: %v", err)
-	}
-	if !IsCuePluginDir(pluginData) {
-		t.Error("IsCuePluginDir(plugin fixture) = false, want true")
-	}
-
-	rootData, err := os.ReadFile("testdata/mu.cue")
-	if err != nil {
-		t.Fatalf("read root fixture: %v", err)
-	}
-	if IsCuePluginDir(rootData) {
-		t.Error("IsCuePluginDir(root fixture) = true, want false")
-	}
-
-	if IsCuePluginDir([]byte("this is not cue @@@@ !!!")) {
-		t.Error("IsCuePluginDir(garbage) = true, want false")
-	}
-}
-
 // TestCueDecoder_MissingFile ensures a missing mu.cue produces a clear
 // error rather than a panic or silent success.
 func TestCueDecoder_MissingFile(t *testing.T) {
@@ -270,5 +246,31 @@ targets: pkg.targets
 	}
 	if requests.Load() != 0 {
 		t.Fatal("offline config contacted CUE registry")
+	}
+}
+
+func TestLoad_RejectsRemovedInlinePrograms(t *testing.T) {
+	for _, field := range []string{"plan", "transform", "body"} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+			`targets: [{target: "x", toolchain: "shell", sources: [], `+field+`: ["'a", "emit"]}]`)
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "inline pith programs were removed; use a shell target or a plugin") {
+			t.Fatalf("%s: Load error = %v, want \"inline pith programs were removed\"", field, err)
+		}
+	}
+}
+
+func TestLoad_RejectsRemovedEweFields(t *testing.T) {
+	for _, field := range []string{"ewe", "ewe_source"} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+			`targets: [{target: "x", toolchain: "shell", sources: [], `+field+`: "populate.cue"}]`)
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "ewe actions were removed") {
+			t.Fatalf("%s: Load error = %v, want \"ewe actions were removed\"", field, err)
+		}
 	}
 }

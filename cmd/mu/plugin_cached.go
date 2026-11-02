@@ -23,14 +23,20 @@ type cachedPluginVersion struct {
 }
 
 func cachedPluginVersions(name string) ([]cachedPluginVersion, error) {
-	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
-		return nil, fmt.Errorf("invalid plugin cache name %q", name)
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(home, ".mu", "plugins", name)
+	return cachedPluginVersionsIn(filepath.Join(home, ".mu", "plugins"), name)
+}
+
+// cachedPluginVersionsIn lists the versions of plugin name materialized
+// under pluginsDir (normally ~/.mu/plugins).
+func cachedPluginVersionsIn(pluginsDir, name string) ([]cachedPluginVersion, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return nil, fmt.Errorf("invalid plugin cache name %q", name)
+	}
+	dir := filepath.Join(pluginsDir, name)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("%w: %s", errCachedPluginMissing, name)

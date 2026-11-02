@@ -13,7 +13,7 @@ LIFECYCLE
 
   1. mu starts the plugin process.
   2. mu sends {"method": "discover"} — plugin replies with metadata.
-  3. mu sends plan/observe/resolve_secret/store_secret/advise requests as needed.
+  3. mu sends plan/observe/resolve_secret/store_secret requests as needed.
   4. mu closes stdin when done — plugin exits.
 
   Request deadlines cover waiting for another request, writing stdin, and
@@ -43,6 +43,14 @@ METHODS
 
     Plugins must declare every supported method in `capabilities`.
     `plan` is required only for build/convergence plugins.
+
+    Plan-capable plugins should declare `config_schema` (field name ->
+    {"type", "description", "default", "required"}): mu validates each
+    target's config against it before planning, so a typo or wrong type
+    fails early. When a plan-capable plugin declares none and a target
+    passes it config, mu prints one warning per plugin per run. Plugins
+    that do not plan (secret providers, advisers) take no target config
+    and need no schema.
 
   plan (optional; required for build/convergence plugins)
     Request:  {
@@ -122,11 +130,6 @@ ACTION SPEC FIELDS
 
   id                  Unique within the subgraph.
   command             []string — the command to execute.
-  body                []any — pith VM program; mutually exclusive with
-                      command (optional).
-  ewe_source          string — project-relative path to an ewe populator
-                      .cue program; mutually exclusive with command/body
-                      (optional).
   inputs              map[name]path — input files (paths resolved to CAS digests).
   outputs             []string — declared output file paths.
   depends_on          []string — IDs of actions this depends on (within subgraph).
@@ -148,6 +151,12 @@ ACTION SPEC FIELDS
   work_dir            string — working directory relative to project root (optional).
   impure              bool — skip CAS cache (optional; forced true
                       when sealed_outputs is non-empty).
+  toolchains          []string — names of `from: "scratch"` toolchains the
+                      action needs (optional, pure actions only). Their files
+                      are unpacked into the sandbox root (bin/ is on PATH; a
+                      raw binary "<name>" lands at bin/<name>) and hashed into
+                      the action key. Naming one sandboxes the action. An
+                      unknown name is a plan error. See `mu guide sandbox`.
   timeout_s           int — per-attempt wall-clock timeout in seconds (optional).
   retries             int — additional attempts on failure (network actions only).
   retry_backoff_ms    int — sleep between retries.
@@ -180,13 +189,25 @@ CROSS-TARGET ARTIFACTS
   name → project-relative path). To consume one, declare the path as a
   normal input:
     "inputs": {"cryptolib": "lib/crypto/libcrypto.a"}
-  mu detects that the path is produced by an already-planned action,
-  defers the input digest, and injects an implicit DependsOn edge to the
-  producing action so the consumer runs after the producer. The deferred digest is
-  filled with the produced file's digest before the consumer's cache
-  lookup. Paths are
-  compared after cleaning: outputs relative to the producer's work_dir,
-  inputs relative to the project root ("./x" and "x" match).
+  mu plans every target before wiring inputs, so any input path that
+  another target's action declares as an output is linked, whatever the
+  planning order and whether or not that target is listed in "deps". mu
+  defers the input digest and injects an implicit DependsOn edge to the
+  producing action so the consumer runs after the producer. The deferred
+  digest is filled with the produced file's digest before the consumer's
+  cache lookup. Paths are compared after cleaning: outputs relative to the
+  producer's work_dir, inputs relative to the project root ("./x" and "x"
+  match). Two targets that read each other's outputs (directly or via
+  "deps") are a cycle and fail planning.
+
+  Every output path has one producer. Two targets declaring the same
+  path (after cleaning) fail planning, naming both targets, both actions
+  and the path. Within one target, two actions may declare the same path
+  only when the plan orders them, through depends_on or an {action:id}
+  input, directly or transitively (for example a generate step followed
+  by an in-place rewrite); the last writer in that chain is the producer
+  other targets wire to. Writers of one path with no dependency between
+  them fail planning.
 
   Listing a target in "deps" also orders execution on its own: every
   action of the dependent with no predecessor in its own subgraph waits

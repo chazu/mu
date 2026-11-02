@@ -21,7 +21,7 @@
 //	}
 //
 // The SDK derives the discover capabilities array from which optional
-// fields (Observe, ResolveSecret, StoreSecret, Advise) are non-nil — no
+// fields (Observe, ResolveSecret, StoreSecret) are non-nil — no
 // manual capabilities list.
 //
 // This file defines the wire types. They are the canonical Go
@@ -30,7 +30,10 @@
 // mu codebase keeps its existing import paths.
 package muplugin
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // ProtocolVersion is the current version of the plugin protocol.
 const ProtocolVersion = 1
@@ -38,18 +41,14 @@ const ProtocolVersion = 1
 // Request is the unified envelope sent to plugins via NDJSON.
 // Plugins dispatch on the Method field.
 type Request struct {
-	Method             string            `json:"method"`                        // "discover", "plan", "observe", "resolve_secret", "store_secret", or "advise"
+	Method             string            `json:"method"`                        // "discover", "plan", "observe", "resolve_secret", or "store_secret"
 	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan" and "observe"
 	Deps               []DepInfo         `json:"deps,omitempty"`                // set for "plan"
 	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan" and "observe"
-	Secrets            map[string]string `json:"secrets,omitempty"`             // set for "observe" and "advise" — resolved sealed input values
+	Secrets            map[string]string `json:"secrets,omitempty"`             // set for "observe" — resolved sealed input values
 	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret" and "store_secret"
 	SecretValue        string            `json:"secret_value,omitempty"`        // set for "store_secret" — bytes to persist
 	SecretMode         string            `json:"secret_mode,omitempty"`         // set for "store_secret" — "create" | "overwrite" | "create_if_absent"
-	Phase              string            `json:"phase,omitempty"`               // set for "advise" — lifecycle phase
-	Manifest           any               `json:"manifest,omitempty"`            // set for "advise" when phase is "after-build"
-	AdviseContext      *AdviseContext    `json:"advise_context,omitempty"`      // set for "advise"
-	AdviseConfig       map[string]any    `json:"advise_config,omitempty"`       // set for "advise" — per-advice config from mu.cue
 }
 
 // DiscoverResponse is returned by plugins for method "discover".
@@ -61,8 +60,7 @@ type DiscoverResponse struct {
 	Consumes        []string       `json:"consumes"` // artifact types this plugin can consume
 	Produces        []string       `json:"produces"` // artifact types this plugin can produce
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
-	Capabilities    []string       `json:"capabilities,omitempty"`   // supported methods, e.g. ["discover","plan","observe","advise"]
-	AdvisePhases    []string       `json:"advise_phases,omitempty"`  // lifecycle phases this plugin wants to advise on
+	Capabilities    []string       `json:"capabilities,omitempty"`   // supported methods, e.g. ["discover","plan","observe"]
 	OutputSchema    *SchemaRef     `json:"output_schema,omitempty"`  // legacy single-schema form
 	OutputSchemas   []SchemaRef    `json:"output_schemas,omitempty"` // resource-specific output schemas
 }
@@ -153,8 +151,6 @@ type DepInfo struct {
 type ActionSpec struct {
 	ID                string            `json:"id"`
 	Command           []string          `json:"command"`
-	Body              []any             `json:"body,omitempty"`       // pith VM program; mutually exclusive with Command
-	EweSource         string            `json:"ewe_source,omitempty"` // project-relative path to an ewe populator .cue program; mutually exclusive with Command/Body
 	Inputs            map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
 	Outputs           []string          `json:"outputs"`              // declared output file paths
 	DependsOn         []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
@@ -167,6 +163,12 @@ type ActionSpec struct {
 	Network           bool              `json:"network,omitempty"`
 	WorkDir           string            `json:"work_dir,omitempty"` // relative to project root (default: project root)
 	Impure            bool              `json:"impure,omitempty"`   // skip CAS cache
+
+	// Toolchains names `from: "scratch"` toolchains the action needs. Their
+	// artifacts are unpacked into the sandbox root (bin/ is on PATH) and
+	// hashed into the action key. Only pure actions may name toolchains: they
+	// run in the sandbox, impure actions run on the host.
+	Toolchains []string `json:"toolchains,omitempty"`
 
 	// TimeoutS is the per-attempt wall-clock timeout in seconds. 0 = no
 	// timeout (legacy). Applies to all actions regardless of Network.
@@ -181,6 +183,32 @@ type ActionSpec struct {
 	// RetryBackoffMs is the sleep between attempts in milliseconds.
 	// 0 = retry immediately.
 	RetryBackoffMs int `json:"retry_backoff_ms,omitempty"`
+}
+
+// removedActionFields lists wire fields mu no longer accepts on an action,
+// with the error reported when a plan response still sets one. Without this
+// check encoding/json would drop the field silently and the action would only
+// fail later, at execution, for lacking a command.
+var removedActionFields = []struct{ name, message string }{
+	{"body", "action bodies were removed; emit a command instead"},
+	{"ewe_source", "ewe actions were removed; emit a command instead"},
+}
+
+// UnmarshalJSON decodes an ActionSpec, rejecting removed fields.
+func (s *ActionSpec) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, removed := range removedActionFields {
+		if raw, ok := fields[removed.name]; ok && string(raw) != "null" {
+			var id string
+			_ = json.Unmarshal(fields["id"], &id)
+			return fmt.Errorf("action %q: %s", id, removed.message)
+		}
+	}
+	type plain ActionSpec
+	return json.Unmarshal(data, (*plain)(s))
 }
 
 // ResolveSecretResponse is returned by plugins for method "resolve_secret".
@@ -203,49 +231,6 @@ const (
 // the stored bytes.
 type StoreSecretResponse struct {
 	Error string `json:"error,omitempty"`
-}
-
-// AdviseContext carries metadata about the build environment for advice plugins.
-type AdviseContext struct {
-	ProjectRoot string   `json:"project_root"`
-	Targets     []string `json:"targets"`
-	DurationS   float64  `json:"duration_s,omitempty"`
-	GitSHA      string   `json:"git_sha,omitempty"`
-	GitBranch   string   `json:"git_branch,omitempty"`
-	GitDirty    bool     `json:"git_dirty,omitempty"`
-}
-
-// AdviseResponse is returned by plugins for method "advise".
-// Advice errors are non-fatal — the build is not failed if an advice plugin
-// returns an error.
-type AdviseResponse struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-}
-
-// DefaultAdviseTimeout is the default timeout for advise requests.
-const DefaultAdviseTimeout = 30 * time.Second
-
-// NewAdviseRequest returns a Request for the "advise" method.
-func NewAdviseRequest(phase string, manifest any, ctx *AdviseContext, cfg map[string]any, secrets map[string]string) Request {
-	return Request{
-		Method:        "advise",
-		Phase:         phase,
-		Manifest:      manifest,
-		AdviseContext: ctx,
-		AdviseConfig:  cfg,
-		Secrets:       secrets,
-	}
-}
-
-// HasAdvisePhase reports whether the plugin declared interest in the given phase.
-func (d *DiscoverResponse) HasAdvisePhase(phase string) bool {
-	for _, p := range d.AdvisePhases {
-		if p == phase {
-			return true
-		}
-	}
-	return false
 }
 
 // NewStoreSecretRequest returns a Request for the "store_secret" method.
@@ -297,15 +282,6 @@ type ObserveRequest struct {
 	Target             TargetInfo
 	ToolchainArtifacts map[string]string
 	Secrets            map[string]string
-}
-
-// AdviseRequest is the ergonomic view of an advise Request for SDK callers.
-type AdviseRequest struct {
-	Phase    string
-	Manifest any
-	Context  *AdviseContext
-	Config   map[string]any
-	Secrets  map[string]string
 }
 
 // StoreSecretRequest is the ergonomic view of a store_secret Request.

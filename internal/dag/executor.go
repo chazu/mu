@@ -3,24 +3,17 @@ package dag
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/chazu/ewe"
 	"github.com/chazu/mu/internal/cas"
-	"github.com/chazu/mu/internal/ewesink"
-	"github.com/chazu/mu/internal/pithvm"
 	"github.com/chazu/mu/internal/rootexec"
-	"github.com/chazu/mu/internal/sandbox"
-	"github.com/chazu/pith"
 )
 
 // ActionStatus represents the result of executing a single action.
@@ -77,18 +70,6 @@ type Executor struct {
 	// silently drop captured secrets.
 	SealedOutputWriter SealedOutputWriter
 
-	// completedOutputs tracks output file paths by target prefix for
-	// completed actions, enabling pith VM getOutput closures.
-	// Protected by outputsMu since the main goroutine writes and
-	// worker goroutines read concurrently.
-	completedOutputs map[string]map[string]string // target -> outputName -> filePath
-
-	// pithResults stores pith VM stack results by target prefix.
-	// Transform actions and body actions write their result here so
-	// downstream actions can access it via target/output under the
-	// "_result" key without requiring file-based output declarations.
-	pithResults map[string]any // target -> stack result
-
 	// completed records finished actions (and their output digests) by ID so
 	// downstream placeholder inputs can be resolved. Guarded by outputsMu.
 	completed map[string]completedAction
@@ -121,9 +102,6 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 		workers = runtime.NumCPU()
 	}
 
-	// Initialize completed outputs tracking for pith VM getOutput.
-	e.completedOutputs = make(map[string]map[string]string)
-	e.pithResults = make(map[string]any)
 	e.completed = make(map[string]completedAction)
 
 	// Track state for each action.
@@ -195,28 +173,6 @@ func (e *Executor) Execute(ctx context.Context, g *Graph) (*ExecuteResult, error
 				e.outputsMu.Lock()
 				e.completed[status.ID] = completedAction{action: g.Action(status.ID), outputs: status.Outputs}
 				e.outputsMu.Unlock()
-
-				// Record completed outputs by target prefix for pith VM getOutput.
-				if idx := strings.LastIndex(status.ID, ":"); idx >= 0 {
-					targetName := status.ID[:idx]
-					e.outputsMu.Lock()
-					if e.completedOutputs[targetName] == nil {
-						e.completedOutputs[targetName] = make(map[string]string)
-					}
-					for _, a := range g.Actions() {
-						if a.ID == status.ID {
-							for _, outPath := range a.Outputs {
-								resolved := outPath
-								if !filepath.IsAbs(outPath) && a.WorkDir != "" {
-									resolved = filepath.Join(a.WorkDir, outPath)
-								}
-								e.completedOutputs[targetName][outPath] = resolved
-							}
-							break
-						}
-					}
-					e.outputsMu.Unlock()
-				}
 			}
 
 			// Unblock dependents.
@@ -286,9 +242,9 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		}
 	}
 
-	// Execute the command (or pith Body program).
-	if len(a.Command) == 0 && len(a.Body) == 0 && a.EweRef == (cas.Digest{}) {
-		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command, body, or ewe program", a.ID)}
+	// Execute the command.
+	if len(a.Command) == 0 {
+		return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q has no command", a.ID)}
 	}
 
 	secrets := e.ResolvedSecrets[a.ID]
@@ -301,10 +257,13 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	}
 	// Apply per-name delivery modes. "env" (or empty) is the default and
 	// exports the value verbatim; "file" writes to a 0600 temp file under a
-	// per-action sealed-input directory and exports the path. Sandbox-mode
-	// actions cannot use "file" because the temp file lives outside the
-	// sandbox view.
+	// per-action sealed-input directory and exports the path. A sandboxed
+	// action gets its files inside the sandbox root instead (see
+	// executeInSandbox), where it can read them; they are written per attempt
+	// and removed as soon as the command exits.
+	sandboxed := a.Sandboxed()
 	var sealedInDir string
+	var sealedFiles map[string]string // sandboxed file-mode values, name -> value
 	sealedEnv := make(map[string]string, len(secrets))
 	for k, v := range secrets {
 		mode := a.SealedInputModes[k]
@@ -312,8 +271,12 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 		case "", "env":
 			sealedEnv[k] = v
 		case "file":
-			if a.Toolchain != nil {
-				return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: sealed_input %q uses mode=file, which is not supported in sandboxed (toolchain) actions", a.ID, k)}
+			if sandboxed {
+				if sealedFiles == nil {
+					sealedFiles = make(map[string]string)
+				}
+				sealedFiles[k] = v
+				continue
 			}
 			if sealedInDir == "" {
 				dir, err := os.MkdirTemp("", "mu-sealed-in-*")
@@ -365,8 +328,9 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// For bare-mode actions with relative output paths, create a per-action
 	// output directory and expose it as $MU_OUT. After execution, outputs
 	// are copied to WorkDir so dependents and cache storage can find them.
+	// Sandboxed actions get $MU_OUT inside the sandbox (executeInSandbox).
 	var muOutDir string
-	if a.Toolchain == nil && hasRelativeOutputs(a.Outputs) {
+	if !sandboxed && hasRelativeOutputs(a.Outputs) {
 		dir, err := os.MkdirTemp("", "mu-out-*")
 		if err != nil {
 			return ActionStatus{ID: a.ID, Err: fmt.Errorf("action %q: create output dir: %w", a.ID, err)}
@@ -381,7 +345,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 	// enter the key).
 	execEnv := actionEnv(a, os.Environ(), muVars, sealedEnv)
 
-	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv, workDir, workRoot)
+	exitCode, attempts, execErr := e.runWithTimeoutAndRetry(ctx, a, execEnv, sealedFiles, workDir, workRoot)
 
 	if execErr != nil {
 		return ActionStatus{ID: a.ID, ExitCode: exitCode, Attempts: attempts, Err: fmt.Errorf("action %q failed: %w", a.ID, execErr)}
@@ -389,8 +353,8 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 
 	// Collect declared outputs into WorkDir so dependents and cache storage can
 	// find them. An action may write an output to either location:
-	//   - $MU_OUT (the staging dir): ewe/pith actions, or any command that
-	//     honors MU_OUT. We copy those into WorkDir.
+	//   - $MU_OUT (the staging dir): any command that honors MU_OUT. We copy
+	//     those into WorkDir.
 	//   - its working dir directly: a plain shell command with a relative output
 	//     path (e.g. `cowsay ... > greeting.txt`, `go build -o=mu`). exec runs
 	//     with cmd.Dir = WorkDir, so the file already lands at the destination.
@@ -473,7 +437,7 @@ func (e *Executor) executeAction(ctx context.Context, a *Action) ActionStatus {
 // Returns (exitCode, attempts, err). attempts is 1 on success without
 // retry. err is non-nil iff the final attempt failed OR the parent
 // context was cancelled.
-func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env map[string]string, workDir *os.File, workRoot *os.Root) (int, int, error) {
+func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env, sealedFiles map[string]string, workDir *os.File, workRoot *os.Root) (int, int, error) {
 	maxRetries := 0
 	if a.Network && a.Retries > 0 {
 		maxRetries = a.Retries
@@ -497,12 +461,8 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env ma
 
 		var exitCode int
 		var err error
-		if a.Toolchain != nil {
-			exitCode, err = e.executeInSandbox(attemptCtx, a, env, workRoot)
-		} else if a.EweRef != (cas.Digest{}) {
-			exitCode, err = e.executeEwe(attemptCtx, a, env, workRoot)
-		} else if len(a.Body) > 0 {
-			exitCode, err = e.executePithVM(attemptCtx, a, env, workRoot)
+		if a.Sandboxed() {
+			exitCode, err = e.executeInSandbox(attemptCtx, a, env, sealedFiles, workRoot)
 		} else {
 			exitCode, err = e.executeBare(attemptCtx, a, env, workDir)
 		}
@@ -566,189 +526,6 @@ func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]st
 		exitCode = cmd.ProcessState.ExitCode()
 	}
 	return exitCode, err
-}
-
-// executePithVM runs a pith VM program instead of a shell command.
-func (e *Executor) executePithVM(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
-	vm := pith.New(ctx)
-
-	getOutput := func(targetName string) (map[string]any, error) {
-		e.outputsMu.RLock()
-		outputs := e.completedOutputs[targetName]
-		pithResult := e.pithResults[targetName]
-		e.outputsMu.RUnlock()
-
-		result := make(map[string]any)
-		for name, path := range outputs {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				result[name] = map[string]any{"path": path, "error": err.Error()}
-				continue
-			}
-			var parsed any
-			if json.Unmarshal(data, &parsed) == nil {
-				result[name] = parsed
-			} else {
-				result[name] = string(data)
-			}
-		}
-		if pithResult != nil {
-			result["_result"] = pithResult
-		}
-		if len(result) == 0 {
-			return nil, fmt.Errorf("no outputs for target %q", targetName)
-		}
-		return result, nil
-	}
-
-	// sealedNames lets the secret/env words partition the namespace: secret/get
-	// serves only these names; env/get refuses them. Names only — never values.
-	sealedNames := make(map[string]bool, len(a.SealedInputs))
-	for name := range a.SealedInputs {
-		sealedNames[name] = true
-	}
-
-	// Expose WorkDir as a sanctioned file/write root for pith bodies, alongside
-	// MU_SEALED_OUT_DIR / MU_OUT (added earlier in runAction). Copy first so we
-	// never mutate the caller's env map.
-	if a.WorkDir != "" {
-		cp := make(map[string]string, len(env)+1)
-		for k, v := range env {
-			cp[k] = v
-		}
-		cp["MU_WORK_DIR"] = a.WorkDir
-		env = cp
-	}
-
-	pithvm.RegisterExecDrivers(vm, env, sealedNames, getOutput, e.Store, workRoot)
-	if err := vm.Run(a.Body); err != nil {
-		return 1, err
-	}
-
-	// Store stack result for downstream access via target/output "_result" key.
-	if result, err := vm.Result(); err == nil && result != nil {
-		if idx := strings.LastIndex(a.ID, ":"); idx >= 0 {
-			targetName := a.ID[:idx]
-			e.outputsMu.Lock()
-			e.pithResults[targetName] = result
-			e.outputsMu.Unlock()
-		}
-	}
-
-	return 0, nil
-}
-
-// executeEwe runs an ewe populator program: it restores the program from CAS by
-// its digest and runs it through a fresh per-execute ewe registry whose sink
-// functions close over this action's reveal (sealed inputs), MU_OUT, and
-// WorkDir. Outputs land in $MU_OUT and are copied to WorkDir exactly as for a
-// bare action.
-func (e *Executor) executeEwe(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
-	rc, err := e.Store.Get(ctx, a.EweRef)
-	if err != nil {
-		return 1, fmt.Errorf("ewe: restore program %s: %w", a.EweRef.String(), err)
-	}
-	src, err := io.ReadAll(rc)
-	rc.Close()
-	if err != nil {
-		return 1, fmt.Errorf("ewe: read program: %w", err)
-	}
-
-	// Sealed-input values live in env (env-mode delivery). reveal resolves a
-	// secret name to its value; nothing else may reveal them.
-	sealedNames := make(map[string]bool, len(a.SealedInputs))
-	for name := range a.SealedInputs {
-		sealedNames[name] = true
-	}
-	reveal := func(name string) (string, error) {
-		v, ok := env[name]
-		if !ok {
-			return "", fmt.Errorf("sealed input %q not available to this action", name)
-		}
-		return v, nil
-	}
-
-	// #Env exposes the action environment EXCEPT sealed-input values, which must
-	// never enter the CUE layer (reveal happens only in sinks).
-	safeEnv := make(map[string]string, len(env))
-	for k, v := range env {
-		if !sealedNames[k] {
-			safeEnv[k] = v
-		}
-	}
-
-	reg, err := ewesink.NewRegistry(ewesink.Deps{
-		WorkRoot: workRoot,
-		Reveal:   reveal,
-		WorkDir:  a.WorkDir,
-		MuOut:    env["MU_OUT"],
-		Env:      safeEnv,
-	})
-	if err != nil {
-		return 1, fmt.Errorf("ewe: build registry: %w", err)
-	}
-
-	if _, err := ewe.NewProcessor(reg).ProcessSource(ctx, string(src)); err != nil {
-		return 1, fmt.Errorf("ewe: %w", err)
-	}
-	return 0, nil
-}
-
-// executeInSandbox runs a command in a hermetic sandbox environment.
-// The toolchain artifacts are unpacked into the sandbox, sources are copied in,
-// the command runs inside the sandbox, and outputs are copied back to WorkDir.
-// The env parameter may include resolved secrets merged with the action's declared env.
-func (e *Executor) executeInSandbox(ctx context.Context, a *Action, env map[string]string, workRoot *os.Root) (int, error) {
-	sb, err := sandbox.New(e.Store)
-	if err != nil {
-		return -1, fmt.Errorf("create sandbox: %w", err)
-	}
-	defer sb.Cleanup()
-	sb.Stdout = e.SubprocessStdout
-
-	// Unpack toolchain into sandbox rootfs.
-	if err := sb.UnpackToolchain(ctx, a.Toolchain); err != nil {
-		return -1, fmt.Errorf("unpack toolchain: %w", err)
-	}
-
-	// Copy sources into sandbox work directory.
-	if len(a.Sources) > 0 && a.WorkDir != "" {
-		var err error
-		if workRoot != nil {
-			err = sb.CopySourcesRoot(workRoot, a.Sources)
-		} else {
-			err = sb.CopySources(a.WorkDir, a.Sources)
-		}
-		if err != nil {
-			return -1, fmt.Errorf("copy sources: %w", err)
-		}
-	}
-
-	// Execute.
-	exitCode, err := sb.Exec(ctx, a.Command, env, a.Network)
-	if err != nil {
-		return exitCode, err
-	}
-
-	// Copy declared outputs back from sandbox to the original WorkDir.
-	for _, outRel := range a.Outputs {
-		sbOut := sb.OutputPath(outRel)
-		hostOut := filepath.Join(a.WorkDir, outRel)
-		if workRoot != nil && !filepath.IsAbs(outRel) {
-			hostOut = outRel
-		}
-		src, err := os.Open(sbOut)
-		if err != nil {
-			return exitCode, fmt.Errorf("open sandbox output %s: %w", outRel, err)
-		}
-		if err := writeFile(ctx, hostOut, src, workRoot); err != nil {
-			src.Close()
-			return exitCode, fmt.Errorf("copy output %s: %w", outRel, err)
-		}
-		src.Close()
-	}
-
-	return exitCode, nil
 }
 
 // captureSealedOutputs reads each declared sealed-output file from the

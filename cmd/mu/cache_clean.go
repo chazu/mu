@@ -18,13 +18,17 @@ import (
 func runCacheClean(args []string) int {
 	fs := flag.NewFlagSet("cache clean", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	cli := newCLIContext("cache clean", fs, useConfig)
 	dryRun := fs.Bool("dry-run", false, "show what would be removed without deleting")
 	jsonOut := fs.Bool("json", false, "output as JSON")
 	if code, ok := parseFlags(fs, args, "cache clean [flags]"); !ok {
 		return code
 	}
 
-	cacheDir := cachePath()
+	cacheDir, code, ok := cli.localCacheDir()
+	if !ok {
+		return code
+	}
 	reachable, err := reachableBlobs(cacheDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu cache clean: %v\n", err)

@@ -7,6 +7,31 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **mu warns about unvalidated plugin config.** When a plan-capable plugin
+  declares no `config_schema` and a target passes it config, `mu build`
+  prints one warning per plugin. Every in-tree plan-capable plugin now
+  declares a schema (remote-exec and remote-file were the last).
+- **The `file` plugin runs its Go implementation.** `plugin.bb` is gone;
+  build the binary with `go build -trimpath -o plugins/file/plugin ./plugins/file`.
+  Paths in its shell commands are now escaped, so a path containing `'` no
+  longer breaks the command, and a target without `path` gets an error
+  instead of crashing the plugin.
+- **`remote-exec` and `remote-file` run their Go implementations.** Their
+  `plugin.bb` files are gone; build the binaries with
+  `go build -trimpath -o plugins/<name>/plugin ./plugins/<name>`. Both declare
+  a `config_schema`, so a string `command` (which bb split into one argv
+  element per character) or a mistyped field fails at plan time.
+  remote-file no longer offers `observe`, and now claims its sealed inputs'
+  delivery modes, so a `file`-mode input passes strict routing. Shared SSH
+  code lives in `plugins/internal/ssh`.
+- **Plugins no longer bake host environment values into plans.** The go,
+  remote-exec and remote-file plugins name the host variables they need
+  (`PATH`, `HOME`, `GOCACHE`, `SSH_AUTH_SOCK`, ...) in `env_passthrough`
+  instead of copying their values into `env`, so plan digests and action keys
+  no longer change with `$PATH` or the login session, and the shared cache
+  can hit across machines. docker's actions pass `PATH`, `HOME` and the
+  `DOCKER_*` client settings through; k8s's impure actions inherit mu's
+  environment instead of running kubectl in an empty one.
 - **Strict sealed routing is the only mode.** A target's `sealed_inputs` /
   `sealed_outputs` are the complete allow-list: every action claim must match a
   declared name, ref, and mode; every declared input must be claimed at least
@@ -15,9 +40,22 @@ All notable changes to mu are recorded here. The format follows
   action and never checked an action's own claims, so a plugin could claim a
   ref the target never declared. One convenience remains: a plan with exactly
   one action and no claims gets the target's maps. The `sealed_routing` field
-  was removed; setting it is a load error. secret-gen targets must declare
-  `sealed_outputs: {VALUE: <ref>}` with the matching mode until `config.ref`
-  goes away.
+  was removed; setting it is a load error.
+- **secret-gen names its destination only in `sealed_outputs`.** A
+  secret-gen target declares exactly one `sealed_outputs` entry (any name,
+  conventionally `VALUE`) and optionally its `sealed_output_modes` entry,
+  which defaults to `create_if_absent`. `config.ref` and `config.mode` were
+  removed; setting either fails planning with the replacement to write.
+- **Cross-target path inputs are wired regardless of planning order.** An
+  input naming another target's declared output now links to that target
+  even when the consumer sorts first and lists no `deps`. Targets that read
+  each other's outputs are reported as a cycle at plan time.
+- **An output path has exactly one producer.** Two targets declaring the
+  same output path now fail planning, naming both targets, actions and the
+  path; previously the last one planned silently won, so consumers wired to
+  an arbitrary producer and the two actions raced on the file. Within one
+  target, actions may share a path only when depends_on or `{action:id}`
+  inputs order them; the last writer is the producer.
 
 ### Added
 
@@ -64,6 +102,24 @@ All notable changes to mu are recorded here. The format follows
   `script`, `url` or `command` source with the pinned digest. Previously they
   added `digest` alongside it, which the schema rejects, leaving `mu.cue`
   unloadable.
+
+### Removed
+
+- The pith VM. Targets can no longer carry inline `plan` or `transform`
+  programs, and actions can no longer carry a `body`. A `mu.cue` target that
+  sets `plan`, `transform` or `body` fails to load, and a plugin plan response
+  with an action `body` is rejected. Use a `shell` target or a plugin that
+  emits commands. The `pith-plugins` guide topic and the pith examples are
+  gone, and mu no longer depends on `github.com/chazu/pith`.
+- ewe actions (`ewe_source` on an action, run in-process by `internal/ewesink`).
+  They ran inside the mu process, so they could never be sandboxed, and they
+  carried known bugs: paging followed `Link: rel=next` to any host with the
+  auth headers attached, query-string secrets could appear in error text,
+  requests had no timeout or size limit and ignored `--offline` and
+  `network: false`, and the actions could be cached. A plan response with
+  `ewe_source`, or a `mu.cue` target with `ewe` or `ewe_source`, is now
+  rejected with "ewe actions were removed". `mu build --plan --json` no longer
+  emits `ewe_digest`, and mu no longer depends on `github.com/chazu/ewe`.
 
 ## [v0.3.5] — 2026-08-05
 

@@ -45,7 +45,10 @@ ACTIONS GENERATED
   docker-push    Pushes the image to a registry (only when push: true).
                  Depends on docker-build.
 
-Both actions require network access.
+Both actions require network access. They pass PATH, HOME and the
+DOCKER_HOST/DOCKER_CONFIG/DOCKER_CONTEXT/DOCKER_CERT_PATH/DOCKER_TLS_VERIFY
+client settings through by name (env_passthrough), so the docker CLI sees
+the host's configuration without those values entering the cache key.
 
 CAPABILITIES
 

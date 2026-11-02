@@ -9,15 +9,16 @@ HOW CACHING WORKS
 
   Each build action has a cache key (sha256) computed from:
   - Command (argv, original order)
-  - Inline pith body or ewe program digest, when present
   - Sorted input digests (sha256 of each input file). Inputs produced by
     another action use the digest of what that action actually produced,
     filled in after it runs and before this action's cache lookup.
   - Declared environment variables (sorted); pure defaults are clean, while
     impure bare commands may inherit
   - Sorted env_passthrough names (never their host values)
-  - Sorted toolchain artifact paths and digests, including bare vs sandbox mode
-  - Sorted declared output paths and sandbox source paths
+  - Sorted input paths (where each input lands in the sandbox work tree)
+  - Sorted toolchain artifact paths and digests, and whether the action runs
+    sandboxed (MU_SANDBOX=1 or named toolchains) or bare
+  - Sorted declared output paths
   - Network flag
   - Impure flag
   - Work directory relative to the project root (slash-separated). The
@@ -112,6 +113,9 @@ INSPECTING THE CACHE
   mu cache clean                   Remove unreachable blobs (garbage collection)
                                    and stale staging (see below).
   mu cache clean --dry-run         Report what would be removed.
+
+  ls, inspect, size and clean read ~/.mu/cache. With --config PATH they
+  read the cache.path set in that mu.cue instead (when it sets one).
 
 STAGING AND CRASH CLEANUP
 
@@ -258,21 +262,18 @@ PLUGIN STORAGE
   CAS directly. Built plugin bundles are extracted to ~/.mu/plugins/<name>/.
   Directory bundles use bundle-<full-sha256> and are published only after
   successful extraction. Interrupted extraction leaves no reusable bundle.
-  Older bundles are retained for running processes. Plugin push selects the
-  build's resolved digest rather than combining cached versions.
+  Older bundles are retained for running processes.
 
 REMOTE METADATA BUDGETS
 
-  OCI manifests and action-result configs are limited to 8 MiB each. Plugin
-  configs and plugin indexes are limited to 4 MiB each. These budgets are
-  independent of large artifact layer blobs. A representative 20,000-output
+  OCI manifests and action-result configs are limited to 8 MiB each. These
+  budgets are independent of large artifact layer blobs. A representative 20,000-output
   action config fits within its budget.
 
   Declared oversized descriptors fail before fetch. Actual transfer bytes,
   including trailing whitespace, are also bounded before JSON decoding, so
   inaccurate sizes cannot bypass the limit. Errors identify the metadata kind
-  and byte budget; split oversized output sets or plugin indexes into smaller
-  artifacts. Native code rejects trailing JSON and closes streams on failure.
+  and byte budget; split oversized output sets into smaller artifacts. Native code rejects trailing JSON and closes streams on failure.
 
 REGISTRY OUTAGES AND LOCAL OPERATION
 

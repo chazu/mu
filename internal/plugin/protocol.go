@@ -25,8 +25,6 @@ type (
 	ActionSpec            = muplugin.ActionSpec
 	ResolveSecretResponse = muplugin.ResolveSecretResponse
 	StoreSecretResponse   = muplugin.StoreSecretResponse
-	AdviseContext         = muplugin.AdviseContext
-	AdviseResponse        = muplugin.AdviseResponse
 )
 
 // StoreSecretMode aliases.
@@ -36,9 +34,6 @@ const (
 	StoreSecretModeCreateIfAbsent = muplugin.StoreSecretModeCreateIfAbsent
 )
 
-// DefaultAdviseTimeout is re-exported for callers in internal/.
-const DefaultAdviseTimeout = muplugin.DefaultAdviseTimeout
-
 // Constructor re-exports (function values, since Go has no `func` alias).
 var (
 	NewDiscoverRequest      = muplugin.NewDiscoverRequest
@@ -46,5 +41,4 @@ var (
 	NewObserveRequest       = muplugin.NewObserveRequest
 	NewResolveSecretRequest = muplugin.NewResolveSecretRequest
 	NewStoreSecretRequest   = muplugin.NewStoreSecretRequest
-	NewAdviseRequest        = muplugin.NewAdviseRequest
 )

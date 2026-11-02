@@ -29,12 +29,15 @@ import (
 //  2. Otherwise, fall back to ~/.mu/plugins/<name>/, which works outside of
 //     any project for plugins previously seen by this user.
 //
+// The project is the one named by --config, else the one discovered from
+// the working directory.
+//
 // In both cases the plugin process is started briefly to run discover, then
 // shut down. No build is triggered.
 func runPluginInfo(args []string) int {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin info", fs)
+	cli := newCLIContext("plugin info", fs, useConfig, useJSON, useOffline)
 	digest := fs.String("digest", "", "select a cached plugin by full SHA-256 digest")
 	if code, ok := parseFlags(fs, args, "plugin info [flags] <name>"); !ok {
 		return code
@@ -45,16 +48,12 @@ func runPluginInfo(args []string) int {
 	}
 	name := fs.Arg(0)
 
-	// Try project config first; absence isn't fatal (cache-only lookup).
-	if root, err := os.Getwd(); err == nil {
-		if pr, perr := config.FindProjectRoot(root); perr == nil {
-			cli.ProjectRoot = pr
-			if cfg, cerr := config.LoadOffline(pr, *cli.flagOffline); cerr == nil {
-				cli.Config = cfg
-			}
-		}
+	// The project (from --config or the working directory) wins; outside
+	// any project the lookup falls back to installed plugins. A project
+	// whose mu.cue fails to load is an error, not a silent fallback.
+	if code, ok := cli.resolveOptionalProject(); !ok {
+		return code
 	}
-	cli.JSON = isJSONFlag(fs)
 
 	source, def, dgst, err := resolveInfoTarget(cli.networkContext(context.Background()), cli.ProjectRoot, cli.Config, name, *digest)
 	if err != nil {
@@ -424,17 +423,6 @@ func schemaFieldStr(m map[string]any, key string) string {
 	}
 	s, _ := v.(string)
 	return s
-}
-
-// isJSONFlag reads the --json flag from fs after Parse. Resolve sets
-// this normally, but we skip Resolve to avoid its "mu.cue not found"
-// stderr when running outside a project.
-func isJSONFlag(fs *flag.FlagSet) bool {
-	f := fs.Lookup("json")
-	if f == nil {
-		return false
-	}
-	return f.Value.String() == "true"
 }
 
 func joinOrDash(s []string) string {

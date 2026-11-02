@@ -109,7 +109,7 @@ mu build //hello
 
 That's the whole loop — no toolchain bootstrap needed for Go plugins. The
 SDK derives capabilities from which handlers (Plan, Observe,
-ResolveSecret, StoreSecret, Advise) are non-nil. Full SDK reference:
+ResolveSecret, StoreSecret) are non-nil. Full SDK reference:
 `mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
 
 ### Alternative: Babashka (or any other language)
@@ -141,27 +141,27 @@ mu build      Build targets
 mu scratch    Build toolchains from scratch
 mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
 mu targets    List targets; --deps/--rdeps show dependency chains (tree/DOT/JSON)
-mu plugin     Search, install, update, list, inspect, add, push, test plugins
+mu plugin     List, inspect, and install plugins
 mu observe    Ask plugins to report current state
-mu verify     Validate CAS integrity + schema namespaces
+mu verify     Validate CAS integrity
 mu guide      Quick-reference help topics
 mu version
 ```
 
-Shared flags: `--json`, `--verbose`, `--config PATH`.
+Common flags, on the commands that use them: `--config PATH`, `--json`,
+`--verbose`, `--offline`. Run `mu <command> -h` for a command's flags.
 
-The official source-package catalog is available through `mu plugin search`.
-Use `mu plugin install NAME[@VERSION]` to download and verify a GitHub release
+Plugins are distributed through the official GitHub release catalog.
+Use `mu plugin install NAME[@VERSION]` to download and verify a release
 asset, bundle it into the local CAS, register its digest in `mu.cue`, and pin
-the source and bundle digests in `mu.lock`. `mu plugin update` refreshes one or
-all locked catalog plugins; `mu plugin lock --json` displays the lockfile.
+the source and bundle digests in `mu.lock`. Re-run install to update.
 Use `--catalog URL` or `MU_PLUGIN_CATALOG` for a catalog mirror or local test
 server.
 
 Run `mu guide` for the topic index. Each topic has its own page:
 `overview`, `mu.cue`, `plugins`, `build`, `observe`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
-`secret-providers`, `pith-plugins`, `sandbox`, `advice`, `sdk`.
+`secret-providers`, `sandbox`, `sdk`.
 
 ## Topics
 
@@ -169,11 +169,10 @@ Run `mu guide` for the topic index. Each topic has its own page:
 |-------|-------|
 | Conceptual model, primitives, hermeticity | [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) |
 | CUE config reference | [`docs/cue-conventions.md`](docs/cue-conventions.md) · `mu guide mu.cue` |
-| Plugin protocol (NDJSON) | `mu guide protocol` · [`docs/plugin-output-schemas.md`](docs/plugin-output-schemas.md) |
+| Plugin protocol (NDJSON) | `mu guide protocol` |
 | Writing plugins | `mu guide plugins` |
-| Inline programs (pith VM) | `mu guide pith-plugins` |
-| Sealed inputs/outputs (secrets) | `mu guide secrets` · [`docs/sealed-input-delivery-modes.md`](docs/sealed-input-delivery-modes.md) · [`docs/secrets-write-policy.md`](docs/secrets-write-policy.md) |
-| Secret-gen toolchain | `mu guide secret-gen` · [`docs/secret-gen-toolchain.md`](docs/secret-gen-toolchain.md) |
+| Sealed inputs/outputs (secrets) | `mu guide secrets` · `mu guide secret-providers` |
+| Secret-gen toolchain | `mu guide secret-gen` |
 | Sandbox model | `mu guide sandbox` |
 | Toolchains from scratch | `mu guide toolchains` |
 | Cache (CAS + OCI remote) | `mu guide cache` |
@@ -196,11 +195,10 @@ Run `mu guide` for the topic index. Each topic has its own page:
 | `remote-file` | Converge a file on a remote host over SSH |
 | `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
 | `terraform` | Infra provisioning + drift + sensitive-output capture |
-| `void` | Build webhook reporter (advice plugin) |
 
 ## Project Status
 
-v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, pith VM, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
+v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
 
 ### Roadmap
 

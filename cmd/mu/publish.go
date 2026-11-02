@@ -36,8 +36,8 @@ func parseAttachments(specs []string) ([]attachSpec, error) {
 }
 
 // attachReferrers attaches each spec's file to subject as an OCI referrer,
-// logging progress to stderr. Shared by `mu build --publish --attach` and
-// `mu plugin push --attach`. Returns the number of failed attachments;
+// logging progress to stderr. Used by `mu build --publish --attach`.
+// Returns the number of failed attachments;
 // failures are logged and do not stop later attachments.
 func attachReferrers(ctx context.Context, store *oci.OCIStore, subject ocispec.Descriptor, attachments []attachSpec, created string) int {
 	failed := 0

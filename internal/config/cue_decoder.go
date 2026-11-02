@@ -138,6 +138,9 @@ func rejectRemovedFields(val cue.Value, path string) error {
 	if val.LookupPath(cue.ParsePath("publish.registry")).Exists() {
 		return fmt.Errorf("%s: publish.registry was removed; put the host in publish.repository; %s", path, registryRefHint)
 	}
+	if val.LookupPath(cue.ParsePath("advice")).Exists() {
+		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
+	}
 	targets := val.LookupPath(cue.ParsePath("targets"))
 	if !targets.Exists() {
 		return nil
@@ -154,26 +157,24 @@ func rejectRemovedFields(val cue.Value, path string) error {
 				return fmt.Errorf("%s: target %q: kind/implements were removed; delete the %q field", path, name, field)
 			}
 		}
+		for _, field := range []string{"plan", "transform", "body"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: inline pith programs were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
+		for _, field := range []string{"ewe", "ewe_source"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: ewe actions were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
 		if t.LookupPath(cue.ParsePath("sealed_routing")).Exists() {
 			name, _ := t.LookupPath(cue.ParsePath("target")).String()
 			return fmt.Errorf("%s: target %q: sealed_routing was removed; strict routing is always on — delete the field", path, name)
 		}
 	}
 	return nil
-}
-
-// IsCuePluginDir reports whether the given mu.cue file (raw bytes)
-// contains a top-level "plugin" field. This mirrors IsPluginDir for the
-// JSON decoder and is used by callers (e.g. the project loader) to
-// decide whether a sub-tree mu.cue is a plugin manifest.
-func IsCuePluginDir(data []byte) bool {
-	ctx := cuecontext.New()
-	v := ctx.CompileBytes(data, cue.Filename("mu.cue"))
-	if v.Err() != nil {
-		return false
-	}
-	p := v.LookupPath(cue.ParsePath("plugin"))
-	return p.Exists()
 }
 
 // compileSchemaDefs compiles the embedded schema.cue in the given context

@@ -29,7 +29,7 @@ func Validate(cfg *ProjectConfig) error {
 			seenTargets[t.Name] = true
 		}
 
-		if t.Toolchain == "" && len(t.Plan) == 0 && len(t.Transform) == 0 {
+		if t.Toolchain == "" {
 			errs = append(errs, fmt.Sprintf("%s: missing required field \"toolchain\"", label))
 		}
 	}

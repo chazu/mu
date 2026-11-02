@@ -34,7 +34,8 @@ const (
 // Sandbox manages a temporary rootfs for executing a build action.
 type Sandbox struct {
 	rootDir   string         // the temp directory serving as our rootfs
-	workDir   string         // working directory inside rootfs for the action
+	workDir   string         // root of the action's file tree inside rootfs (work/)
+	cwdRel    string         // command working directory, relative to workDir
 	store     cas.Store      // CAS for unpacking toolchain blobs
 	isolation IsolationLevel // actual isolation achieved
 
@@ -89,6 +90,15 @@ func (s *Sandbox) WorkDir() string {
 	return s.workDir
 }
 
+// reservedRootDirs are sandbox-owned top-level directories. Toolchain
+// artifacts may not be unpacked into them: a toolchain file under work/ would
+// masquerade as an action input, and the others are mount points or
+// runtime-managed (tmp/, out/, sealed/, and Linux's dev/ and proc/).
+var reservedRootDirs = map[string]bool{
+	"work": true, "out": true, "tmp": true, "sealed": true,
+	"dev": true, "proc": true, ".pivot_root": true,
+}
+
 // UnpackToolchain extracts all artifacts from a toolchain manifest into the
 // sandbox's rootfs. Each artifact is fetched from CAS by digest and written
 // to its relative path under the root directory.
@@ -105,8 +115,14 @@ func (s *Sandbox) UnpackToolchain(ctx context.Context, artifacts map[string]cas.
 func (s *Sandbox) unpackBlob(ctx context.Context, relPath string, dgst cas.Digest) error {
 	// Guard against path traversal.
 	dest := filepath.Join(s.rootDir, relPath)
-	if !strings.HasPrefix(dest, s.rootDir+string(filepath.Separator)) {
+	if !filepath.IsLocal(relPath) || !strings.HasPrefix(dest, s.rootDir+string(filepath.Separator)) {
 		return fmt.Errorf("path traversal: %s", relPath)
+	}
+	if first, _, _ := strings.Cut(filepath.ToSlash(filepath.Clean(relPath)), "/"); reservedRootDirs[first] {
+		return fmt.Errorf("toolchain path %s is inside reserved sandbox directory %s/", relPath, first)
+	}
+	if s.store == nil {
+		return fmt.Errorf("no CAS store to fetch %s", dgst)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -209,6 +225,121 @@ func (s *Sandbox) CopySourcesRoot(root *os.Root, relPaths []string) error {
 	return nil
 }
 
+// SetWorkSubdir makes the command run in work/<rel> instead of work/. The
+// work tree mirrors the project root, so an action whose work_dir is a project
+// subdirectory sees its inputs at their project-relative paths and resolves
+// its relative outputs against its own directory.
+func (s *Sandbox) SetWorkSubdir(rel string) error {
+	rel = filepath.Clean(rel)
+	if rel != "." && !filepath.IsLocal(rel) {
+		return fmt.Errorf("sandbox: work subdirectory %q is not local", rel)
+	}
+	if err := os.MkdirAll(filepath.Join(s.workDir, rel), 0o755); err != nil {
+		return fmt.Errorf("sandbox: create work subdirectory: %w", err)
+	}
+	s.cwdRel = rel
+	return nil
+}
+
+// cwd is the host path of the command's working directory.
+func (s *Sandbox) cwd() string {
+	return filepath.Join(s.workDir, s.cwdRel)
+}
+
+// VisiblePath is how the sandboxed command sees rootDir/rel: under Linux
+// namespaces the sandbox root is "/", elsewhere it is the host path.
+func (s *Sandbox) VisiblePath(rel string) string {
+	if s.isolation == IsolationNamespace {
+		return "/" + filepath.ToSlash(filepath.Clean(rel))
+	}
+	return filepath.Join(s.rootDir, rel)
+}
+
+// PlaceFile writes r to work/<rel> with the given permissions. rel must be
+// local and not already present. Writes go through os.Root, so nothing
+// outside work/ can be reached.
+func (s *Sandbox) PlaceFile(rel string, r io.Reader, perm os.FileMode) error {
+	if !filepath.IsLocal(rel) {
+		return fmt.Errorf("sandbox: input path %q is not local", rel)
+	}
+	root, err := os.OpenRoot(s.workDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if dir := filepath.Dir(rel); dir != "." {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	f, err := root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm.Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// OpenOutput opens a declared output for reading. It looks in out/ first
+// (where $MU_OUT points), then in the command's working directory. Both
+// lookups are confined with os.Root, so a symlink planted by the action cannot
+// make mu read a host file from outside the sandbox.
+func (s *Sandbox) OpenOutput(rel string) (*os.File, error) {
+	if !filepath.IsLocal(rel) {
+		return nil, fmt.Errorf("sandbox: output path %q escapes the work directory", rel)
+	}
+	var firstErr error
+	for _, dir := range []string{filepath.Join(s.rootDir, "out"), s.cwd()} {
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return nil, err
+		}
+		f, err := root.Open(rel)
+		root.Close()
+		if err == nil {
+			return f, nil
+		}
+		if firstErr == nil || !os.IsNotExist(err) {
+			firstErr = err
+		}
+	}
+	return nil, firstErr
+}
+
+// WriteSealedFiles delivers file-mode sealed inputs: each value is written to
+// sealed/<name> (directory 0700, files 0600) inside the sandbox root, where
+// the command can read it. It returns name -> path as the command sees it.
+// Callers remove the files with RemoveSealedFiles right after execution;
+// Cleanup removes them too.
+func (s *Sandbox) WriteSealedFiles(values map[string]string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	dir := filepath.Join(s.rootDir, "sealed")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("sandbox: create sealed dir: %w", err)
+	}
+	paths := make(map[string]string, len(values))
+	for name, value := range values {
+		if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+			return nil, fmt.Errorf("sandbox: sealed input name %q is not a single path component", name)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
+			return nil, fmt.Errorf("sandbox: write sealed input %q: %w", name, err)
+		}
+		paths[name] = s.VisiblePath(filepath.Join("sealed", name))
+	}
+	return paths, nil
+}
+
+// RemoveSealedFiles deletes the files written by WriteSealedFiles.
+func (s *Sandbox) RemoveSealedFiles() error {
+	return os.RemoveAll(filepath.Join(s.rootDir, "sealed"))
+}
+
 // Exec runs a command inside the sandbox with a hermetic environment.
 // The command runs in the work directory. PATH includes the sandbox's bin
 // directory (where toolchain binaries are unpacked) plus any additional
@@ -231,7 +362,7 @@ func (s *Sandbox) Exec(ctx context.Context, command []string, env map[string]str
 // execCopy runs the command with copy-based isolation (restricted env only).
 func (s *Sandbox) execCopy(ctx context.Context, command []string, env map[string]string) (int, error) {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.Dir = s.workDir
+	cmd.Dir = s.cwd()
 	cmd.Env = s.buildEnv(env)
 	cmd.Stdout = s.stdoutWriter()
 	cmd.Stderr = os.Stderr
@@ -278,9 +409,9 @@ func (s *Sandbox) buildEnv(env map[string]string) []string {
 }
 
 // OutputPath returns the absolute path for a declared output file, relative
-// to the sandbox's work directory.
+// to the command's working directory.
 func (s *Sandbox) OutputPath(relPath string) string {
-	return filepath.Join(s.workDir, relPath)
+	return filepath.Join(s.cwd(), relPath)
 }
 
 // Cleanup removes the sandbox's temporary directory and all its contents.

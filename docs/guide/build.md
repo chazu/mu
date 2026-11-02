@@ -12,8 +12,6 @@ FLAGS
   --emit-manifest   Emit a build manifest as JSON to stdout (for CI).
   --no-cache        Skip action-result reads; retain dependency CAS storage.
   --offline         Use local dependencies; disable Mu-owned remote access.
-  --no-discover-cache
-                    Force live plugin discovery instead of its digest cache.
   --jobs N          Max parallel actions (default: NumCPU).
   --config PATH     Path to mu.cue (default: discover by walking up).
   --verbose         Show plugin I/O.
@@ -42,8 +40,8 @@ JSON PLAN CONTRACT
   are version, targets, plugins, actions, and summary. Plugin rows record
   resolved content digest, version, protocol version, and capabilities. Each
   action includes its ID,
-  computed action_key, and every execution-affecting field: command or body,
-  ewe_digest, input digests, outputs, dependencies, environment, sealed refs
+  computed action_key, and every execution-affecting field: command, input
+  digests, outputs, dependencies, environment, sealed refs
   and modes, network/work-dir/project-root/impure/retry settings, toolchain digests, and
   sources. Empty optional fields may be omitted.
 
@@ -100,7 +98,9 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
   required variables in action.env; use sealed_inputs for secret values.
   When a bare command has no PATH, Mu searches only /usr/bin:/bin for its
   initial executable. An explicit PATH controls lookup; ambient parent PATH
-  cannot select another binary. The sandbox supplies its own toolchain PATH.
+  cannot select another binary. In the sandbox the toolchain bin/ comes first
+  on PATH (see `mu guide sandbox`; pure actions are sandboxed with
+  MU_SANDBOX=1 or when they name scratch toolchains).
 
   Impure bare commands with no env declaration retain parent inheritance for
   direct host operations. Explicit env maps, including {}, replace inheritance.

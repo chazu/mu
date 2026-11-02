@@ -116,13 +116,17 @@ func formatSize(bytes int64) string {
 func runCacheLs(args []string) int {
 	fs := flag.NewFlagSet("cache ls", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	cli := newCLIContext("cache ls", fs, useConfig)
 	toolchains := fs.Bool("toolchains", false, "show only toolchain manifests")
 	jsonOut := fs.Bool("json", false, "output as JSON")
 	if code, ok := parseFlags(fs, args, "cache ls [flags]"); !ok {
 		return code
 	}
 
-	cacheDir := cachePath()
+	cacheDir, code, ok := cli.localCacheDir()
+	if !ok {
+		return code
+	}
 	store, err := openLocalCache(cacheDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu cache ls: %v\n", err)
@@ -253,6 +257,7 @@ func cacheLsToolchains(cacheDir string, entries []cachedAction, jsonOut bool) in
 func runCacheInspect(args []string) int {
 	fs := flag.NewFlagSet("cache inspect", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	cli := newCLIContext("cache inspect", fs, useConfig)
 	jsonOut := fs.Bool("json", false, "output as JSON")
 	if code, ok := parseFlags(fs, args, "cache inspect [flags] <ref>"); !ok {
 		return code
@@ -264,7 +269,10 @@ func runCacheInspect(args []string) int {
 		return 2
 	}
 
-	cacheDir := cachePath()
+	cacheDir, code, ok := cli.localCacheDir()
+	if !ok {
+		return code
+	}
 	store, err := openLocalCache(cacheDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu cache inspect: %v\n", err)
@@ -382,12 +390,16 @@ func inspectBlob(digest string, size int64, jsonOut bool) int {
 func runCacheSize(args []string) int {
 	fs := flag.NewFlagSet("cache size", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	cli := newCLIContext("cache size", fs, useConfig)
 	jsonOut := fs.Bool("json", false, "output as JSON")
 	if code, ok := parseFlags(fs, args, "cache size [flags]"); !ok {
 		return code
 	}
 
-	cacheDir := cachePath()
+	cacheDir, code, ok := cli.localCacheDir()
+	if !ok {
+		return code
+	}
 
 	// Count blobs.
 	blobDir := filepath.Join(cacheDir, "blobs", "sha256")
