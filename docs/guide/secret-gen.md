@@ -33,6 +33,22 @@ BASIC USAGE
   planning with a message naming the sealed_outputs /
   sealed_output_modes entry to write instead.
 
+HOW IT WORKS
+
+  A secret-gen target plans into exactly one action:
+
+    1. The action runs the derivation argv under bash.
+    2. Its stdout is captured and, by default, one trailing newline
+       is stripped.
+    3. The value is written to $MU_SEALED_OUT_DIR/<NAME>, where NAME
+       is the target's sealed_outputs key — a per-action 0700
+       directory the executor creates.
+    4. After the action exits successfully, mu reads that file and
+       routes it through the provider's store_secret with the
+       selected mode.
+    5. The directory is removed whether or not the action succeeded,
+       and the value buffer is zeroed after routing.
+
 TARGET FIELDS
 
   sealed_outputs       (required) Exactly one entry: name -> ref.
@@ -49,7 +65,12 @@ CONFIG FIELDS
   keep_trailing_newline  (optional, default false) If false, strip
               a single trailing newline from the derivation's
               stdout before storing (the right thing for openssl
-              rand, uuidgen, etc.).
+              rand, uuidgen, etc.). Set true when the trailing
+              newline matters, e.g. a PEM block whose consumers
+              expect it.
+
+  sources, outputs, and network are not used and are ignored if
+  present. The derivation runs without network access.
 
 PICKING A MODE
 
@@ -165,12 +186,22 @@ COOKBOOK — common derivations
 WHAT SECRET-GEN IS NOT
 
   - Not a generic "run-once" toolchain. It only handles the
-    derive-then-store pattern.
+    derive-then-store pattern. To mint something that lives in the
+    filesystem, use shell with outputs.
   - Not a way to read a secret. Use sealed_inputs for that.
   - Not aware of the value. mu sees the bytes only briefly,
-    in memory, between the side-channel read and store_secret.
+    in memory, between the side-channel read and store_secret. They
+    are never written outside the per-action directory, logged, or
+    hashed into the cache key.
+
+PROVIDER SUPPORT
+
+  The destination scheme must map to a registered plugin that
+  declares store_secret. Bundled: pass (plugins/pass) and sops
+  (plugins/sops). To add a backend, implement store_secret; see
+  'mu guide secret-providers'.
 
 SEE ALSO
 
-  mu guide secrets         The full secrets reference.
-  docs/secret-gen-toolchain.md   In-depth design notes.
+  mu guide secrets           The full secrets reference.
+  mu guide secret-providers  Implementing store_secret.

@@ -8,12 +8,9 @@ required). Values never enter the cache, manifests, or logs. Provider refs are
 also omitted from manifests; refs and modes remain non-secret planning metadata
 and are part of the cache key.
 
-This guide is the canonical user-facing reference. Per-feature deep
-dives and the plugin-author counterpart:
+This guide is the canonical user-facing reference. Related topics:
+  mu guide secret-gen            Built-in toolchain that mints secrets
   mu guide secret-providers      Authoring secret-aware plugins
-  docs/secret-gen-toolchain.md
-  docs/sealed-input-delivery-modes.md
-  docs/secrets-write-policy.md
 
 ────────────────────────────────────────────────────────────────────
 READING SECRETS — sealed_inputs
@@ -49,15 +46,51 @@ DELIVERY MODES — sealed_input_modes
   sealed_input_modes: SSH_KEY: "file"
 
   Modes:
-    env  (default)  Value exported as $NAME.
-    file            Value written to a 0600 temp file under a
-                    per-action sealed-input directory; $NAME holds
-                    the path. The dir is removed when the action
-                    exits regardless of success.
+    env  (default)  Value exported as $NAME. An unset or empty mode
+                    means env.
+    file            Value written to a 0600 file named NAME in a
+                    per-action directory (mu-sealed-in-* under
+                    $TMPDIR, mode 0700); $NAME holds the path. The
+                    directory is removed when the action exits,
+                    whether or not it succeeded.
+  Any other mode fails the action.
 
-  Sandbox-mode (toolchain-pinned) actions reject file mode because
-  the temp file lives outside the sandbox view. shell, secret-gen,
-  remote-exec, remote-file all run bare and support file mode.
+  Why file mode: multi-line secrets (SSH keys, x509 certs, JSON
+  service-account blobs, kubeconfigs) are awkward as env vars, and
+  many tools want a path rather than a value ('ssh -i <path>',
+  'kubectl --kubeconfig <path>', 'gcloud ... --key-file <path>').
+  Env vars are also visible in 'ps -E' and /proc/<pid>/environ for
+  the action and every child it forks; file mode keeps the value out
+  of the process table.
+
+  Example: loading an SSH key into ssh-agent.
+
+    env mode (value in the environment, piped by hand):
+      config: command: ["bash", "-c", "printf '%s\\n' \"$SSH_KEY\" | ssh-add -"]
+      sealed_inputs: SSH_KEY: "pass:raw:hosts/dalian/key"
+
+    file mode ($SSH_KEY is a path to a 0600 file mu deletes after
+    the action):
+      config: command: ["bash", "-c", "ssh-add \"$SSH_KEY\""]
+      sealed_inputs:      SSH_KEY: "pass:raw:hosts/dalian/key"
+      sealed_input_modes: SSH_KEY: "file"
+
+  Which to use: env for short tokens and passwords; file for SSH
+  keys, kubeconfigs, certificates, JSON blobs, anything multi-line,
+  and anything a CLI wants as a --key-file style path. There is no
+  stdin mode: to pipe a secret into a command ('ssh-add -',
+  'pass insert -m'), read it from a file-mode path or printf the
+  env-mode value into the pipe.
+
+  Sandbox-mode (toolchain-pinned) actions reject file mode at exec
+  time because the temp file lives outside the sandbox view; env mode
+  works in both. shell, secret-gen, remote-exec, remote-file, and
+  plugin actions that pin no toolchain run bare and support file
+  mode.
+
+  The mode is part of the cache key (see SECURITY MODEL), and under
+  strict routing the action that consumes a name must claim the same
+  effective mode as the target declares (see ACTION ROUTING).
 
 THE PASS:RAW PREFIX
 
@@ -106,8 +139,10 @@ WRITE-POLICY ALLOW-LIST — secrets.writable_refs
 ────────────────────────────────────────────────────────────────────
 
 By default any plugin with the store_secret capability can write
-to any ref under its scheme. To bound the blast radius, declare a
-project-level allow-list at the top of mu.cue:
+to any ref under its scheme, so a typo in a secret-gen target or a
+bad plugin update could clobber any entry in your store. To bound
+the blast radius, declare a project-level allow-list at the top of
+mu.cue:
 
   secrets: {
       writable_refs: [
@@ -116,9 +151,24 @@ project-level allow-list at the top of mu.cue:
       ]
   }
 
-  Patterns use Go's path.Match: '*' matches a single path segment
-  (does NOT span '/'); literal text matches itself. Multiple
-  patterns are OR'd.
+PATTERNS
+
+  Patterns are matched against the FULL ref, scheme included
+  ("pass:registry/admin"), using Go's path.Match. Multiple patterns
+  are OR'd.
+    *               any run of characters except '/'
+    ?, [a-z], [!a]  single-character matches and classes
+    literal text    itself
+  '*' does NOT span '/', and '**' is not supported: list each depth
+  you allow.
+
+    writable_refs: [
+        "pass:registry/*",            // pass:registry/admin
+        "pass:registry/*/htpasswd",   // pass:registry/zone-a/htpasswd
+    ]
+
+  One list covers every write-capable scheme; there is no per-plugin
+  scoping. With several (pass + sops), include each scheme prefix.
 
 THREE STATES
 
@@ -129,9 +179,27 @@ THREE STATES
 ENFORCEMENT
 
   Plan time: every sealed_output ref in the graph is checked. A
-  forbidden ref aborts Plan() before the provider manager starts.
+  forbidden ref aborts Plan() before the provider manager starts,
+  so no provider ever sees the write:
+    coordinator: action "//secrets/personal:gen": sealed_output ref
+    "pass:personal/all-the-things" is not allowed by
+    secrets.writable_refs (2 pattern(s))
   Write time: the SealedOutputWriter closure re-checks defensively
-  before calling store_secret.
+  before calling store_secret, so a write that bypassed planning
+  still fails closed.
+
+  The policy composes with routing: routing proves which action owns
+  each declared output; writable_refs bounds where it may store it.
+
+  It does not gate reads (resolve_secret) or writes a target makes by
+  running the backend's CLI itself; see SECURITY MODEL.
+
+SUGGESTED DEFAULTS
+
+  Scope the list to the project's own namespace:
+    secrets: writable_refs: ["pass:<project>/*", "pass:<project>/*/*"]
+  Stores shared between people and machines should pin exact refs:
+    secrets: writable_refs: ["pass:registry/admin", "pass:registry/htpasswd"]
 
 ────────────────────────────────────────────────────────────────────
 ACTION ROUTING — target maps are the allow-list

@@ -168,10 +168,10 @@ Run `mu guide` for the topic index. Each topic has its own page:
 |-------|-------|
 | Conceptual model, primitives, hermeticity | [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) |
 | CUE config reference | [`docs/cue-conventions.md`](docs/cue-conventions.md) · `mu guide mu.cue` |
-| Plugin protocol (NDJSON) | `mu guide protocol` · [`docs/plugin-output-schemas.md`](docs/plugin-output-schemas.md) |
+| Plugin protocol (NDJSON) | `mu guide protocol` |
 | Writing plugins | `mu guide plugins` |
-| Sealed inputs/outputs (secrets) | `mu guide secrets` · [`docs/sealed-input-delivery-modes.md`](docs/sealed-input-delivery-modes.md) · [`docs/secrets-write-policy.md`](docs/secrets-write-policy.md) |
-| Secret-gen toolchain | `mu guide secret-gen` · [`docs/secret-gen-toolchain.md`](docs/secret-gen-toolchain.md) |
+| Sealed inputs/outputs (secrets) | `mu guide secrets` · `mu guide secret-providers` |
+| Secret-gen toolchain | `mu guide secret-gen` |
 | Sandbox model | `mu guide sandbox` |
 | Toolchains from scratch | `mu guide toolchains` |
 | Cache (CAS + OCI remote) | `mu guide cache` |
