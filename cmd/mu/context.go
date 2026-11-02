@@ -48,7 +48,8 @@ type cliContext struct {
 	Verbose bool
 	Offline bool
 
-	stderr io.Writer // injectable for tests
+	cacheLock *cas.CacheLock // shared lock held while Store is open
+	stderr    io.Writer      // injectable for tests
 }
 
 // sharedFlag names one of the flags newCLIContext can register. A command
@@ -205,8 +206,24 @@ func (c *cliContext) openStore() (cas.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Hold the cache shared while the store is in use so `mu cache clean`
+	// (exclusive) cannot collect blobs this process has not yet recorded.
+	lock, err := cas.LockShared(c.Paths.CacheDir, func() {
+		fmt.Fprintf(c.stderr, "mu %s: waiting for `mu cache clean` to finish...\n", c.Name)
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.cacheLock = lock
 	c.Store = store
 	return store, nil
+}
+
+// Close releases what Resolve/openStore acquired (the shared cache lock).
+// Exiting the process releases it as well.
+func (c *cliContext) Close() {
+	c.cacheLock.Release()
+	c.cacheLock = nil
 }
 
 func (c *cliContext) networkContext(ctx context.Context) context.Context {

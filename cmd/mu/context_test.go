@@ -140,7 +140,7 @@ func TestCommandFlagSets(t *testing.T) {
 		{[]string{"cache", "ls"}, "config json toolchains"},
 		{[]string{"cache", "inspect"}, "config json"},
 		{[]string{"cache", "size"}, "config json"},
-		{[]string{"cache", "clean"}, "config dry-run json"},
+		{[]string{"cache", "clean"}, "all-plugins config dry-run json"},
 		{[]string{"cache", "push"}, "config dry-run offline verbose"},
 		{[]string{"login"}, "config offline password-stdin username"},
 		{[]string{"logout"}, "config"},

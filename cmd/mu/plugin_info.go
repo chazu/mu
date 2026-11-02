@@ -38,6 +38,7 @@ func runPluginInfo(args []string) int {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("plugin info", fs, useConfig, useJSON, useOffline)
+	defer cli.Close()
 	digest := fs.String("digest", "", "select a cached plugin by full SHA-256 digest")
 	if code, ok := parseFlags(fs, args, "plugin info [flags] <name>"); !ok {
 		return code

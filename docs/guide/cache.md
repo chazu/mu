@@ -110,9 +110,21 @@ INSPECTING THE CACHE
   mu cache inspect <ref>           Inspect an action, toolchain, or blob by tag/digest.
   mu cache size                    Show total cache disk usage.
   mu cache size --json             Output as JSON.
-  mu cache clean                   Remove unreachable blobs (garbage collection)
+  mu cache clean                   Remove unreachable blobs (garbage collection),
+                                   stale plugin versions (see PLUGIN STORAGE)
                                    and stale staging (see below).
+  mu cache clean --all-plugins     Also keep only the newest version of every
+                                   installed plugin.
   mu cache clean --dry-run         Report what would be removed.
+
+  GC roots are the action results plus the plugin bundle digests the
+  project pins (mu.lock bundle_digest, mu.cue plugin digest).
+
+  Builds and other commands that open the cache hold the advisory lock
+  <cache>/.lock shared; clean holds it exclusively. So clean waits (with a
+  message) for running builds to finish, and a build started during a clean
+  waits for it, rather than clean collecting a blob a build has written but
+  not yet recorded. Where flock is unavailable the lock is a no-op.
 
   Every command uses one cache directory: the cache.path of the project
   (named by --config, else found by walking up from the working directory),
@@ -270,6 +282,15 @@ PLUGIN STORAGE
   Directory bundles use bundle-<full-sha256> and are published only after
   successful extraction. Interrupted extraction leaves no reusable bundle.
   Older bundles are retained for running processes.
+
+  `mu cache clean` prunes ~/.mu/plugins:
+  - entries from older releases named by a 12-hex digest prefix
+    (bundle-e6a95fab5a97) are always removed; nothing resolves them;
+  - for each plugin the current project pins (mu.lock or a digest in
+    mu.cue), every other installed version is removed;
+  - with --all-plugins, every other plugin keeps only its newest version
+    (by modification time). Without it, plugins this project does not use
+    are left alone, since other projects may.
 
 REMOTE METADATA BUDGETS
 
