@@ -140,6 +140,9 @@ func TestResolveRecordsInputPaths(t *testing.T) {
 func TestToolchainLookupUsesRegistryAndConfig(t *testing.T) {
 	store := newTestStore(t)
 	registry := NewToolchainRegistry(store)
+	if _, err := store.Put(context.Background(), strings.NewReader("go")); err != nil {
+		t.Fatal(err)
+	}
 	manifest := &ToolchainManifest{Name: "go", Version: "1.0", Artifacts: map[string]string{"bin/go": fakeDigest("go")}}
 	if err := registry.Register(context.Background(), manifest); err != nil {
 		t.Fatal(err)

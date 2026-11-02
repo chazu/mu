@@ -8,6 +8,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -695,5 +698,98 @@ func TestStoreArtifactsDoesNotReadThroughSymlinks(t *testing.T) {
 	}
 	if has, _ := b.Store.Has(context.Background(), cas.NewSHA256(sha256Hex([]byte("PRIVATE KEY")))); has {
 		t.Fatal("symlink target content was stored in CAS")
+	}
+}
+
+// diskRemote serves a DiskStore as a cas.Remote, withholding the blobs in
+// hide: a shared cache that holds a toolchain receipt and manifest but not
+// the toolchain's files.
+type diskRemote struct {
+	store *cas.DiskStore
+	hide  map[cas.Digest]bool
+}
+
+func (r *diskRemote) Get(ctx context.Context, d cas.Digest) (io.ReadCloser, error) {
+	if r.hide[d] {
+		return nil, cas.ErrNotFound
+	}
+	rc, err := r.store.Get(ctx, d)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, cas.ErrNotFound
+	}
+	return rc, err
+}
+
+func (r *diskRemote) GetActionResult(ctx context.Context, key cas.ActionKey) (*cas.ActionResult, error) {
+	return r.store.GetActionResult(ctx, key)
+}
+
+// A fresh local cache whose remote supplies the toolchain receipt but not the
+// artifacts it names must rebuild the toolchain, not report it complete
+// (mu-zl9.8). Afterwards the binary is in the local store.
+func TestBuild_RemoteReceiptWithoutArtifactsRebuilds(t *testing.T) {
+	archive := makeTarGz(t, map[string]string{"bin/tool": "#!/bin/sh\necho tool 1.0\n"})
+	var fetches atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
+		w.Write(archive)
+	}))
+	defer srv.Close()
+	cfg := &config.ProjectConfig{Toolchains: []config.Toolchain{{
+		Name: "tool", From: "scratch",
+		Config: config.ToolchainConfig{Version: "1.0", URL: srv.URL + "/tool.tar.gz", SHA256: sha256Hex(archive)},
+	}}}
+	ctx := context.Background()
+
+	// Populate the "remote" by building there, then withhold the binary.
+	remoteDisk, err := cas.NewDiskStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := &Builder{Store: remoteDisk, Registry: coordinator.NewToolchainRegistry(remoteDisk), CacheDir: t.TempDir()}
+	if err := seed.Build(ctx, cfg); err != nil {
+		t.Fatalf("seed build: %v", err)
+	}
+	bin, err := cas.ParseFullDigest(seed.Registry.Get("tool").Artifacts["bin/tool"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := &diskRemote{store: remoteDisk, hide: map[cas.Digest]bool{bin: true}}
+
+	newBuilder := func() *Builder {
+		local, err := cas.NewDiskStore(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := &cas.Cache{Local: local, Remote: remote}
+		return &Builder{Store: store, Registry: coordinator.NewToolchainRegistry(store), CacheDir: t.TempDir()}
+	}
+
+	b := newBuilder()
+	fetches.Store(0)
+	if err := b.Build(ctx, cfg); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Fatalf("archive fetches = %d, want 1 (the remote receipt's binary is unavailable)", n)
+	}
+	local := b.Store.(*cas.Cache).Local
+	if ok, _ := local.Has(ctx, bin); !ok {
+		t.Fatal("toolchain reported complete but its binary is not in the local store")
+	}
+
+	// When the remote does hold the artifacts, they are fetched and verified
+	// into the local store instead of rebuilding.
+	remote.hide = nil
+	b = newBuilder()
+	fetches.Store(0)
+	if err := b.Build(ctx, cfg); err != nil {
+		t.Fatalf("Build with complete remote: %v", err)
+	}
+	if n := fetches.Load(); n != 0 {
+		t.Fatalf("archive fetches = %d, want 0 (the remote has every artifact)", n)
+	}
+	if ok, _ := b.Store.(*cas.Cache).Local.Has(ctx, bin); !ok {
+		t.Fatal("remote artifact was not fetched into the local store")
 	}
 }

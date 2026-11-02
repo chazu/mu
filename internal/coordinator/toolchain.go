@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -129,7 +130,9 @@ func (r *ToolchainRegistry) Register(ctx context.Context, manifest *ToolchainMan
 }
 
 // Lookup retrieves a manifest by name and version. It checks the in-memory cache
-// first, then falls back to CAS. Returns (nil, nil) if the toolchain is not found.
+// first, then falls back to CAS. Returns (nil, nil) if the toolchain is not
+// found, or if its CAS receipt names an artifact that is not available
+// locally and cannot be fetched (see artifactsPresent).
 func (r *ToolchainRegistry) Lookup(ctx context.Context, name, version string) (*ToolchainManifest, error) {
 	// Check in-memory cache.
 	r.mu.RLock()
@@ -169,6 +172,9 @@ func (r *ToolchainRegistry) Lookup(ctx context.Context, name, version string) (*
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("toolchain: unmarshal manifest: %w", err)
 	}
+	if ok, err := r.artifactsPresent(ctx, &manifest); err != nil || !ok {
+		return nil, err
+	}
 
 	// Cache in-memory.
 	r.mu.Lock()
@@ -176,6 +182,38 @@ func (r *ToolchainRegistry) Lookup(ctx context.Context, name, version string) (*
 	r.mu.Unlock()
 
 	return &manifest, nil
+}
+
+// artifactsPresent reports whether every artifact the manifest names is in
+// the local store, fetching any that are missing through the store (a
+// cas.Cache pulls them from its remote and verifies them). A receipt is only
+// as good as the blobs it points at: a shared cache can hold a receipt and
+// manifest without the toolchain's files, and a local cache can lose blobs to
+// cleaning. Either way the toolchain must be rebuilt, so a missing artifact is
+// a miss (false, nil), not an error; only cancellation is returned.
+func (r *ToolchainRegistry) artifactsPresent(ctx context.Context, m *ToolchainManifest) (bool, error) {
+	for rel, s := range m.Artifacts {
+		dgst, err := cas.ParseFullDigest(s)
+		if err != nil {
+			slog.Debug("toolchain receipt names an invalid artifact digest; rebuilding",
+				"toolchain", m.Name, "version", m.Version, "artifact", rel, "err", err)
+			return false, nil
+		}
+		if ok, err := r.store.Has(ctx, dgst); err == nil && ok {
+			continue
+		}
+		rc, err := r.store.Get(ctx, dgst)
+		if err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			slog.Debug("toolchain receipt references an unavailable artifact; rebuilding",
+				"toolchain", m.Name, "version", m.Version, "artifact", rel, "digest", dgst.String(), "err", err)
+			return false, nil
+		}
+		rc.Close()
+	}
+	return true, nil
 }
 
 // Get returns the cached manifest for the given toolchain name (any version).

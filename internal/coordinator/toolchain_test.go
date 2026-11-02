@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/chazu/mu/internal/cas"
@@ -140,13 +141,18 @@ func TestPersistenceAcrossInstances(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	// Register with the first registry instance.
+	// Register with the first registry instance. A receipt is served only
+	// while the blobs it names are present, so store the artifact first.
+	bin, err := store.Put(ctx, strings.NewReader("go binary"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	reg1 := NewToolchainRegistry(store)
 	manifest := &ToolchainManifest{
 		Name:    "go",
 		Version: "1.25.7",
 		Artifacts: map[string]string{
-			"bin/go": "sha256:aaa111",
+			"bin/go": bin.String(),
 		},
 	}
 	if err := reg1.Register(ctx, manifest); err != nil {
@@ -172,7 +178,7 @@ func TestPersistenceAcrossInstances(t *testing.T) {
 	if got.Name != "go" || got.Version != "1.25.7" {
 		t.Errorf("unexpected manifest: %+v", got)
 	}
-	if got.Artifacts["bin/go"] != "sha256:aaa111" {
-		t.Errorf("Artifacts[bin/go] = %q, want %q", got.Artifacts["bin/go"], "sha256:aaa111")
+	if got.Artifacts["bin/go"] != bin.String() {
+		t.Errorf("Artifacts[bin/go] = %q, want %q", got.Artifacts["bin/go"], bin)
 	}
 }
