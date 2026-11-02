@@ -55,9 +55,10 @@ DELIVERY MODES — sealed_input_modes
                     the path. The dir is removed when the action
                     exits regardless of success.
 
-  Sandbox-mode (toolchain-pinned) actions reject file mode because
-  the temp file lives outside the sandbox view. shell, secret-gen,
-  remote-exec, remote-file all run bare and support file mode.
+  Sandboxed (pure) actions get the file inside the sandbox root
+  instead (sealed/<NAME>, 0600), removed as soon as the command
+  exits. Impure actions (shell, secret-gen, remote-exec,
+  remote-file by default) run on the host as described above.
 
 THE PASS:RAW PREFIX
 

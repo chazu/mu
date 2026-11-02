@@ -290,7 +290,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		// for intra-target wiring, not through the cross-target path map.
 		crossTargetProducers := cloneStringMap(producerForPath)
 
-		resolved, err := Resolve(ctx, planActions, c.ProjectRoot, c.Store, crossTargetProducers)
+		resolved, err := Resolve(ctx, planActions, c.ProjectRoot, c.Store, crossTargetProducers, c.toolchainLookup(registry))
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}

@@ -39,7 +39,7 @@ func TestResolveConfinesSymlinkReads(t *testing.T) {
 				}
 			}
 			spec := plugin.ActionSpec{ID: "test", Inputs: map[string]string{"src": "link"}}
-			_, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, root, newTestStore(t), nil)
+			_, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, root, newTestStore(t), nil, nil)
 			if outside && err == nil {
 				t.Fatal("read escaped project through symlink")
 			}
@@ -70,7 +70,7 @@ func TestResolveFileInputs(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestResolveAbsoluteFileInput(t *testing.T) {
 		ID:      "build",
 		Command: []string{"cat", path},
 		Inputs:  map[string]string{"src": path},
-	}}, dir, nil, nil)
+	}}, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve absolute input: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestResolveCrossTargetProducer(t *testing.T) {
 		"infra/vpc/state.json": "//infra/vpc:show",
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, producers)
+	actions, err := Resolve(context.Background(), specs, dir, nil, producers, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestResolveActionRef(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestResolveMixedInputs(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestResolveMissingFile(t *testing.T) {
 		},
 	}
 
-	_, err := Resolve(context.Background(), specs, dir, nil, nil)
+	_, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -321,7 +321,7 @@ func TestResolvePathTraversal(t *testing.T) {
 			},
 		}
 
-		_, err := Resolve(context.Background(), specs, dir, nil, nil)
+		_, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 		if err == nil {
 			t.Errorf("expected error for traversal input %q, got nil", input)
 			continue
@@ -343,7 +343,7 @@ func TestResolveWorkDirTraversal(t *testing.T) {
 		},
 	}
 
-	_, err := Resolve(context.Background(), specs, dir, nil, nil)
+	_, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for work_dir traversal, got nil")
 	}
@@ -369,7 +369,7 @@ func TestResolveWorkDirValid(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestResolveWorkDirEmpty(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestResolveSealedInputsPassthrough(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestResolveSealedInputsNil(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestResolveSealedOutputsForceImpure(t *testing.T) {
 			},
 		},
 	}
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 		},
 	}
 
-	actions, err := Resolve(context.Background(), specs, dir, nil, nil)
+	actions, err := Resolve(context.Background(), specs, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestResolveSealedInputsIsolatedCopy(t *testing.T) {
 }
 
 func TestResolveEmptySpecs(t *testing.T) {
-	actions, err := Resolve(context.Background(), nil, t.TempDir(), nil, nil)
+	actions, err := Resolve(context.Background(), nil, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestResolveImplicitDependenciesAreStable(t *testing.T) {
 	}
 	producers := map[string]string{"out-a": "b", "out-b": "a", "out-c": "z", "out-d": "b"}
 	for i := 0; i < 100; i++ {
-		actions, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, t.TempDir(), nil, producers)
+		actions, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, t.TempDir(), nil, producers, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -47,6 +47,7 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 	cfg := initConfig{
 		RootDir: s.rootDir,
 		WorkDir: s.workDir,
+		Cwd:     s.VisiblePath(filepath.Join("work", s.cwdRel)),
 		Command: command,
 		Env:     s.namespaceEnv(env),
 		Network: network,
@@ -105,6 +106,7 @@ func (s *Sandbox) namespaceEnv(env map[string]string) []string {
 type initConfig struct {
 	RootDir string   `json:"root_dir"`
 	WorkDir string   `json:"work_dir"`
+	Cwd     string   `json:"cwd"` // command working directory inside the new root
 	Command []string `json:"command"`
 	Env     []string `json:"env"`
 	Network bool     `json:"network"`
@@ -171,7 +173,11 @@ func RunInit() {
 	}
 	// 8. Make most of the filesystem read-only
 	makeReadOnly([]string{"/work", "/out", "/tmp", "/dev"})
-	if err := os.Chdir("/work"); err != nil {
+	cwd := cfg.Cwd
+	if cwd == "" {
+		cwd = "/work"
+	}
+	if err := os.Chdir(cwd); err != nil {
 		fatal("enter work dir: %v", err)
 	}
 

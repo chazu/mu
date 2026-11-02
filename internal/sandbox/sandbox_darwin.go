@@ -67,7 +67,7 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 	args = append(args, command...)
 
 	cmd := exec.CommandContext(ctx, "sandbox-exec", args...)
-	cmd.Dir = s.workDir
+	cmd.Dir = s.cwd()
 	cmd.Env = s.buildEnv(env)
 	cmd.Stdout = s.stdoutWriter()
 	cmd.Stderr = os.Stderr

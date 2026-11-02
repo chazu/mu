@@ -39,12 +39,19 @@ func actionRefID(value string) string {
 // so the DAG executes in the correct order. This lets a dependent target
 // consume a dep's declared output by path without needing to wait for
 // execution during planning.
-func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string, store cas.Store, crossTargetProducers map[string]string) ([]*dag.Action, error) {
+//
+// Every file input (project file or cross-target output) also records its
+// project-relative path in InputPaths, where a sandboxed action finds it.
+// toolchains resolves the scratch toolchains an action names (spec.Toolchains)
+// into its dag.Action.Toolchain artifact set; it may be nil when no action
+// names one.
+func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string, store cas.Store, crossTargetProducers map[string]string, toolchains ToolchainLookup) ([]*dag.Action, error) {
 	actions := make([]*dag.Action, 0, len(specs))
 
 	for _, spec := range specs {
 		inputs := make(map[string]cas.Digest, len(spec.Inputs))
 		var inputSources map[string]dag.InputSource
+		var inputPaths map[string]string
 		extraDeps := make(map[string]struct{})
 		deferInput := func(name string, src dag.InputSource) {
 			inputs[name] = cas.Digest{}
@@ -53,6 +60,12 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			}
 			inputSources[name] = src
 			extraDeps[src.ProducerID] = struct{}{}
+		}
+		recordPath := func(name, value string) {
+			if inputPaths == nil {
+				inputPaths = make(map[string]string)
+			}
+			inputPaths[name] = filepath.ToSlash(projectPathKey(projectRoot, "", value))
 		}
 
 		for name, value := range spec.Inputs {
@@ -68,6 +81,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			// disk yet, so defer hashing and wire in a DependsOn edge.
 			if producer, ok := crossTargetProducers[projectPathKey(projectRoot, "", value)]; ok {
 				deferInput(name, dag.InputSource{ProducerID: producer, OutputPath: value})
+				recordPath(name, value)
 				continue
 			}
 
@@ -83,6 +97,12 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 				return nil, fmt.Errorf("resolve action %q input %q: %w", spec.ID, name, err)
 			}
 			inputs[name] = dgst
+			recordPath(name, value)
+		}
+
+		toolchain, err := resolveToolchains(ctx, spec, spec.Impure || len(spec.SealedOutputs) > 0, toolchains)
+		if err != nil {
+			return nil, err
 		}
 
 		// Pure actions use a fixed clean default; only impure actions may inherit.
@@ -201,6 +221,8 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			Command:           spec.Command,
 			Inputs:            inputs,
 			InputSources:      inputSources,
+			InputPaths:        inputPaths,
+			Toolchain:         toolchain,
 			Outputs:           spec.Outputs,
 			DependsOn:         dependsOn,
 			Env:               env,
@@ -220,6 +242,55 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 	}
 
 	return actions, nil
+}
+
+// ToolchainLookup returns the artifact map (relative path -> full digest
+// string) of the named scratch toolchain, building it first when needed. It
+// returns (nil, nil) when no such toolchain is configured.
+type ToolchainLookup func(ctx context.Context, name string) (map[string]string, error)
+
+// resolveToolchains merges the artifacts of every toolchain spec names into
+// one sandbox-root artifact set. A raw-binary toolchain stores its binary at
+// the root as "<name>"; it is placed at bin/<name> so it is on the sandbox
+// PATH. The result is nil when the action names no toolchain.
+func resolveToolchains(ctx context.Context, spec plugin.ActionSpec, impure bool, lookup ToolchainLookup) (map[string]cas.Digest, error) {
+	if len(spec.Toolchains) == 0 {
+		return nil, nil
+	}
+	if impure {
+		return nil, fmt.Errorf("action %q names toolchains %v but is impure; toolchains exist only inside the sandbox, which runs pure actions", spec.ID, spec.Toolchains)
+	}
+	merged := make(map[string]cas.Digest)
+	owner := make(map[string]string)
+	for _, name := range spec.Toolchains {
+		var artifacts map[string]string
+		var err error
+		if lookup != nil {
+			artifacts, err = lookup(ctx, name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("action %q toolchain %q: %w", spec.ID, name, err)
+		}
+		if artifacts == nil {
+			return nil, fmt.Errorf("action %q names unknown toolchain %q (no `from: \"scratch\"` toolchain with that name is configured)", spec.ID, name)
+		}
+		_, hasBin := artifacts["bin/"+name]
+		for rel, digest := range artifacts {
+			d, err := cas.ParseFullDigest(digest)
+			if err != nil {
+				return nil, fmt.Errorf("action %q toolchain %q artifact %q: %w", spec.ID, name, rel, err)
+			}
+			if rel == name && !hasBin {
+				rel = "bin/" + name
+			}
+			if prev, ok := merged[rel]; ok && prev != d {
+				return nil, fmt.Errorf("action %q: toolchains %q and %q both provide %q with different content", spec.ID, owner[rel], name, rel)
+			}
+			merged[rel] = d
+			owner[rel] = name
+		}
+	}
+	return merged, nil
 }
 
 // resolveEnvPassthrough validates and copies an action's env_passthrough names.

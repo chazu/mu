@@ -98,7 +98,9 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
   required variables in action.env; use sealed_inputs for secret values.
   When a bare command has no PATH, Mu searches only /usr/bin:/bin for its
   initial executable. An explicit PATH controls lookup; ambient parent PATH
-  cannot select another binary. The sandbox supplies its own toolchain PATH.
+  cannot select another binary. In the sandbox the toolchain bin/ comes first
+  on PATH (see `mu guide sandbox`; pure actions are sandboxed with
+  MU_SANDBOX=1 or when they name scratch toolchains).
 
   Impure bare commands with no env declaration retain parent inheritance for
   direct host operations. Explicit env maps, including {}, replace inheritance.

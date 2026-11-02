@@ -11,7 +11,7 @@ import (
 func TestResolveEnvPassthrough(t *testing.T) {
 	dir := t.TempDir()
 	spec := plugin.ActionSpec{ID: "a", Command: []string{"true"}, EnvPassthrough: []string{"HOME", "GOCACHE"}}
-	actions, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, dir, nil, nil)
+	actions, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestResolveEnvPassthrough(t *testing.T) {
 
 	for _, bad := range [][]string{{""}, {"A=B"}, {"HOME", "HOME"}} {
 		spec.EnvPassthrough = bad
-		if _, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, dir, nil, nil); err == nil {
+		if _, err := Resolve(context.Background(), []plugin.ActionSpec{spec}, dir, nil, nil, nil); err == nil {
 			t.Errorf("env_passthrough %q: expected error", bad)
 		}
 	}

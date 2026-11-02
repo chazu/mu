@@ -21,6 +21,8 @@ import (
 // digests identify upstream content. Timeout/retry policy does not identify a
 // successful build's artifacts. The checkout location does not either: only
 // the project-relative work directory is hashed (v4), never the project root.
+// Whether the action runs sandboxed is hashed, so enabling MU_SANDBOX does not
+// reuse results produced on the bare host.
 func ComputeActionKey(a *Action) cas.ActionKey {
 	h := sha256.New()
 	field := func(parts ...string) {
@@ -31,7 +33,7 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 			_, _ = h.Write([]byte(part))
 		}
 	}
-	field("mu.action-key/v4")
+	field("mu.action-key/v5")
 	for _, arg := range a.Command {
 		field("cmd", arg)
 	}
@@ -48,15 +50,17 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	for _, name := range sortedKeys(a.Inputs) {
 		field("input", name, a.Inputs[name].String())
 	}
+	// Where each input lands in the sandbox work tree is visible to the
+	// command, so it is part of the identity (v5).
+	for _, name := range sortedKeys(a.InputPaths) {
+		field("input_path", name, a.InputPaths[name])
+	}
 	for _, name := range sortedKeys(a.Toolchain) {
 		field("toolchain", name, a.Toolchain[name].String())
 	}
-	field("sandbox", strconv.FormatBool(a.Toolchain != nil))
+	field("sandbox", strconv.FormatBool(a.Sandboxed()))
 	for _, name := range sortedStrings(a.Outputs) {
 		field("output", name)
-	}
-	for _, name := range sortedStrings(a.Sources) {
-		field("source", name)
 	}
 	field("network", strconv.FormatBool(a.Network))
 	field("impure", strconv.FormatBool(a.Impure))

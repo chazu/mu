@@ -13,7 +13,47 @@ import (
 	"sync"
 
 	"github.com/chazu/mu/internal/cas"
+	"github.com/chazu/mu/internal/config"
 )
+
+// toolchainLookup resolves a toolchain named by an action: from the registry
+// when it is already loaded, else from its CAS receipt, else by building it
+// from scratch (when a Builder is configured). Names that no configured
+// `from: "scratch"` toolchain carries resolve to (nil, nil).
+func (c *Coordinator) toolchainLookup(registry *ToolchainRegistry) ToolchainLookup {
+	return func(ctx context.Context, name string) (map[string]string, error) {
+		if artifacts := registry.ArtifactsMap(name); artifacts != nil {
+			return artifacts, nil
+		}
+		var tc *config.Toolchain
+		if c.Config != nil {
+			for i := range c.Config.Toolchains {
+				if c.Config.Toolchains[i].Name == name {
+					tc = &c.Config.Toolchains[i]
+					break
+				}
+			}
+		}
+		if tc == nil {
+			return nil, nil
+		}
+		if m, err := registry.Lookup(ctx, name, tc.Config.Version); err == nil && m != nil {
+			return registry.ArtifactsMap(name), nil
+		}
+		if c.Builder == nil {
+			return nil, fmt.Errorf("toolchain %q is configured but not built; run `mu scratch`", name)
+		}
+		subset := *c.Config
+		subset.Toolchains = []config.Toolchain{*tc}
+		if err := c.Builder.Build(ctx, &subset); err != nil {
+			return nil, fmt.Errorf("scratch build: %w", err)
+		}
+		if artifacts := registry.ArtifactsMap(name); artifacts != nil {
+			return artifacts, nil
+		}
+		return nil, fmt.Errorf("toolchain %q was built but is not registered", name)
+	}
+}
 
 // ToolchainManifest records the artifacts produced by building from scratch a toolchain.
 type ToolchainManifest struct {
