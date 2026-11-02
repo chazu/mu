@@ -40,6 +40,8 @@ TARGET FIELDS
                        registered plugin (e.g. "go", "file", "k8s").
   sources              Array of source file paths or globs ("src/**/*.go").
   deps                 Array of target names this depends on (optional).
+                       Deps are always built, and finish, before this
+                       target's actions start.
   config               Toolchain-specific config object (optional).
   sealed_inputs        {NAME: "scheme:path"} — secret refs to resolve
                        before exec (optional). See 'mu guide secrets'.
