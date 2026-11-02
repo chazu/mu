@@ -12,11 +12,6 @@ type Action struct {
 	ID      string
 	Command []string
 
-	// EweRef is the content digest of an ewe populator program (a .cue file
-	// hashed into CAS at plan time). When set, the action runs that program
-	// through the ewe processor instead of a command. The program
-	// reaches execute time as inert content-addressed text, never inlined CUE.
-	EweRef      cas.Digest
 	Inputs      map[string]cas.Digest // name -> content hash (resolved by coordinator)
 	Outputs     []string              // declared output file paths
 	DependsOn   []string              // action IDs this depends on

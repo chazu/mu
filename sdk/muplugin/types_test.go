@@ -10,7 +10,8 @@ import (
 
 func TestPlanResponseRejectsRemovedActionFields(t *testing.T) {
 	for field, want := range map[string]string{
-		`"body": ["'a", "emit"]`: "action bodies were removed",
+		`"body": ["'a", "emit"]`:       "action bodies were removed",
+		`"ewe_source": "populate.cue"`: "ewe actions were removed",
 	} {
 		line := `{"actions": [{"id": "run", "command": ["true"], ` + field + `}]}`
 		var resp muplugin.PlanResponse

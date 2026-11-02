@@ -158,7 +158,6 @@ type DepInfo struct {
 type ActionSpec struct {
 	ID                string            `json:"id"`
 	Command           []string          `json:"command"`
-	EweSource         string            `json:"ewe_source,omitempty"` // project-relative path to an ewe populator .cue program; mutually exclusive with Command
 	Inputs            map[string]string `json:"inputs"`               // name -> file path or "{action:id}" reference
 	Outputs           []string          `json:"outputs"`              // declared output file paths
 	DependsOn         []string          `json:"depends_on,omitempty"` // intra-subgraph action IDs
@@ -193,6 +192,7 @@ type ActionSpec struct {
 // fail later, at execution, for lacking a command.
 var removedActionFields = []struct{ name, message string }{
 	{"body", "action bodies were removed; emit a command instead"},
+	{"ewe_source", "ewe actions were removed; emit a command instead"},
 }
 
 // UnmarshalJSON decodes an ActionSpec, rejecting removed fields.

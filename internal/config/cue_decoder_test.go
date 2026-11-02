@@ -255,3 +255,16 @@ func TestLoad_RejectsRemovedInlinePrograms(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_RejectsRemovedEweFields(t *testing.T) {
+	for _, field := range []string{"ewe", "ewe_source"} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+			`targets: [{target: "x", toolchain: "shell", sources: [], `+field+`: "populate.cue"}]`)
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "ewe actions were removed") {
+			t.Fatalf("%s: Load error = %v, want \"ewe actions were removed\"", field, err)
+		}
+	}
+}

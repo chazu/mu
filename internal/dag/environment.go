@@ -12,7 +12,7 @@ const DefaultActionPath = "/usr/bin:/bin"
 // ActionEnvironment defines the cacheable execution environment. Pure actions
 // with no env declaration get an empty environment. Bare command lookup uses
 // a fixed system PATH when PATH is absent. Explicit empty maps remain empty.
-// Only impure bare commands can inherit the parent environment; VM and sandbox
+// Only impure bare commands can inherit the parent environment; sandbox
 // execution never imports the ambient environment.
 func ActionEnvironment(env map[string]string, impure bool) map[string]string {
 	if env == nil && !impure {
@@ -44,8 +44,8 @@ func actionEnv(a *Action, host []string, muVars, sealed map[string]string) map[s
 	}
 	env := make(map[string]string)
 	declared := ActionEnvironment(a.Env, a.Impure)
-	// VM and sandbox execution never imports the ambient environment.
-	bare := a.Toolchain == nil && a.EweRef.IsZero()
+	// Sandbox execution never imports the ambient environment.
+	bare := a.Toolchain == nil
 	if declared == nil && bare {
 		maps.Copy(env, hostVars)
 	} else {

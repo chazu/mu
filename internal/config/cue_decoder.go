@@ -135,6 +135,12 @@ func rejectRemovedFields(val cue.Value, path string) error {
 				return fmt.Errorf("%s: target %q: inline pith programs were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
 			}
 		}
+		for _, field := range []string{"ewe", "ewe_source"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: ewe actions were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
 	}
 	return nil
 }

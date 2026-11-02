@@ -59,6 +59,15 @@ All notable changes to mu are recorded here. The format follows
   with an action `body` is rejected. Use a `shell` target or a plugin that
   emits commands. The `pith-plugins` guide topic and the pith examples are
   gone, and mu no longer depends on `github.com/chazu/pith`.
+- ewe actions (`ewe_source` on an action, run in-process by `internal/ewesink`).
+  They ran inside the mu process, so they could never be sandboxed, and they
+  carried known bugs: paging followed `Link: rel=next` to any host with the
+  auth headers attached, query-string secrets could appear in error text,
+  requests had no timeout or size limit and ignored `--offline` and
+  `network: false`, and the actions could be cached. A plan response with
+  `ewe_source`, or a `mu.cue` target with `ewe` or `ewe_source`, is now
+  rejected with "ewe actions were removed". `mu build --plan --json` no longer
+  emits `ewe_digest`, and mu no longer depends on `github.com/chazu/ewe`.
 
 ## [v0.3.5] — 2026-08-05
 

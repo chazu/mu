@@ -35,9 +35,6 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	for _, arg := range a.Command {
 		field("cmd", arg)
 	}
-	if !a.EweRef.IsZero() {
-		field("ewe", a.EweRef.String())
-	}
 	env := ActionEnvironment(a.Env, a.Impure)
 	for _, name := range sortedKeys(env) {
 		field("env", name, env[name])

@@ -42,8 +42,8 @@ JSON PLAN CONTRACT
   commits the canonical document with plan_sha256 omitted. Plugin rows commit
   resolved content digest, version, protocol version, and capabilities. Each
   action includes its ID,
-  computed action_key, and every execution-affecting field: command or body,
-  ewe_digest, input digests, outputs, dependencies, environment, sealed refs
+  computed action_key, and every execution-affecting field: command, input
+  digests, outputs, dependencies, environment, sealed refs
   and modes, network/work-dir/project-root/impure/retry settings, toolchain digests, and
   sources. Empty optional fields may be omitted.
 

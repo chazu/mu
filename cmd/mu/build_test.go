@@ -224,24 +224,6 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 	}
 }
 
-func TestPlanJSONProjectsEweExecutionForm(t *testing.T) {
-	eweDigest, err := cas.ParseDigest("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-	if err != nil {
-		t.Fatal(err)
-	}
-	graph := dag.NewGraph()
-	if err := graph.AddAction(&dag.Action{ID: "//app:ewe", EweRef: eweDigest}); err != nil {
-		t.Fatal(err)
-	}
-	document := newPlanJSONDocument(&coordinator.PlanResult{Graph: graph}, []string{"//app"})
-	if len(document.Actions) != 1 {
-		t.Fatalf("actions = %d, want 1", len(document.Actions))
-	}
-	if document.Actions[0].EweDigest != eweDigest.String() || document.Actions[0].Command != nil {
-		t.Errorf("ewe action projection = %#v", document.Actions[0])
-	}
-}
-
 func TestValidateExpectedPlanRequiresExactDigestAndImmutablePlugins(t *testing.T) {
 	graph := dag.NewGraph()
 	if err := graph.AddAction(&dag.Action{ID: "//app:run", Command: []string{"true"}}); err != nil {
