@@ -294,12 +294,8 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 
 		plannedActions[i] = planActions
 		declaredByTarget[t.Name] = cloneStringMap(declaredOutputs)
-		for _, a := range planActions {
-			for _, outPath := range a.Outputs {
-				producers[projectPathKey(c.ProjectRoot, a.WorkDir, outPath)] = pathProducer{
-					target: t.Name, actionID: a.ID, path: outPath,
-				}
-			}
+		if err := producers.addTarget(c.ProjectRoot, t.Name, planActions); err != nil {
+			return nil, fmt.Errorf("coordinator: %w", err)
 		}
 	}
 
@@ -947,6 +943,96 @@ type pathProducer struct {
 // pathProducers maps projectPathKey-normalised output paths to their
 // producers across every planned target.
 type pathProducers map[string]pathProducer
+
+// addTarget records the output paths declared by target's (already
+// prefixed) actions. Each path has exactly one producer:
+//
+//   - Two targets declaring the same path is an error: consumers could not
+//     tell which to wire to and the two actions would race on the file.
+//   - Within one target, actions may share a path only when they are
+//     ordered by the plugin's dependency edges (depends_on or {action:id}
+//     inputs, transitively), e.g. a generate step followed by an in-place
+//     rewrite. The last writer in that chain is the producer. Unordered
+//     writers of the same path are an error.
+func (p pathProducers) addTarget(projectRoot, target string, actions []plugin.ActionSpec) error {
+	var keys []string
+	writers := make(map[string][]pathProducer)
+	for _, a := range actions {
+		for _, outPath := range a.Outputs {
+			key := projectPathKey(projectRoot, a.WorkDir, outPath)
+			ws := writers[key]
+			if len(ws) > 0 && ws[len(ws)-1].actionID == a.ID {
+				continue // same action listing one path twice
+			}
+			if len(ws) == 0 {
+				keys = append(keys, key)
+			}
+			writers[key] = append(ws, pathProducer{target: target, actionID: a.ID, path: outPath})
+		}
+	}
+
+	ancestors := actionAncestors(actions)
+	for _, key := range keys {
+		ws := writers[key]
+		last := ws[0]
+		for _, w := range ws[1:] {
+			if ancestors[w.actionID][last.actionID] {
+				last = w
+			}
+		}
+		// The last writer must follow every other writer of the path.
+		for _, w := range ws {
+			if w.actionID != last.actionID && !ancestors[last.actionID][w.actionID] {
+				return fmt.Errorf("target %q: actions %q and %q both declare output %q without a dependency between them",
+					target, last.actionID, w.actionID, key)
+			}
+		}
+		if prev, ok := p[key]; ok {
+			return fmt.Errorf("output %q is declared by both target %q (action %q) and target %q (action %q)",
+				key, prev.target, prev.actionID, target, last.actionID)
+		}
+		p[key] = last
+	}
+	return nil
+}
+
+// actionAncestors returns, for each action ID, the set of actions in the same
+// subgraph it transitively depends on via depends_on or {action:id} inputs.
+func actionAncestors(actions []plugin.ActionSpec) map[string]map[string]bool {
+	direct := make(map[string][]string, len(actions))
+	for _, a := range actions {
+		deps := append([]string(nil), a.DependsOn...)
+		for _, v := range a.Inputs {
+			if isActionRef(v) {
+				deps = append(deps, actionRefID(v))
+			}
+		}
+		direct[a.ID] = deps
+	}
+	out := make(map[string]map[string]bool, len(actions))
+	var visit func(id string) map[string]bool
+	visit = func(id string) map[string]bool {
+		if set, ok := out[id]; ok {
+			return set
+		}
+		set := make(map[string]bool)
+		out[id] = set // guards against cycles; the DAG rejects those later
+		for _, d := range direct[id] {
+			if _, local := direct[d]; !local {
+				continue
+			}
+			set[d] = true
+			for anc := range visit(d) {
+				set[anc] = true
+			}
+		}
+		return set
+	}
+	for _, a := range actions {
+		visit(a.ID)
+	}
+	return out
+}
 
 // actionIDsExcept returns the key -> producing action ID map Resolve uses for
 // cross-target wiring, leaving out the outputs of target self.

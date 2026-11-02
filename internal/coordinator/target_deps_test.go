@@ -289,3 +289,103 @@ func TestPlan_CrossTargetPathCycle(t *testing.T) {
 		})
 	}
 }
+
+// Two targets declaring the same output path (after normalisation) fail
+// planning with an error naming both targets, both actions, and the path.
+func TestPlan_DuplicateOutputAcrossTargets(t *testing.T) {
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Targets: []config.Target{{
+				Name: "//a", Toolchain: "cfg",
+				Config: map[string]any{"actions": []any{map[string]any{
+					"id": "w", "command": []any{"true"}, "outputs": []any{"out/x.txt"},
+				}}},
+			}, {
+				Name: "//b", Toolchain: "cfg",
+				Config: map[string]any{"actions": []any{map[string]any{
+					"id": "w", "command": []any{"true"}, "work_dir": "out", "outputs": []any{"./x.txt"},
+				}}},
+			}},
+			Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
+		},
+		Store: newTestStore(t),
+	}
+	_, err := c.Plan(context.Background(), []string{"//a", "//b"})
+	if err == nil {
+		t.Fatal("Plan succeeded, want duplicate output error")
+	}
+	for _, want := range []string{`"//a"`, `"//b"`, "//a:w", "//b:w", filepath.Join("out", "x.txt")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// Within one target, actions may share an output path only when the plugin
+// orders them; the last writer in the chain is the path's producer.
+func TestPlan_DuplicateOutputWithinTarget(t *testing.T) {
+	writer := func(id string, extra map[string]any) map[string]any {
+		a := map[string]any{"id": id, "command": []any{"true"}, "outputs": []any{"x.txt"}}
+		for k, v := range extra {
+			a[k] = v
+		}
+		return a
+	}
+	after := func(ids ...any) map[string]any { return map[string]any{"depends_on": ids} }
+	for _, tc := range []struct {
+		name     string
+		actions  []any
+		producer string // "" means planning must fail
+	}{
+		{"unordered", []any{writer("gen", nil), writer("fmt", nil)}, ""},
+		{"depends_on", []any{writer("gen", nil), writer("fmt", after("gen"))}, "//p:fmt"},
+		{"action ref, listed first", []any{
+			writer("fmt", map[string]any{"inputs": map[string]any{"src": "{action:gen}"}}),
+			writer("gen", nil),
+		}, "//p:fmt"},
+		{"transitive via non-writer", []any{
+			writer("a", nil),
+			map[string]any{"id": "b", "command": []any{"true"}, "depends_on": []any{"a"}},
+			writer("c", after("b")),
+		}, "//p:c"},
+		{"siblings of one root", []any{writer("a", nil), writer("b", after("a")), writer("c", after("a"))}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Coordinator{
+				ProjectRoot: t.TempDir(),
+				Config: &config.ProjectConfig{
+					Targets: []config.Target{{
+						Name: "//p", Toolchain: "cfg",
+						Config: map[string]any{"actions": tc.actions},
+					}, {
+						Name: "//q", Toolchain: "cfg",
+						Config: map[string]any{"actions": []any{map[string]any{
+							"id": "read", "command": []any{"true"}, "inputs": map[string]any{"x": "x.txt"},
+						}}},
+					}},
+					Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
+				},
+				Store: newTestStore(t),
+			}
+			plan, err := c.Plan(context.Background(), []string{"//p", "//q"})
+			if tc.producer == "" {
+				if err == nil {
+					t.Fatal("Plan succeeded, want duplicate output error")
+				}
+				for _, want := range []string{`"//p"`, "x.txt", "without a dependency"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not mention %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Plan: %v", err)
+			}
+			if got := plan.Graph.Action("//q:read").InputSources["x"].ProducerID; got != tc.producer {
+				t.Fatalf("//q:read input producer = %q, want %q", got, tc.producer)
+			}
+		})
+	}
+}

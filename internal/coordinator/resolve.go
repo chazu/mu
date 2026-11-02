@@ -64,8 +64,10 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			}
 
 			// Cross-target reference: value is a project-relative path that
-			// another already-planned action produces. File won't exist on
-			// disk yet, so defer hashing and wire in a DependsOn edge.
+			// an action of another target declares as an output (Plan
+			// collects producers for every target before resolving any).
+			// The file may not exist on disk yet, so defer hashing and wire
+			// in a DependsOn edge.
 			if producer, ok := crossTargetProducers[projectPathKey(projectRoot, "", value)]; ok {
 				deferInput(name, dag.InputSource{ProducerID: producer, OutputPath: value})
 				continue
