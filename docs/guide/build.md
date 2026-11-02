@@ -15,8 +15,6 @@ FLAGS
                     same in-memory graph only on a match.
   --no-cache        Skip action-result reads; retain dependency CAS storage.
   --offline         Use local dependencies; disable Mu-owned remote access.
-  --no-discover-cache
-                    Force live plugin discovery instead of its digest cache.
   --jobs N          Max parallel actions (default: NumCPU).
   --config PATH     Path to mu.cue (default: discover by walking up).
   --verbose         Show plugin I/O.

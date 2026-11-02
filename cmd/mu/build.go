@@ -25,7 +25,6 @@ func runBuild(args []string) int {
 	cli := newCLIContext("build", fs)
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
-	noDiscoverCache := fs.Bool("no-discover-cache", false, "bypass the plugin discover response cache (force live discover)")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")
 	dryRun := fs.Bool("dry-run", false, "alias for --plan")
 	emitManifest := fs.Bool("emit-manifest", false, "emit build manifest as JSON to stdout")
@@ -93,7 +92,6 @@ func runBuild(args []string) int {
 		Store:             cli.Store,
 		ToolchainRegistry: registry,
 		Workers:           *jobs,
-		NoDiscoverCache:   *noDiscoverCache,
 		Verbose:           cli.Verbose,
 	}
 

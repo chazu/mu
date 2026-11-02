@@ -14,7 +14,6 @@ import (
 	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
-	"github.com/chazu/mu/internal/coordinator/discovercache"
 	"github.com/chazu/mu/internal/dag"
 	"github.com/chazu/mu/internal/pithvm"
 	"github.com/chazu/mu/internal/plugin"
@@ -36,10 +35,6 @@ type Coordinator struct {
 	ToolchainRegistry *ToolchainRegistry
 	Builder           ToolchainBuilder // optional; set to enable toolchain scratch build
 	Workers           int              // 0 = runtime.NumCPU()
-
-	// NoDiscoverCache disables the plugin discover response cache for this
-	// build (no reads, no writes). Useful when hacking on a plugin locally.
-	NoDiscoverCache bool
 
 	// Verbose increases coordinator-level log verbosity when true. Cache
 	// layer events (hit/miss/repair) are surfaced at info level instead
@@ -191,51 +186,11 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		}
 	}
 
-	// Consult the discover cache before starting. Entries are keyed by CAS
-	// digest; command plugins (zero digest) are never cached.
-	var dcache *discovercache.Cache
-	if !c.NoDiscoverCache {
-		if p := discovercache.DefaultPath(); p != "" {
-			dcache = discovercache.Open(p)
-			seeded := make(map[string]*plugin.DiscoverResponse)
-			for _, rp := range resolvedPlugins {
-				if rp.Digest.Hash == "" {
-					continue
-				}
-				if resp, ok := dcache.Get(rp.Digest); ok {
-					seeded[rp.Def.Name] = resp
-				}
-			}
-			if len(seeded) > 0 {
-				mgr.SetCachedDiscover(seeded)
-			}
-		}
-	}
-
 	if err := mgr.Start(ctx); err != nil {
 		return nil, fmt.Errorf("coordinator: starting plugins: %w", err)
 	}
 	// Plugins are only needed for planning. Shut them down before returning.
 	defer mgr.Close()
-
-	// Persist any discover responses obtained live this build.
-	if dcache != nil {
-		digestByName := make(map[string]cas.Digest, len(resolvedPlugins))
-		for _, rp := range resolvedPlugins {
-			digestByName[rp.Def.Name] = rp.Digest
-		}
-		for _, name := range mgr.NewlyDiscovered() {
-			d, ok := digestByName[name]
-			if !ok || d.Hash == "" {
-				continue
-			}
-			info := mgr.DiscoverInfo(name)
-			if info == nil {
-				continue
-			}
-			_ = dcache.Put(d, info)
-		}
-	}
 
 	// 4. Resolve target graph (topological order, leaves first).
 	// The target set was resolved before any dependency bootstrap.
