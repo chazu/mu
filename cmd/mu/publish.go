@@ -65,12 +65,47 @@ type stringSliceFlag []string
 func (s *stringSliceFlag) String() string     { return strings.Join(*s, ",") }
 func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
 
+// publishCandidate is one target selected for publishing. Named is true when
+// the target was given literally on the command line (not only matched by a
+// wildcard): a named target with nothing to publish is an error.
+type publishCandidate struct {
+	Target string
+	Named  bool
+}
+
+// expandPublishTargets expands the CLI target patterns against the configured
+// targets, in pattern order without duplicates. Dependencies pulled in by the
+// build are not candidates; only what the user asked for is published.
+func expandPublishTargets(patterns []string, available []string) ([]publishCandidate, error) {
+	var out []publishCandidate
+	index := make(map[string]int)
+	for _, p := range patterns {
+		names, err := coordinator.ExpandTargetPatterns([]string{p}, available)
+		if err != nil {
+			return nil, err
+		}
+		named := !coordinator.IsTargetPattern(p)
+		for _, n := range names {
+			if i, ok := index[n]; ok {
+				out[i].Named = out[i].Named || named
+				continue
+			}
+			index[n] = len(out)
+			out = append(out, publishCandidate{Target: n, Named: named})
+		}
+	}
+	return out, nil
+}
+
 // publishTargets pushes each requested target's outputs to the publish registry
 // (config.publish) as a first-class artifact — one layer per output, a config
 // blob of {target, command, created, revision, source, outputs}, tagged by git
-// sha + latest. Called after a successful `mu build --publish`. Returns an exit
+// sha + latest. Called after a successful `mu build --publish`. Wildcard
+// patterns are expanded; wildcard-matched targets without outputs are skipped,
+// but an explicitly named target without outputs fails before anything is
+// pushed, as does a publish that would push nothing at all. Returns an exit
 // code; exitOK on success.
-func publishTargets(ctx context.Context, c *cliContext, result *coordinator.BuildResult, targets []string, attachSpecs []string) int {
+func publishTargets(ctx context.Context, c *cliContext, result *coordinator.BuildResult, patterns []string, attachSpecs []string) int {
 	base, code, ok := resolvePublishBase(c)
 	if !ok {
 		return code
@@ -81,6 +116,42 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 	attachments, err := parseAttachments(attachSpecs)
 	if err != nil {
 		return c.fail(exitUsage, "%v", err)
+	}
+
+	available := make([]string, 0, len(c.Config.Targets))
+	for _, t := range c.Config.Targets {
+		available = append(available, t.Name)
+	}
+	candidates, err := expandPublishTargets(patterns, available)
+	if err != nil {
+		return c.fail(exitFail, "%v", err)
+	}
+
+	type publishable struct {
+		target   string
+		outputs  map[string]cas.Digest
+		command  []string
+		exitCode int
+	}
+	var work []publishable
+	var missing []string
+	for _, cand := range candidates {
+		outputs, command, exitCode := collectTargetOutputs(result, cand.Target)
+		if len(outputs) == 0 {
+			if cand.Named {
+				missing = append(missing, cand.Target)
+			} else {
+				fmt.Fprintf(os.Stderr, "  publish: %s produced no outputs, skipping\n", cand.Target)
+			}
+			continue
+		}
+		work = append(work, publishable{cand.Target, outputs, command, exitCode})
+	}
+	if len(missing) > 0 {
+		return c.fail(exitFail, "--publish: %s produced no outputs to publish", strings.Join(missing, ", "))
+	}
+	if len(work) == 0 {
+		return c.fail(exitFail, "--publish: no matched target produced outputs to publish")
 	}
 
 	// Side-band provenance. Missing git info is non-fatal — an artifact can be
@@ -96,25 +167,22 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 	}
 
 	var published, failed int
-	for _, target := range targets {
-		outputs, command, exitCode, found := collectTargetOutputs(result, target)
-		if !found || len(outputs) == 0 {
-			fmt.Fprintf(os.Stderr, "  publish: %s produced no outputs, skipping\n", target)
-			continue
-		}
-
+	for _, w := range work {
+		target := w.target
 		meta := oci.ArtifactMeta{
 			Target:    target,
-			Command:   command,
+			Command:   w.command,
 			Created:   created,
 			MuVersion: muVersion,
 			Revision:  revision,
 			Source:    source,
-			ExitCode:  exitCode,
-			Outputs:   outputs,
+			ExitCode:  w.exitCode,
+			Outputs:   w.outputs,
 		}
 
 		ref := base + "/" + targetSlug(target)
+		// TODO(mu-zl9.4): use the unified registry client constructor once it
+		// lands instead of the cache-push helper.
 		remoteRepo, err := newPushRepository(ref)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  publish: %s: %v\n", target, err)
@@ -151,17 +219,16 @@ func publishTargets(ctx context.Context, c *cliContext, result *coordinator.Buil
 // "<target>:<name>" (e.g. "//cmd/mu:build"). Dependency actions (different IDs)
 // are excluded. It returns the merged outputs plus the command and exit code of
 // the output-producing action (the target's terminal action, whose argv the
-// artifact represents), and whether any action matched.
-func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[string]cas.Digest, []string, int, bool) {
+// artifact represents).
+func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[string]cas.Digest, []string, int) {
 	outputs := make(map[string]cas.Digest)
 	var command []string
-	exitCode, found := 0, false
+	exitCode := 0
 	prefix := target + ":"
 	for _, s := range result.ExecResult.Completed {
 		if s.ID != target && !strings.HasPrefix(s.ID, prefix) {
 			continue
 		}
-		found = true
 		for name, dgst := range s.Outputs {
 			outputs[name] = dgst
 		}
@@ -174,7 +241,7 @@ func collectTargetOutputs(result *coordinator.BuildResult, target string) (map[s
 			}
 		}
 	}
-	return outputs, command, exitCode, found
+	return outputs, command, exitCode
 }
 
 // resolvePublishBase returns "<registry>/<repository>" from config.publish, or a

@@ -32,13 +32,12 @@ func TestActionSpecImpureJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTargetInfoStrictSealedRoutingJSONRoundTrip(t *testing.T) {
+func TestTargetInfoSealedOutputModesJSONRoundTrip(t *testing.T) {
 	target := plugin.TargetInfo{
 		Name:              "//secrets/create",
 		Toolchain:         "secret-writer",
 		SealedOutputs:     map[string]string{"TOKEN": "pass:generated/token"},
 		SealedOutputModes: map[string]string{"TOKEN": "create_if_absent"},
-		SealedRouting:     "strict",
 	}
 	payload, err := json.Marshal(target)
 	if err != nil {
@@ -48,7 +47,7 @@ func TestTargetInfoStrictSealedRoutingJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(payload, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.SealedRouting != "strict" || got.SealedOutputModes["TOKEN"] != "create_if_absent" {
+	if got.SealedOutputs["TOKEN"] != "pass:generated/token" || got.SealedOutputModes["TOKEN"] != "create_if_absent" {
 		t.Fatalf("round trip = %#v", got)
 	}
 }

@@ -24,8 +24,10 @@ func TestReadOnlySDKProviderRejectsSealedOutputAtPlan(t *testing.T) {
 			Plugins: []config.PluginDef{{Name: "ro", Command: command}},
 			Secrets: &config.SecretsConfig{WritableRefs: []string{"ro:*"}},
 			Targets: []config.Target{{
-				Name:      "//secrets/minted",
-				Toolchain: "secret-gen",
+				Name:              "//secrets/minted",
+				Toolchain:         "secret-gen",
+				SealedOutputs:     map[string]string{"VALUE": "ro:dest"},
+				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
 					"ref":        "ro:dest",
 					"derivation": []any{"echo", "abc"},

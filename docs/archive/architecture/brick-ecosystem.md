@@ -52,8 +52,8 @@ Plain PUDL bindings project only scalar source fields marked
 `@pudl(binding=plain)`. `pudl run-set` names the exact closed set, schedules
 producers first, and pins their observations. It never starts an omitted model.
 
-Sealed bindings remain provider refs. PUDL-generated targets set
-`sealed_routing: "strict"`; plugin actions must claim exact refs and modes, all
+Sealed bindings remain provider refs. Sealed routing is always strict;
+plugin actions must claim exact refs and modes, all
 declared inputs must be used, and each output has exactly one writer. Mu
 validates routing without resolving values, resolves inputs immediately before
 execution, and enforces `secrets.writable_refs` on writes.

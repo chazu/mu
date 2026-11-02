@@ -28,7 +28,8 @@ Plugins decide what to build and how. mu executes.
 - **Plugins** — external executables that emit action subgraphs via NDJSON protocol
 - **Toolchains** — built from scratch as content-addressed artifacts (download, verify, extract)
 - **Sealed I/O** — provider-backed values resolved at execution time, never
-  stored in the cache or manifest
+  stored in the cache or manifest; each action claims exactly the sealed
+  names its target declares
 
 ### Design Principles
 
@@ -139,8 +140,7 @@ Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventio
 mu build      Build targets
 mu scratch    Build toolchains from scratch
 mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
-mu target     List and inspect targets
-mu graph      Show dependency chains (ASCII/DOT/JSON)
+mu targets    List targets; --deps/--rdeps show dependency chains (tree/DOT/JSON)
 mu plugin     Search, install, update, list, inspect, add, push, test plugins
 mu observe    Ask plugins to report current state
 mu verify     Validate CAS integrity + schema namespaces
