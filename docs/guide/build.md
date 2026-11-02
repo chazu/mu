@@ -20,7 +20,11 @@ FLAGS
   --jobs N          Max parallel actions (default: NumCPU).
   --config PATH     Path to mu.cue (default: discover by walking up).
   --verbose         Show plugin I/O.
-  --publish         Publish each successful target's outputs as an artifact.
+  --publish         Publish each requested target's outputs as an artifact.
+                    Wildcards (//pkg/...) are expanded; matched targets
+                    with no outputs are skipped. A target named explicitly
+                    with no outputs, or a publish that would push nothing,
+                    fails before anything is pushed.
   --attach TYPE=PATH
                     Attach a referrer file to the published artifact
                     (repeatable; requires --publish).
