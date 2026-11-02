@@ -356,7 +356,7 @@ func TestActionManifestPublicationIsDeterministic(t *testing.T) {
 func TestPermissionMetadataRoundtrip(t *testing.T) {
 	for _, backend := range []string{"layout", "registry"} {
 		t.Run(backend, func(t *testing.T) {
-			var s *oci.OCIStore
+			var s cas.Store
 			var err error
 			if backend == "layout" {
 				s, err = oci.NewLocal(t.TempDir())

@@ -12,15 +12,7 @@ import (
 )
 
 func init() {
-	cas.RegisterBackend("disk", buildDiskStore)
 	cas.RegisterBackend("oci", buildOCIStore)
-}
-
-func buildDiskStore(spec cas.BackendSpec) (cas.Store, error) {
-	if spec.Path == "" {
-		return nil, fmt.Errorf("disk backend requires a path")
-	}
-	return NewLocal(spec.Path)
 }
 
 // buildOCIStore constructs a Store backed by a remote OCI registry.

@@ -107,20 +107,12 @@ func runVerify(args []string) int {
 	}
 
 	// Verify action results reference valid blobs.
-	entries, _ := readIndex(cacheDir)
+	var entries []cachedAction
+	if store, err := openLocalCache(cacheDir); err == nil {
+		entries, _ = readCachedActions(store, false)
+	}
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Tag, "action-") {
-			continue
-		}
-		manifest, err := readManifest(cacheDir, e.ManifestDigest)
-		if err != nil {
-			continue
-		}
-		result, err := readActionResult(cacheDir, manifest)
-		if err != nil {
-			continue
-		}
-		for name, dgst := range result.Outputs {
+		for name, dgst := range e.Result.Outputs {
 			p := blobPath(cacheDir, dgst.String())
 			if p == "" {
 				continue

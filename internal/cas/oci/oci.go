@@ -1,11 +1,12 @@
-// Package oci implements a content-addressable store backed by OCI.
+// Package oci implements a content-addressable store backed by an OCI registry.
 //
-// The same OCIStore type works with both local OCI layout directories (via
-// NewLocal) and remote OCI registries (via New with a remote.Repository).
-// Blobs map directly to OCI blobs. Action results are stored as OCI manifests
-// tagged by the action key hash, with each output as a layer descriptor and the
-// result metadata as the config blob. Standard OCI tools (crane, skopeo, oras)
-// can inspect the cache in either form.
+// OCIStore works against a remote OCI registry (via New with a
+// remote.Repository) or any Registry implementation. Blobs map directly to OCI
+// blobs. Action results are stored as OCI manifests tagged by the action key
+// hash, with each output as a layer descriptor and the result metadata as the
+// config blob, so standard OCI tools (crane, skopeo, oras) can inspect a
+// remote cache. The local cache is a cas.DiskStore (see NewLocal); its
+// per-key action results become manifests only when pushed (PushActionResult).
 package oci
 
 import (
@@ -30,7 +31,6 @@ import (
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	ocilayout "oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -96,14 +96,11 @@ func New(repo Registry) *OCIStore {
 	return s
 }
 
-// NewLocal creates an OCIStore backed by a local OCI layout directory.
-// The directory is created if it does not exist.
-func NewLocal(path string) (*OCIStore, error) {
-	store, err := ocilayout.New(path)
-	if err != nil {
-		return nil, fmt.Errorf("oci: open local store %s: %w", path, err)
-	}
-	return &OCIStore{repo: store}, nil
+// NewLocal opens the local disk cache at path, creating it if needed. It is a
+// convenience alias for cas.NewDiskStore kept for existing callers; the local
+// cache is no longer an OCI layout (see cas.DiskStore).
+func NewLocal(path string) (*cas.DiskStore, error) {
+	return cas.NewDiskStore(path)
 }
 
 // toOCIDigest converts a cas.Digest to an OCI digest.
@@ -305,6 +302,12 @@ func (s *OCIStore) Delete(ctx context.Context, dgst cas.Digest) error {
 // action key hash. Each output artifact becomes a layer descriptor, and the
 // result metadata is stored as the config blob.
 func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, result *cas.ActionResult) error {
+	return s.putActionResult(ctx, key, result, nil)
+}
+
+// putActionResult is PutActionResult with known output blob sizes. Outputs
+// missing from sizes have their size looked up via Resolve.
+func (s *OCIStore) putActionResult(ctx context.Context, key cas.ActionKey, result *cas.ActionResult, sizes map[godigest.Digest]int64) error {
 	if err := key.Digest.Validate(); err != nil {
 		return fmt.Errorf("oci: action key: %w", err)
 	}
@@ -359,7 +362,9 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 				"mu.output.name":        name,
 			},
 		}
-		if resolved, err := s.repo.Resolve(ctx, layer.Digest.String()); err == nil {
+		if size, ok := sizes[layer.Digest]; ok {
+			layer.Size = size
+		} else if resolved, err := s.repo.Resolve(ctx, layer.Digest.String()); err == nil {
 			layer.Size = resolved.Size
 		}
 		layers = append(layers, layer)
@@ -408,6 +413,67 @@ func (s *OCIStore) PutActionResult(ctx context.Context, key cas.ActionKey, resul
 
 	return nil
 }
+
+// PushActionResult copies one action result from the local disk cache to s:
+// every output blob missing from the registry is uploaded from local, then the
+// OCI manifest and action tag are built and pushed exactly as PutActionResult
+// does. It is how `mu cache push` publishes per-key local receipts.
+func (s *OCIStore) PushActionResult(ctx context.Context, local *cas.DiskStore, key cas.ActionKey, result *cas.ActionResult) error {
+	if err := s.available(ctx); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(result.Outputs))
+	for name := range result.Outputs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	sizes := make(map[godigest.Digest]int64, len(names))
+	for _, name := range names {
+		out := result.Outputs[name]
+		if _, done := sizes[toOCIDigest(out)]; done {
+			continue
+		}
+		size, err := s.pushLocalBlob(ctx, local, out)
+		if err != nil {
+			return fmt.Errorf("oci: push output %q: %w", name, err)
+		}
+		sizes[toOCIDigest(out)] = size
+	}
+	return s.putActionResult(ctx, key, result, sizes)
+}
+
+// pushLocalBlob uploads one local blob unless the registry already has it,
+// returning its size.
+func (s *OCIStore) pushLocalBlob(ctx context.Context, local *cas.DiskStore, dgst cas.Digest) (int64, error) {
+	p, err := local.BlobPath(dgst)
+	if err != nil {
+		return 0, err
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return 0, fmt.Errorf("local blob %s: %w", dgst, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("local blob %s: %w", dgst, err)
+	}
+	desc := ocispec.Descriptor{MediaType: MediaTypeMuBlob, Digest: toOCIDigest(dgst), Size: info.Size()}
+	exists, err := s.repo.Exists(ctx, desc)
+	if err != nil {
+		return 0, s.failed(ctx, fmt.Errorf("check blob %s: %w", dgst, err))
+	}
+	if exists {
+		return desc.Size, nil
+	}
+	if err := s.repo.Push(ctx, desc, cas.ContextReader(ctx, f)); err != nil && !isAlreadyExists(err) {
+		return 0, s.failed(ctx, fmt.Errorf("push blob %s: %w", dgst, err))
+	}
+	return desc.Size, nil
+}
+
+// ActionTag returns the registry tag under which the result for key is stored.
+func ActionTag(key cas.ActionKey) string { return actionKeyToTag(key) }
 
 // GetActionResult retrieves an action result by resolving the tag derived from
 // the action key. Returns (nil, nil) on a cache miss.

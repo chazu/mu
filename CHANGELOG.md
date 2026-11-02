@@ -17,6 +17,18 @@ All notable changes to mu are recorded here. The format follows
 
 ### Fixed
 
+- Concurrent mu processes sharing `~/.mu/cache` no longer lose each other's
+  action results. The local cache was an oras OCI layout whose `index.json`
+  was loaded at open and rewritten non-atomically on every result, so two
+  builds overwrote each other's entries and a crash could truncate it. Each
+  action result is now its own file, `~/.mu/cache/ac/<action-key-hash>`, and
+  every blob and result is written to `~/.mu/cache/ingest/`, fsynced, and
+  renamed into place. Opening the cache no longer parses every manifest.
+  Existing caches keep their blobs; their `index.json` results are converted
+  once on first open (the file is renamed `index.json.migrated`), and any
+  entry that cannot be read is a one-time cache miss. `mu cache push` now
+  builds the remote OCI manifests and tags from the per-key files at push
+  time, so remote caches look the same as before.
 - `mu plugin search`, `install` and `update` reach the official catalog again.
   The bounded registry client disabled HTTP/2 but still offered it in the TLS
   handshake, so HTTP/2 servers such as GitHub's release downloads answered in

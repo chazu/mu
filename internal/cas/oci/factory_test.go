@@ -6,12 +6,6 @@ import (
 	"github.com/chazu/mu/internal/cas"
 )
 
-func TestBuildDiskStore_RejectsEmptyPath(t *testing.T) {
-	if _, err := buildDiskStore(cas.BackendSpec{Type: "disk"}); err == nil {
-		t.Fatal("expected error for empty path")
-	}
-}
-
 func TestBuildOCIStore_RejectsEmptyRegistry(t *testing.T) {
 	if _, err := buildOCIStore(cas.BackendSpec{Type: "oci"}); err == nil {
 		t.Fatal("expected error for empty registry")
