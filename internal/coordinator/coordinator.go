@@ -15,6 +15,7 @@ import (
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/dag"
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/plugin"
 )
 
@@ -33,6 +34,11 @@ type Coordinator struct {
 	ToolchainRegistry *ToolchainRegistry
 	Builder           ToolchainBuilder // optional; set to enable toolchain scratch build
 	Workers           int              // 0 = runtime.NumCPU()
+
+	// PluginsDir and ToolchainsDir are where resolved plugins and extracted
+	// toolchain binaries live (paths.Paths); empty means the ~/.mu default.
+	PluginsDir    string
+	ToolchainsDir string
 
 	// Verbose increases coordinator-level log verbosity when true. Cache
 	// layer events (hit/miss/repair) are surfaced at info level instead
@@ -125,11 +131,14 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	}
 
 	// 2. Resolve plugins → CAS (hash local scripts or fetch remote ones).
-	home, _ := os.UserHomeDir()
+	pluginsDir, err := c.dir(c.PluginsDir, func(p paths.Paths) string { return p.PluginsDir })
+	if err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
+	}
 	resolver := &PluginResolver{
 		Store:       c.Store,
 		ProjectRoot: c.ProjectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
+		CacheDir:    pluginsDir,
 	}
 	resolvedPlugins, err := resolver.Resolve(ctx, planningPlugins)
 	if err != nil {
@@ -1256,13 +1265,24 @@ func (c *Coordinator) resolveScriptRuntime(ctx context.Context, registry *Toolch
 		}
 	}
 
-	home, err := os.UserHomeDir()
+	baseDir, err := c.dir(c.ToolchainsDir, func(p paths.Paths) string { return p.ToolchainsDir })
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", err
 	}
-	baseDir := filepath.Join(home, ".mu", "toolchains")
 
 	return registry.ExtractBinary(ctx, "bb", artifact, baseDir)
+}
+
+// dir returns configured when set, else the default location pick selects.
+func (c *Coordinator) dir(configured string, pick func(paths.Paths) string) (string, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	p, err := paths.Default()
+	if err != nil {
+		return "", err
+	}
+	return pick(p), nil
 }
 
 func resolvedNeedsRuntime(plugins []ResolvedPlugin) bool {

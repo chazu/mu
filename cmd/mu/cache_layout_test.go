@@ -17,8 +17,9 @@ import (
 func TestCacheCleanUsesPerKeyActionResults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Chdir(t.TempDir()) // outside any project: the default cache
 	ctx := context.Background()
-	store, err := cas.NewDiskStore(cachePath())
+	store, err := cas.NewDiskStore(filepath.Join(home, ".mu", "cache"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestCacheCleanUsesPerKeyActionResults(t *testing.T) {
 	if err := os.WriteFile(p, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reachableBlobs(filepath.Clean(cachePath())); err == nil {
+	if _, err := reachableBlobs(store.Root()); err == nil {
 		t.Fatal("reachableBlobs ignored a corrupt root")
 	}
 }

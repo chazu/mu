@@ -18,6 +18,7 @@ func runBuild(args []string) int {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cli := newCLIContext("build", fs, useConfig, useJSON, useVerbose, useOffline)
+	defer cli.Close()
 	jobs := fs.Int("jobs", 0, "max parallel actions (0 = NumCPU)")
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	planOnly := fs.Bool("plan", false, "show planned actions without executing")

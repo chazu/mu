@@ -11,6 +11,7 @@ import (
 func TestCachedPluginSelectionRequiresExplicitIdentity(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	pluginsDir := filepath.Join(home, ".mu", "plugins")
 	name := "choice"
 	a, b := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	for _, hash := range []string{a, b} {
@@ -28,14 +29,14 @@ func TestCachedPluginSelectionRequiresExplicitIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := resolveCachedPlugin(name); err == nil || !strings.Contains(err.Error(), "--digest") {
+	if _, _, err := resolveCachedPlugin(pluginsDir, name, ""); err == nil || !strings.Contains(err.Error(), "--digest") {
 		t.Fatalf("ambiguous selection: %v", err)
 	}
-	def, digest, err := resolveCachedPlugin(name, "sha256:"+a)
+	def, digest, err := resolveCachedPlugin(pluginsDir, name, "sha256:"+a)
 	if err != nil || digest.Hash != a || !strings.HasSuffix(def.WorkDir, "bundle-"+a) {
 		t.Fatalf("explicit selection: %+v, %v, %v", def, digest, err)
 	}
-	versions, err := cachedPluginVersions(name)
+	versions, err := cachedPluginVersionsIn(pluginsDir, name)
 	if err != nil || len(versions) != 2 {
 		t.Fatalf("listing hid cached versions: %+v, %v", versions, err)
 	}
@@ -45,10 +46,10 @@ func TestCachedPluginSelectionRequiresExplicitIdentity(t *testing.T) {
 	if code := printGuideForPlugin(context.Background(), name, "sha256:"+a); code != 0 {
 		t.Fatalf("explicit guide failed: %d", code)
 	}
-	if _, _, err := resolveCachedPlugin(name, "sha256:"+a[:12]); err == nil {
+	if _, _, err := resolveCachedPlugin(pluginsDir, name, "sha256:"+a[:12]); err == nil {
 		t.Fatal("accepted abbreviated explicit identity")
 	}
-	if _, _, err := resolveCachedPlugin("../outside"); err == nil {
+	if _, _, err := resolveCachedPlugin(pluginsDir, "../outside", ""); err == nil {
 		t.Fatal("accepted traversal name")
 	}
 }
@@ -56,6 +57,7 @@ func TestCachedPluginSelectionRequiresExplicitIdentity(t *testing.T) {
 func TestFullCachePublicationSupersedesLegacyPrefix(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	pluginsDir := filepath.Join(home, ".mu", "plugins")
 	hash := strings.Repeat("a", 64)
 	dir := filepath.Join(home, ".mu", "plugins", "single")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -66,7 +68,7 @@ func TestFullCachePublicationSupersedesLegacyPrefix(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	def, digest, err := resolveCachedPlugin("single")
+	def, digest, err := resolveCachedPlugin(pluginsDir, "single", "")
 	if err != nil || digest.Hash != hash || !strings.Contains(def.Script, hash) {
 		t.Fatalf("legacy version displaced complete publication: %+v, %s, %v", def, digest, err)
 	}

@@ -66,7 +66,7 @@ func (c *cliContext) resolveOptionalProject() (int, bool) {
 	}
 	c.ProjectRoot = root
 	c.Config = cfg
-	return exitOK, true
+	return c.resolvePaths()
 }
 
 // pluginListItem is one row of `mu plugin list`: a plugin declared in the
@@ -101,11 +101,7 @@ func runPluginList(args []string) int {
 	if code, ok := cli.resolveOptionalProject(); !ok {
 		return code
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return cli.fail(exitFail, "%v", err)
-	}
-	items, err := collectPluginList(cli.Config, filepath.Join(home, ".mu", "plugins"))
+	items, err := collectPluginList(cli.Config, cli.Paths.PluginsDir)
 	if err != nil {
 		return cli.fail(exitFail, "%v", err)
 	}
@@ -252,13 +248,10 @@ func inferPluginToolchain(path string) string {
 	return ""
 }
 
-// resolveBbPath finds the cached bb binary. Returns "" if not found.
-func resolveBbPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	path := filepath.Join(home, ".mu", "toolchains", "bb", "bb")
+// resolveBbPath finds the bb binary extracted under toolchainsDir. Returns ""
+// if not found.
+func resolveBbPath(toolchainsDir string) string {
+	path := filepath.Join(toolchainsDir, "bb", "bb")
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}

@@ -361,10 +361,11 @@ CACHED VERSION SELECTION
     mu plugin list --json
 
   --digest selects an already cached version, even inside a project; it does
-  not fetch another version. Listing exposes all available identities. Legacy
-  short cache paths remain usable when unambiguous, but a complete full-digest
-  publication supersedes its old short alias. Re-resolve legacy entries from
-  their project to obtain a full identity for explicit selection.
+  not fetch another version. Listing exposes all available identities.
+  Entries left by older releases under a 12-hex short name (bundle-<12 hex>)
+  are ignored: they are never listed or selected, and `mu cache clean`
+  deletes them. Re-resolve such a plugin from its project (mu build) to
+  materialize it under its full digest.
 
   Standalone plugin files publish through verified atomic replacement at
   plugin-<full digest>.<extension>. Failed copy/close/digest checks leave no

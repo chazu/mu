@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/chazu/mu/internal/cas/oci"
+	"github.com/chazu/mu/internal/paths"
 	"github.com/chazu/mu/internal/plugincatalog"
 )
 
@@ -60,7 +61,7 @@ func TestInstallCatalogPluginUpdatesProjectAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cli := &cliContext{ProjectRoot: project, Store: store}
+	cli := &cliContext{ProjectRoot: project, Store: store, Paths: paths.Under(filepath.Join(home, ".mu"))}
 	entry, err := installCatalogPlugin(context.Background(), cli, server.URL+"/catalog.json", catalog, catalog.Plugins[0])
 	if err != nil {
 		t.Fatalf("installCatalogPlugin: %v", err)

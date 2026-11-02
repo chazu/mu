@@ -139,10 +139,10 @@ Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventio
 ```
 build (b)  Build one or more targets
 scratch    Build toolchains from scratch
-cache      Inspect the local CAS cache (ls, inspect, size, clean, push, login, logout)
+cache      Inspect the local CAS cache (ls, inspect, size, clean, verify, push)
+login      Store OCI registry credentials for a host (mu logout <host> removes them)
 targets    List targets and their dependency chains (alias t; --deps/--rdeps, --dot, --json)
 plugin (p) List and inspect plugins (list, info, install)
-verify     Re-hash CAS blobs and report corrupt or missing ones
 guide      Quick-reference guides for mu features
 version    Print the mu version
 help       Show help for mu or a command (mu help <command> [<subcommand>])

@@ -30,6 +30,8 @@ THE DAY-TO-DAY VERBS
   mu build <target>...      Plan + execute the target's action DAG.
   mu build --plan <target>  Show the planned actions, don't run them.
   mu cache ls               List cached action results.
+  mu cache verify [--fix]   Check (and repair) local cache integrity.
+  mu login <host>           Store registry credentials (cache, publish).
   mu plugin list            Show project and installed plugins.
   mu plugin info <name>     Show capabilities/metadata for one plugin.
   mu targets                Show targets defined in this project.

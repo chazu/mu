@@ -110,12 +110,29 @@ INSPECTING THE CACHE
   mu cache inspect <ref>           Inspect an action, toolchain, or blob by tag/digest.
   mu cache size                    Show total cache disk usage.
   mu cache size --json             Output as JSON.
-  mu cache clean                   Remove unreachable blobs (garbage collection)
+  mu cache clean                   Remove unreachable blobs (garbage collection),
+                                   stale plugin versions (see PLUGIN STORAGE)
                                    and stale staging (see below).
+  mu cache clean --all-plugins     Also keep only the newest version of every
+                                   installed plugin.
   mu cache clean --dry-run         Report what would be removed.
+  mu cache verify [--fix]          Check blob and result integrity (see
+                                   VERIFYING CACHE INTEGRITY).
 
-  ls, inspect, size and clean read ~/.mu/cache. With --config PATH they
-  read the cache.path set in that mu.cue instead (when it sets one).
+  GC roots are the action results plus the plugin bundle digests the
+  project pins (mu.lock bundle_digest, mu.cue plugin digest).
+
+  Builds and other commands that open the cache hold the advisory lock
+  <cache>/.lock shared; clean holds it exclusively. So clean waits (with a
+  message) for running builds to finish, and a build started during a clean
+  waits for it, rather than clean collecting a blob a build has written but
+  not yet recorded. Where flock is unavailable the lock is a no-op.
+
+  Every command uses one cache directory: the cache.path of the project
+  (named by --config, else found by walking up from the working directory),
+  else ~/.mu/cache. Builds, scratch toolchain downloads, and the cache
+  subcommands all read and write that same directory. Outside a project the
+  default is used.
 
 STAGING AND CRASH CLEANUP
 
@@ -148,9 +165,19 @@ VERIFYING CACHE INTEGRITY
   tampering) fails the read and is deleted, so a cached action re-executes
   and the next lookup re-fetches or rebuilds instead of reusing it.
 
-  mu verify                        Re-hash all blobs, report corruption.
-  mu verify --json                 Output as JSON.
-  mu verify --fix                  Delete corrupt blobs.
+  mu cache verify                  Re-hash all blobs and check that every
+                                   action result's outputs (and a toolchain
+                                   receipt's artifacts) are present and intact.
+                                   Exits 1 on any problem.
+  mu cache verify --fix            Delete corrupt blobs and every action
+                                   result that references a corrupt or missing
+                                   blob (or cannot be read); those actions
+                                   rebuild next time. Exits 0 once the
+                                   remaining cache is consistent.
+  mu cache verify --json           Output as JSON.
+
+  --fix holds the cache lock exclusively, like clean. The old top-level
+  `mu verify` now only points here.
 
 REMOTE CACHE
 
@@ -167,7 +194,7 @@ REMOTE CACHE
   Registry references: every registry location in mu.cue is one string,
   "host/namespace/repo" (for publish, the base "host/namespace" that each
   target's slug is appended to), with no scheme. The host is everything
-  before the first "/" and is what `mu cache login` takes. localhost and
+  before the first "/" and is what `mu login` takes. localhost and
   127.0.0.1 registries use plain HTTP; all others use TLS. The older split
   {registry, repository} forms of cache.push and publish are rejected at
   load.
@@ -192,7 +219,7 @@ REMOTE CACHE
 
   An authentication failure (HTTP 401/403, or a challenge mu has no
   credential for) is not an outage: it fails the lookup, and the build, with
-  an error ending in "run: mu cache login <host>". Log in, fix the remote, or
+  an error ending in "run: mu login <host>". Log in, fix the remote, or
   build with --offline.
 
   Earlier releases configured a list under cache.backends, with read_repair
@@ -232,20 +259,24 @@ PUSHING
 
 AUTHENTICATION
 
-  mu cache login [host]            Log in to an OCI registry and store the
-                                   credential. Host defaults to the host of
-                                   cache.push (else cache.remote, else
-                                   publish.repository).
-  mu cache login [host] --username <u> --password-stdin
-  mu cache logout [host]           Remove the stored credential.
+  mu login <host>                  Log in to an OCI registry and store the
+                                   credential in ~/.mu/credentials.json (0600).
+  mu login --username <u> --password-stdin <host>
+                                   Non-interactive login (CI). A personal
+                                   access token is passed as the password.
+  mu logout <host>                 Remove the stored credential.
 
-  Flags: --username, --password (prefer --password-stdin), --password-stdin.
-  On a TTY, username/password are prompted interactively when omitted.
+  No project is needed. The host may be omitted only inside a project whose
+  mu.cue names exactly one registry host (across cache.push, cache.remote
+  and publish.repository). On a TTY, the username and password are prompted
+  when omitted; otherwise pass --username and --password-stdin. Login also
+  serves build --publish and remote cache reads, which is why it is not a
+  `mu cache` subcommand (`mu cache login` now only points here).
 
   Every registry access (cache.remote reads, cache push, build --publish)
   uses the same client and credentials:
     Lookups try ~/.mu/credentials.json first (Docker-format JSON, plaintext,
-    written by `mu cache login`), then the Docker chain
+    written by `mu login`), then the Docker chain
     (~/.docker/config.json and its credential helpers), so existing
     `docker login` / `oras login` sessions keep working. A broken Docker
     chain (e.g. a missing docker-credential-desktop) is skipped. With no
@@ -263,6 +294,15 @@ PLUGIN STORAGE
   Directory bundles use bundle-<full-sha256> and are published only after
   successful extraction. Interrupted extraction leaves no reusable bundle.
   Older bundles are retained for running processes.
+
+  `mu cache clean` prunes ~/.mu/plugins:
+  - entries from older releases named by a 12-hex digest prefix
+    (bundle-e6a95fab5a97) are always removed; nothing resolves them;
+  - for each plugin the current project pins (mu.lock or a digest in
+    mu.cue), every other installed version is removed;
+  - with --all-plugins, every other plugin keeps only its newest version
+    (by modification time). Without it, plugins this project does not use
+    are left alone, since other projects may.
 
 REMOTE METADATA BUDGETS
 

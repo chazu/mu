@@ -26,6 +26,7 @@ func runCachePush(args []string) int {
 	fs := flag.NewFlagSet("cache push", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	c := newCLIContext("cache push", fs, useConfig, useVerbose, useOffline)
+	defer c.Close()
 	dryRun := fs.Bool("dry-run", false, "list the action results that would be pushed, without pushing")
 	if code, ok := parseFlags(fs, args, "cache push [flags] [target...]"); !ok {
 		return code
