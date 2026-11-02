@@ -200,8 +200,8 @@ internally using built-in logic:
 This is baked into the mu binary because you need tools before you can run
 tools — the tool-fetcher must be built in.
 
-The `MU_SCRATCH` environment variable allows overriding this with an external
-executable, should anyone need custom scratch build logic.
+Scratch only installs pre-compiled tools. Source-only tools are built in a
+normal target, and downstream targets consume its output.
 
 ```
                     ┌──────────────────────────────────┐

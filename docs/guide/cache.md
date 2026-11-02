@@ -223,7 +223,7 @@ REGISTRY OUTAGES AND LOCAL OPERATION
   --offline uses local/cached CUE modules and source/toolchain artifacts. Missing
   required data fails with its requested identity; another plugin/toolchain
   version is never substituted. Network performed by configured preprocessors,
-  plugins, external MU_SCRATCH commands, and actions remains their own contract.
+  plugins, and actions remains their own contract.
   --offline is rejected for registry publication, login, and remote discovery.
   Local inspection and cache-push dry-run remain available.
 

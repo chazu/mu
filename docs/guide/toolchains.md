@@ -80,20 +80,18 @@ FAILURE MODES
 
   Binary not found at conventional path
     verify() errors. Workarounds: rename the toolchain to match the
-    binary's name; provide a shim plugin that bypasses scratch; or use
-    MU_SCRATCH to delegate.
+    binary's name, or provide a shim plugin that bypasses scratch.
 
   Binary rejects both version flags
     Same verify error. Same workarounds.
 
   Source distribution (no precompiled binary)
-    Not supported by the built-in scratch flow. Either pre-build
-    externally and host a binary tarball, or set MU_SCRATCH=<command>
-    to delegate the whole download/extract/verify pipeline to a builder
-    that knows how to compile (Nix, custom script, etc.).
+    Not supported by the scratch flow. Source-only tools: build them in a
+    normal target and consume the output (or pre-build externally and
+    host a binary tarball).
 
   Toolchain name != binary name
-    Verify fails. Use MU_SCRATCH or write a wrapper plugin.
+    Verify fails. Rename the toolchain or write a wrapper plugin.
 
   Archive exceeds extraction limits
     Extraction stops with "archive exceeds extraction limit" and the
@@ -146,11 +144,6 @@ USING TOOLCHAINS IN PLUGINS
     {"method": "plan", "toolchain_artifacts": {"go": "/path/to/go"}, ...}
 
   Plugins use these paths instead of system-installed tools.
-
-EXTERNAL SCRATCH BUILDS
-
-  Set MU_SCRATCH=<command> to delegate toolchain bootstrapping to an
-  external process (e.g. a Nix-based builder).
 
 COMMANDS
 

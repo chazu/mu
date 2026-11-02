@@ -75,7 +75,7 @@ func usage() {
 
 Commands:
   build (b)  Build one or more targets
-  scratch    Build toolchains from scratch (override with MU_SCRATCH)
+  scratch    Build toolchains from scratch
   cache      Inspect the local CAS cache
   target (t) List and inspect targets
   graph      Show the dependency chain of a target
