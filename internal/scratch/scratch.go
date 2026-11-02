@@ -4,8 +4,6 @@ package scratch
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -282,19 +280,4 @@ func archiveExt(rawURL string) string {
 		}
 	}
 	return filepath.Ext(base)
-}
-
-// sha256File computes the SHA-256 hex digest of a file.
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }

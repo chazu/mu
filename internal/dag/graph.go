@@ -16,7 +16,7 @@ type Action struct {
 	Outputs     []string              // declared output file paths
 	DependsOn   []string              // action IDs this depends on
 	Env         map[string]string
-	Network     bool   // allow network access (honor system in v1)
+	Network     bool   // allow network access; enforced by the sandbox for pure actions
 	WorkDir     string // execution working directory
 	ProjectRoot string // coordinator scope; empty for intentionally unrestricted direct library actions
 	Impure      bool   // skip CAS cache when true

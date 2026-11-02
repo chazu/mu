@@ -502,7 +502,7 @@ func (e *Executor) runWithTimeoutAndRetry(ctx context.Context, a *Action, env, s
 }
 
 // executeBare runs a command directly on the host (no sandbox).
-// Used for actions without a toolchain, preserving backward compatibility.
+// Used for impure actions and actions with sealed outputs; pure actions run sandboxed.
 // The env parameter may include resolved secrets merged with the action's declared env.
 func (e *Executor) executeBare(ctx context.Context, a *Action, env map[string]string, workDir *os.File) (int, error) {
 	if workDir == nil {
