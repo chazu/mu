@@ -34,7 +34,8 @@ Plugins decide what to build and how. mu executes.
 
 - **Plugin protocol over built-in rules.** LSP model applied to builds.
 - **Content-addressed everything.** Universal caching across all languages.
-- **OCI as the cache layer.** Same OCI layout locally and remotely.
+- **OCI as the shared cache layer.** Remote caches are plain OCI registries; the
+  local cache keeps OCI-style blobs plus one atomic file per action result.
 - **Minimal and composable.** ~7,500 LOC of Go. Plugins in any language.
 
 See [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) for the full mental model.

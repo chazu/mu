@@ -7,23 +7,20 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/registryhttp"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content"
-	ocilayout "oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
-// runCachePush copies every cached action manifest (and all its referenced
-// blobs) from the local OCI layout at ~/.mu/cache to the remote OCI registry
-// configured under cache.push in mu.cue. Blobs already present remotely are
-// skipped by oras.Copy.
+// runCachePush publishes every cached action result (and its output blobs)
+// from the local disk cache at ~/.mu/cache to the remote OCI registry
+// configured under cache.push in mu.cue. Each per-key local receipt becomes an
+// OCI manifest tagged action-sha256-<key> on the remote, built at push time.
+// Blobs already present remotely are not uploaded again.
 func runCachePush(args []string) int {
 	fs := flag.NewFlagSet("cache push", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -43,16 +40,17 @@ func runCachePush(args []string) int {
 	}
 
 	cacheDir := c.CachePath()
-	entries, err := readIndex(cacheDir)
+	local, err := openLocalCache(cacheDir)
 	if err != nil {
-		return c.fail(exitFail, "reading local cache index: %v", err)
+		return c.fail(exitFail, "opening local cache %s: %v", cacheDir, err)
 	}
-
-	var tags []string
-	for _, e := range entries {
-		if strings.HasPrefix(e.Tag, "action-") {
-			tags = append(tags, e.Tag)
-		}
+	actions, err := readCachedActions(local, false)
+	if err != nil {
+		return c.fail(exitFail, "reading local cache: %v", err)
+	}
+	tags := make([]string, 0, len(actions))
+	for _, a := range actions {
+		tags = append(tags, a.Tag)
 	}
 
 	if len(tags) == 0 {
@@ -74,28 +72,21 @@ func runCachePush(args []string) int {
 
 	ctx := c.networkContext(context.Background())
 
-	local, err := ocilayout.New(cacheDir)
-	if err != nil {
-		return c.fail(exitFail, "opening local cache %s: %v", cacheDir, err)
-	}
-
 	remoteRepo, err := newPushRepository(ref)
 	if err != nil {
 		return c.fail(exitFail, "%v", err)
 	}
-
-	copyOpts := oras.DefaultCopyOptions
-	copyOpts.FindSuccessors = sizeFillingSuccessors(cacheDir)
+	remote := oci.New(remoteRepo)
 
 	var pushed, failed int
-	for _, tag := range tags {
-		if _, err := oras.Copy(ctx, local, tag, remoteRepo, tag, copyOpts); err != nil {
-			fmt.Fprintf(os.Stderr, "  %s: %v\n", tag, err)
+	for _, a := range actions {
+		if err := remote.PushActionResult(ctx, local, a.Key, a.Result); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", a.Tag, err)
 			failed++
 			break
 		}
 		if c.Verbose {
-			fmt.Printf("  pushed %s\n", tag)
+			fmt.Printf("  pushed %s\n", a.Tag)
 		}
 		pushed++
 	}
@@ -171,37 +162,6 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		fmt.Fprintf(os.Stderr, "<-- %s\n", dump)
 	}
 	return resp, err
-}
-
-// sizeFillingSuccessors returns a FindSuccessors hook that runs the default
-// successor walk and then fills in any descriptors whose Size is zero by
-// stat'ing the corresponding blob file in the local OCI layout. This is
-// needed because mu cache manifests written before the CAS writer started
-// recording layer sizes have Size=0 on layer descriptors. oras-go propagates
-// that zero into req.ContentLength on the blob PUT, which makes Go's http
-// client fall back to Transfer-Encoding: chunked — which strict registries
-// (Zot) reject with 400 on the monolithic-upload PUT.
-func sizeFillingSuccessors(cacheDir string) func(context.Context, content.Fetcher, ocispec.Descriptor) ([]ocispec.Descriptor, error) {
-	blobsDir := filepath.Join(cacheDir, "blobs")
-	return func(ctx context.Context, fetcher content.Fetcher, desc ocispec.Descriptor) ([]ocispec.Descriptor, error) {
-		succs, err := content.Successors(ctx, fetcher, desc)
-		if err != nil {
-			return nil, err
-		}
-		for i := range succs {
-			if succs[i].Size > 0 {
-				continue
-			}
-			d := succs[i].Digest
-			p := filepath.Join(blobsDir, d.Algorithm().String(), d.Encoded())
-			info, statErr := os.Stat(p)
-			if statErr != nil {
-				continue
-			}
-			succs[i].Size = info.Size()
-		}
-		return succs, nil
-	}
 }
 
 // isLocalRegistryHost mirrors internal/cas/oci.isLocalRegistry for the push

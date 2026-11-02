@@ -24,11 +24,14 @@ type BackendSpec struct {
 	Registry string // raw, when Type == "oci"
 }
 
-var backendFactories = map[string]StoreFactory{}
+var backendFactories = map[string]StoreFactory{
+	"disk": func(spec BackendSpec) (Store, error) { return NewDiskStore(spec.Path) },
+}
 
 // RegisterBackend installs a factory for a given backend type. Typically
 // called from an init() in the package that provides the factory (e.g.
-// internal/cas/oci). Re-registering overrides the previous entry.
+// internal/cas/oci). Re-registering overrides the previous entry. The "disk"
+// backend (DiskStore) is built in.
 func RegisterBackend(typ string, f StoreFactory) {
 	backendFactories[typ] = f
 }

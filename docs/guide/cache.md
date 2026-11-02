@@ -1,7 +1,7 @@
 mu guide cache — content-addressed storage and action caching
 
-mu stores all build artifacts in a content-addressed store (CAS) using
-OCI image layout. The default location is ~/.mu/cache/.
+mu stores all build artifacts in a local content-addressed store (CAS).
+The default location is ~/.mu/cache/. Remote caches are OCI registries.
 
 HOW CACHING WORKS
 
@@ -78,14 +78,33 @@ HOW CACHING WORKS
   Action-result read-repair streams output blobs and publishes the local
   result only after every transfer succeeds and returns the expected digest.
 
-OCI LAYOUT
+LOCAL LAYOUT
 
   ~/.mu/cache/
-    index.json                     OCI index (manifest registry)
     blobs/sha256/<hash>            Content-addressed blobs
+    ac/<action-key-hash>           One action result per file
+    ingest/                        In-flight temporary files
 
-  Action results are stored as OCI manifests with:
-  - Config blob: {"version":2, "output_modes":{"name":493}, "outputs": {"name": {"Algorithm":"sha256","Hash":"..."}}, "exit_code": 0}
+  An action result file holds the receipt JSON:
+    {"version":2, "output_modes":{"name":493}, "outputs": {"name": {"Algorithm":"sha256","Hash":"..."}}, "exit_code": 0}
+
+  Every blob and result is written to a temporary file under ingest/,
+  fsynced, and renamed into place. A blob is named by the SHA-256 of the
+  bytes actually written. There is no shared index, so any number of mu
+  processes (parallel builds, editor-triggered builds, CI jobs on one
+  runner) can share ~/.mu/cache without losing each other's results, and a
+  crash never leaves a partial blob or result visible.
+
+  Caches written by releases before this layout kept action results in an
+  OCI index.json. The first mu command that opens the cache converts those
+  entries to ac/ files and renames index.json to index.json.migrated.
+  Entries that cannot be read are treated as cache misses and rebuild.
+
+REMOTE LAYOUT
+
+  On an OCI registry, action results are OCI manifests tagged
+  action-sha256-<action-key-hash>, with:
+  - Config blob: the receipt JSON above
   - Layer blobs: the actual output file contents, sorted by output name so
     repeated publication of identical results keeps the same manifest digest
 
@@ -105,7 +124,7 @@ STAGING AND CRASH CLEANUP
 
   mu writes temporary files next to their destination and publishes them
   atomically: scratch extraction (~/.mu/cache/extract/.extract-*),
-  downloads (.fetch-*), OCI ingest, plugin bundles (.bundle-*, .plugin-*),
+  downloads (.fetch-*), cache writes (~/.mu/cache/ingest), plugin bundles (.bundle-*, .plugin-*),
   toolchain binaries (.tool-*), schema installs (.tmp-*), and, in the
   system temp directory, cache replay and blob spools, sandbox roots, and
   sealed-value directories (mu-*). A writer removes its own partial output
@@ -145,10 +164,13 @@ REMOTE REGISTRY
 
   PUSHING
 
-    mu cache push                  Copy cached actions (action-* tags) from the
-                                   local CAS to cache.push's registry/repository.
+    mu cache push                  Copy cached action results and their output
+                                   blobs from the local CAS to cache.push's
+                                   registry/repository.
     mu cache push --dry-run        List the action tags that would be pushed.
 
+  The OCI manifest and tag for each local result are built at push time;
+  output blobs the registry already has are not uploaded again.
   Tags are derived (action-*); only the registry and repository are
   configurable. Plugins publish separately with `mu plugin push <name>`,
   which reuses the same destination config and credentials.

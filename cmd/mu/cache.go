@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/chazu/mu/internal/cas"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/chazu/mu/internal/cas/oci"
 )
 
 func cachePath() string {
@@ -17,57 +17,63 @@ func cachePath() string {
 	return filepath.Join(home, ".mu", "cache")
 }
 
-// indexEntry is a manifest entry from the OCI index.json.
-type indexEntry struct {
-	Tag            string
-	ManifestDigest string
-	ManifestSize   int64
+// cachedAction is one action result in the local disk cache.
+type cachedAction struct {
+	Tag    string // action-sha256-<key>: the tag `mu cache push` publishes it under
+	Key    cas.ActionKey
+	Result *cas.ActionResult
 }
 
-// digestJSON matches cas.Digest for JSON decoding.
-type digestJSON struct {
-	Algorithm string `json:"Algorithm"`
-	Hash      string `json:"Hash"`
+// openLocalCache opens the local disk cache. Opening also migrates action
+// results recorded by older releases in an OCI index.json.
+func openLocalCache(cacheDir string) (*cas.DiskStore, error) {
+	return cas.NewDiskStore(cacheDir)
 }
 
-func (d digestJSON) String() string {
-	return d.Algorithm + ":" + d.Hash
-}
-
-// actionResultJSON matches cas.ActionResult for JSON decoding.
-type actionResultJSON struct {
-	Outputs  map[string]digestJSON `json:"outputs"`
-	ExitCode int                   `json:"exit_code"`
-}
-
-// readIndex reads the OCI index.json and returns tagged entries.
-func readIndex(cacheDir string) ([]indexEntry, error) {
-	data, err := os.ReadFile(filepath.Join(cacheDir, "index.json"))
-	if err != nil {
-		return nil, fmt.Errorf("reading index.json: %w", err)
-	}
-
-	var idx ocispec.Index
-	if err := json.Unmarshal(data, &idx); err != nil {
-		return nil, fmt.Errorf("parsing index.json: %w", err)
-	}
-
-	var entries []indexEntry
-	for _, m := range idx.Manifests {
-		tag := m.Annotations["org.opencontainers.image.ref.name"]
-		if tag == "" {
-			continue
+// readCachedActions lists the local cache's action results in key order.
+// Unreadable entries are skipped unless strict, in which case the first one is
+// returned as an error (garbage collection must not guess at its roots).
+func readCachedActions(store *cas.DiskStore, strict bool) ([]cachedAction, error) {
+	var actions []cachedAction
+	err := store.WalkActionResults(func(key cas.ActionKey, result *cas.ActionResult, err error) error {
+		if err != nil {
+			if strict {
+				return err
+			}
+			return nil
 		}
-		entries = append(entries, indexEntry{
-			Tag:            tag,
-			ManifestDigest: m.Digest.String(),
-			ManifestSize:   m.Size,
-		})
-	}
-	return entries, nil
+		actions = append(actions, cachedAction{Tag: oci.ActionTag(key), Key: key, Result: result})
+		return nil
+	})
+	return actions, err
 }
 
-// blobPath returns the filesystem path for a digest in the OCI layout.
+// toolchainManifest is the blob a scratch toolchain's action result points to.
+type toolchainManifest struct {
+	Name      string            `json:"name"`
+	Version   string            `json:"version"`
+	Artifacts map[string]string `json:"artifacts"`
+}
+
+// readToolchainManifest returns the toolchain manifest when result is a
+// toolchain receipt (a single output named "manifest").
+func readToolchainManifest(cacheDir string, result *cas.ActionResult) (*toolchainManifest, bool) {
+	manifestDgst, ok := result.Outputs["manifest"]
+	if !ok || len(result.Outputs) != 1 {
+		return nil, false
+	}
+	data, err := os.ReadFile(blobPath(cacheDir, manifestDgst.String()))
+	if err != nil {
+		return nil, false
+	}
+	var tc toolchainManifest
+	if err := json.Unmarshal(data, &tc); err != nil || tc.Name == "" {
+		return nil, false
+	}
+	return &tc, true
+}
+
+// blobPath returns the filesystem path for a digest in the local cache.
 func blobPath(cacheDir, digest string) string {
 	// digest is "sha256:abcdef..." → blobs/sha256/abcdef...
 	// Only full identities name a blob file; anything else (prefixes, "..",
@@ -90,34 +96,6 @@ func blobSize(cacheDir, digest string) int64 {
 		return 0
 	}
 	return info.Size()
-}
-
-// readManifest reads and parses an OCI manifest by its digest.
-func readManifest(cacheDir, digest string) (*ocispec.Manifest, error) {
-	p := blobPath(cacheDir, digest)
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return nil, err
-	}
-	var m ocispec.Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
-
-// readActionResult reads the config blob of an action manifest as an ActionResult.
-func readActionResult(cacheDir string, manifest *ocispec.Manifest) (*actionResultJSON, error) {
-	p := blobPath(cacheDir, manifest.Config.Digest.String())
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return nil, err
-	}
-	var result actionResultJSON
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 func formatSize(bytes int64) string {
@@ -145,7 +123,12 @@ func runCacheLs(args []string) int {
 	}
 
 	cacheDir := cachePath()
-	entries, err := readIndex(cacheDir)
+	store, err := openLocalCache(cacheDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu cache ls: %v\n", err)
+		return 1
+	}
+	entries, err := readCachedActions(store, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu cache ls: %v\n", err)
 		return 1
@@ -157,7 +140,7 @@ func runCacheLs(args []string) int {
 	return cacheLsActions(cacheDir, entries, *jsonOut)
 }
 
-func cacheLsActions(cacheDir string, entries []indexEntry, jsonOut bool) int {
+func cacheLsActions(cacheDir string, entries []cachedAction, jsonOut bool) int {
 	type actionEntry struct {
 		Tag      string `json:"tag"`
 		Outputs  int    `json:"outputs"`
@@ -168,20 +151,7 @@ func cacheLsActions(cacheDir string, entries []indexEntry, jsonOut bool) int {
 
 	var items []actionEntry
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Tag, "action-") {
-			continue
-		}
-
-		manifest, err := readManifest(cacheDir, e.ManifestDigest)
-		if err != nil {
-			continue
-		}
-
-		result, err := readActionResult(cacheDir, manifest)
-		if err != nil {
-			continue
-		}
-
+		result := e.Result
 		var totalSize int64
 		for _, dgst := range result.Outputs {
 			totalSize += blobSize(cacheDir, dgst.String())
@@ -219,9 +189,9 @@ func cacheLsActions(cacheDir string, entries []indexEntry, jsonOut bool) int {
 	return 0
 }
 
-func cacheLsToolchains(cacheDir string, entries []indexEntry, jsonOut bool) int {
+func cacheLsToolchains(cacheDir string, entries []cachedAction, jsonOut bool) int {
 	// Toolchain manifests are stored as action results with key "toolchain:<name>:<version>".
-	// We need to read each manifest's config blob to get the toolchain name/version.
+	// We need to read each result's manifest blob to get the toolchain name/version.
 	type tcEntry struct {
 		Name      string `json:"name"`
 		Version   string `json:"version"`
@@ -234,42 +204,8 @@ func cacheLsToolchains(cacheDir string, entries []indexEntry, jsonOut bool) int 
 	seen := map[string]bool{}
 
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Tag, "action-") {
-			continue
-		}
-
-		manifest, err := readManifest(cacheDir, e.ManifestDigest)
-		if err != nil {
-			continue
-		}
-
-		result, err := readActionResult(cacheDir, manifest)
-		if err != nil {
-			continue
-		}
-
-		// Toolchain manifests have a single output named "manifest".
-		manifestDgst, ok := result.Outputs["manifest"]
-		if !ok || len(result.Outputs) != 1 {
-			continue
-		}
-
-		// Read the manifest blob to get toolchain name/version.
-		p := blobPath(cacheDir, manifestDgst.String())
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-
-		var tcManifest struct {
-			Name      string            `json:"name"`
-			Version   string            `json:"version"`
-			Artifacts map[string]string `json:"artifacts"`
-		}
-		if err := json.Unmarshal(data, &tcManifest); err != nil {
-			continue
-		}
-		if tcManifest.Name == "" {
+		tcManifest, ok := readToolchainManifest(cacheDir, e.Result)
+		if !ok {
 			continue
 		}
 
@@ -329,7 +265,12 @@ func runCacheInspect(args []string) int {
 	}
 
 	cacheDir := cachePath()
-	entries, err := readIndex(cacheDir)
+	store, err := openLocalCache(cacheDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mu cache inspect: %v\n", err)
+		return 1
+	}
+	entries, err := readCachedActions(store, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mu cache inspect: %v\n", err)
 		return 1
@@ -337,39 +278,8 @@ func runCacheInspect(args []string) int {
 
 	// Try to match as a toolchain name first.
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Tag, "action-") {
-			continue
-		}
-		manifest, err := readManifest(cacheDir, e.ManifestDigest)
-		if err != nil {
-			continue
-		}
-		result, err := readActionResult(cacheDir, manifest)
-		if err != nil {
-			continue
-		}
-
-		manifestDgst, ok := result.Outputs["manifest"]
-		if !ok || len(result.Outputs) != 1 {
-			continue
-		}
-
-		p := blobPath(cacheDir, manifestDgst.String())
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-
-		var tcManifest struct {
-			Name      string            `json:"name"`
-			Version   string            `json:"version"`
-			Artifacts map[string]string `json:"artifacts"`
-		}
-		if err := json.Unmarshal(data, &tcManifest); err != nil {
-			continue
-		}
-
-		if tcManifest.Name == ref {
+		tcManifest, ok := readToolchainManifest(cacheDir, e.Result)
+		if ok && tcManifest.Name == ref {
 			return inspectToolchain(cacheDir, tcManifest.Name, tcManifest.Version, tcManifest.Artifacts, *jsonOut)
 		}
 	}
@@ -377,17 +287,7 @@ func runCacheInspect(args []string) int {
 	// Try to match as an action tag (full or partial).
 	for _, e := range entries {
 		if e.Tag == ref || strings.Contains(e.Tag, ref) {
-			manifest, err := readManifest(cacheDir, e.ManifestDigest)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "mu cache inspect: reading manifest: %v\n", err)
-				return 1
-			}
-			result, err := readActionResult(cacheDir, manifest)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "mu cache inspect: reading action result: %v\n", err)
-				return 1
-			}
-			return inspectAction(cacheDir, e.Tag, result, *jsonOut)
+			return inspectAction(cacheDir, e.Tag, e.Result, *jsonOut)
 		}
 	}
 
@@ -428,7 +328,7 @@ func inspectToolchain(cacheDir, name, version string, artifacts map[string]strin
 	return 0
 }
 
-func inspectAction(cacheDir, tag string, result *actionResultJSON, jsonOut bool) int {
+func inspectAction(cacheDir, tag string, result *cas.ActionResult, jsonOut bool) int {
 	if jsonOut {
 		// Flatten digests to strings for JSON output.
 		outputs := make(map[string]string, len(result.Outputs))
@@ -502,13 +402,13 @@ func runCacheSize(args []string) int {
 		return nil
 	})
 
-	// Count action results from index.
-	entries, _ := readIndex(cacheDir)
+	// Count action results.
 	actionCount := 0
-	for _, e := range entries {
-		if strings.HasPrefix(e.Tag, "action-") {
+	if store, err := openLocalCache(cacheDir); err == nil {
+		store.WalkActionResults(func(cas.ActionKey, *cas.ActionResult, error) error {
 			actionCount++
-		}
+			return nil
+		})
 	}
 
 	if *jsonOut {

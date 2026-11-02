@@ -10,12 +10,11 @@ import (
 	"time"
 
 	"github.com/chazu/mu/internal/staging"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // runCacheClean removes blobs from ~/.mu/cache that are not reachable from any
-// tagged manifest in index.json. Tags are the GC roots. If any root is
-// unreadable, we abort rather than risk deleting a live blob.
+// action result under ~/.mu/cache/ac. Action results are the GC roots. If any
+// root is unreadable, we abort rather than risk deleting a live blob.
 func runCacheClean(args []string) int {
 	fs := flag.NewFlagSet("cache clean", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -102,65 +101,33 @@ func runCacheClean(args []string) int {
 	return 0
 }
 
-// reachableBlobs walks every tagged manifest in index.json and returns the set
-// of blob digests transitively referenced. Toolchain manifest blobs are opened
-// so that toolchain-artifact digests inside them are also reachable.
+// reachableBlobs opens the local cache and returns the set of blob digests
+// transitively referenced by its action results (the GC roots). Toolchain
+// manifest blobs are opened so that toolchain-artifact digests inside them are
+// also reachable. Opening the store first migrates any legacy index.json, so
+// results recorded by older releases stay roots.
 func reachableBlobs(cacheDir string) (map[string]bool, error) {
-	entries, err := readIndex(cacheDir)
+	store, err := openLocalCache(cacheDir)
 	if err != nil {
 		return nil, err
 	}
+	actions, err := readCachedActions(store, true)
+	if err != nil {
+		return nil, fmt.Errorf("reading action results: %w", err)
+	}
 	reachable := make(map[string]bool)
-
-	for _, e := range entries {
-		reachable[e.ManifestDigest] = true
-		manifest, err := readManifest(cacheDir, e.ManifestDigest)
-		if err != nil {
-			return nil, fmt.Errorf("reading manifest for tag %q (%s): %w", e.Tag, e.ManifestDigest, err)
+	for _, a := range actions {
+		for _, dgst := range a.Result.Outputs {
+			reachable[dgst.String()] = true
 		}
-		reachable[manifest.Config.Digest.String()] = true
-		for _, layer := range manifest.Layers {
-			reachable[layer.Digest.String()] = true
-		}
-		if err := walkActionReferences(cacheDir, manifest, reachable); err != nil {
-			return nil, fmt.Errorf("walking tag %q: %w", e.Tag, err)
+		if tc, ok := readToolchainManifest(cacheDir, a.Result); ok {
+			for _, dgst := range tc.Artifacts {
+				if !strings.Contains(dgst, ":") {
+					dgst = "sha256:" + dgst
+				}
+				reachable[dgst] = true
+			}
 		}
 	}
 	return reachable, nil
-}
-
-// walkActionReferences reads the config blob as an ActionResult and marks all
-// of its output digests reachable. If an output is named "manifest", it is
-// opened as a toolchain manifest and its artifact digests are marked too.
-func walkActionReferences(cacheDir string, manifest *ocispec.Manifest, reachable map[string]bool) error {
-	result, err := readActionResult(cacheDir, manifest)
-	if err != nil {
-		// Config blob may not be an ActionResult (e.g. custom manifest types).
-		// Non-fatal: we've already marked the config digest reachable above.
-		return nil
-	}
-	for _, dgst := range result.Outputs {
-		reachable[dgst.String()] = true
-	}
-	manifestDgst, ok := result.Outputs["manifest"]
-	if !ok || len(result.Outputs) != 1 {
-		return nil
-	}
-	data, err := os.ReadFile(blobPath(cacheDir, manifestDgst.String()))
-	if err != nil {
-		return nil
-	}
-	var tc struct {
-		Artifacts map[string]string `json:"artifacts"`
-	}
-	if err := json.Unmarshal(data, &tc); err != nil {
-		return nil
-	}
-	for _, dgst := range tc.Artifacts {
-		if !strings.Contains(dgst, ":") {
-			dgst = "sha256:" + dgst
-		}
-		reachable[dgst] = true
-	}
-	return nil
 }
