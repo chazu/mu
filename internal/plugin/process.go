@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -126,7 +127,7 @@ func StartProcessWithOptions(name string, command []string, projectRoot string, 
 	}
 
 	// Allow large responses (default 64KB may be too small for big action graphs).
-	p.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	p.scanner.Buffer(make([]byte, 0, 64*1024), MaxResponseLine)
 
 	if err := cmd.Start(); err != nil {
 		stdin.Close()
@@ -193,10 +194,6 @@ func (p *Process) logsSnapshot() string {
 	}
 	return strings.Join(snap, "\n")
 }
-
-// Logs returns a fresh copy of the ring contents (tagged strings,
-// oldest first). Safe to call before or after Close.
-func (p *Process) Logs() []string { return p.logs.Snapshot() }
 
 // send serializes each write/read exchange, including its cancellation and
 // cleanup. A cancelled exchange terminates the process: a half-sent request or
@@ -281,9 +278,16 @@ func (p *Process) abort() {
 	})
 }
 
+// MaxResponseLine is the longest single NDJSON response line mu accepts from
+// a plugin. Plan responses for large targets can run to megabytes.
+const MaxResponseLine = 16 * 1024 * 1024
+
 // scanError returns a descriptive error when the scanner fails.
 func (p *Process) scanError() error {
 	if err := p.scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return fmt.Errorf("plugin %q: response line exceeds the %d MiB limit", p.name, MaxResponseLine/(1024*1024))
+		}
 		return fmt.Errorf("plugin %q: read response: %w", p.name, err)
 	}
 	// EOF — process closed stdout. Check if it crashed.
@@ -299,10 +303,19 @@ func (p *Process) Discover(ctx context.Context) (*DiscoverResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultDiscoverTimeout)
 	defer cancel()
 
-	var resp DiscoverResponse
-	if err := p.send(ctx, NewDiscoverRequest(), &resp); err != nil {
+	// Decode the error envelope too: a plugin that answers discover with
+	// {"error": ...} would otherwise surface as a protocol version mismatch.
+	var envelope struct {
+		DiscoverResponse
+		Error string `json:"error,omitempty"`
+	}
+	if err := p.send(ctx, NewDiscoverRequest(), &envelope); err != nil {
 		return nil, err
 	}
+	if envelope.Error != "" {
+		return nil, fmt.Errorf("plugin %q: discover error: %s", p.name, envelope.Error)
+	}
+	resp := envelope.DiscoverResponse
 
 	if resp.ProtocolVersion != ProtocolVersion {
 		return nil, fmt.Errorf("plugin %q: protocol version mismatch: got %d, want %d",

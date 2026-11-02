@@ -65,18 +65,6 @@ func (m *Manager) SetVerbose(w io.Writer) {
 	m.verboseSink = w
 }
 
-// Logs returns a fresh copy of the tagged stderr ring for a plugin, or
-// nil if the plugin is unknown or not started. Oldest line first.
-func (m *Manager) Logs(name string) []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	entry, ok := m.plugins[name]
-	if !ok || entry.process == nil {
-		return nil
-	}
-	return entry.process.Logs()
-}
-
 // Register adds a plugin definition. A later Start starts only new definitions.
 func (m *Manager) Register(def PluginDef) error {
 	m.mu.Lock()
@@ -270,18 +258,6 @@ func (m *Manager) DiscoverInfo(name string) *DiscoverResponse {
 		}
 	}
 	return &cpy
-}
-
-// PluginNames returns the names of all registered plugins.
-func (m *Manager) PluginNames() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	names := make([]string, 0, len(m.plugins))
-	for name := range m.plugins {
-		names = append(names, name)
-	}
-	return names
 }
 
 // Close gracefully shuts down all plugin processes.
