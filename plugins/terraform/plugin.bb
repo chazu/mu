@@ -2,9 +2,9 @@
 
 ;; Terraform convergence plugin for mu.
 ;;
-;; Converges Terraform-managed infrastructure via terraform init/plan/apply.
-;; Observes drift via terraform plan -detailed-exitcode. All actions are
-;; impure (side effects on infrastructure) and require network access.
+;; Applies Terraform-managed infrastructure via terraform init/plan/apply.
+;; All actions are impure (side effects on infrastructure) and require
+;; network access.
 ;;
 ;; Config options:
 ;;   dir                  - terraform working directory (default: ".")
@@ -16,7 +16,7 @@
 ;;   emit_state           - run `terraform show -json` and `terraform output -json`
 ;;                          after apply (or after plan in plan-only mode), capturing
 ;;                          state.json and outputs.json as CAS outputs so downstream
-;;                          targets (e.g. pudl) can consume them. Default: true.
+;;                          targets can consume them. Default: true.
 ;;   binary               - terraform-compatible CLI to invoke. If unset, prefers
 ;;                          `tofu` (OpenTofu) when on PATH, else falls back to
 ;;                          `terraform`. Accepts any command name or absolute path.
@@ -37,8 +37,7 @@
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
-         '[babashka.fs :as fs]
-         '[babashka.process :as process])
+         '[babashka.fs :as fs])
 
 (defn resolve-bin
   "Resolve which terraform-compatible CLI to invoke. Config `binary`
@@ -50,10 +49,10 @@
 
 (defn handle-discover []
   {"name"             "terraform"
-   "version"          "0.2.0"
+   "version"          "0.3.0"
    "protocol_version" 1
-   "description"      "Plan and apply Terraform configurations with state observation"
-   "capabilities"     ["discover" "plan" "observe"]
+   "description"      "Plan and apply Terraform configurations and capture their state"
+   "capabilities"     ["discover" "plan"]
    "consumes"         ["source:terraform" "source:hcl"]
    "produces"         ["terraform_state"]
    "config_schema"    {"dir"                   {"type" "string"  "default" "." "description" "Working directory containing .tf files"}
@@ -61,7 +60,7 @@
                        "backend_config"        {"type" "object" "description" "Backend configuration key-value pairs for terraform init"}
                        "auto_approve"          {"type" "boolean" "default" true "description" "Skip interactive approval during apply"}
                        "parallelism"           {"type" "integer" "description" "Limit concurrent Terraform operations"}
-                       "emit_state"            {"type" "boolean" "default" true "description" "Include Terraform state in observe output"}
+                       "emit_state"            {"type" "boolean" "default" true "description" "Capture state.json and outputs.json as target outputs"}
                        "binary"                {"type" "string" "description" "Path to terraform or tofu binary"}
                        "sealed_output_outputs" {"type" "object" "description" "Map of sealed output names to Terraform output names"}}})
 
@@ -224,47 +223,10 @@
         {"actions"          actions
          "declared_outputs" declared}))))
 
-(defn handle-observe [req]
-  (let [target  (get req "target")
-        config  (get target "config" {})
-        dir     (get config "dir" ".")]
-
-    (try
-      ;; First run terraform init (quiet) to configure backend
-      (let [init-result (process/sh (build-init-cmd config)
-                                     {:dir dir})]
-        (when (not= 0 (:exit init-result))
-          (throw (ex-info "terraform init failed" {:output (:err init-result)}))))
-
-      ;; Then run terraform plan -detailed-exitcode
-      (let [plan-cmd (cond-> [(resolve-bin config) "plan" "-input=false" "-no-color" "-detailed-exitcode"]
-                       (get config "var_file")
-                       (conj (str "-var-file=" (get config "var_file"))))
-            result   (process/sh plan-cmd {:dir dir})]
-        (cond
-          ;; Exit 0 = no changes
-          (= 0 (:exit result))
-          {"current" {"has_changes" false
-                      "plan_output" (str/trim (str (:out result)))}}
-
-          ;; Exit 2 = changes detected
-          (= 2 (:exit result))
-          {"current" {"has_changes" true
-                      "plan_output" (str/trim (str (:out result)))}}
-
-          ;; Exit 1 = error
-          :else
-          {"error" (str "terraform plan failed (exit " (:exit result) "): "
-                        (:err result))}))
-
-      (catch Exception e
-        {"error" (str "terraform observe failed: " (.getMessage e))}))))
-
 (defn handle-request [req]
   (case (get req "method")
     "discover" (handle-discover)
     "plan"     (handle-plan req)
-    "observe"  (handle-observe req)
     {"error" (str "unknown method: " (get req "method"))}))
 
 ;; Main NDJSON loop

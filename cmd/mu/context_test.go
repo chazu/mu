@@ -131,7 +131,6 @@ func TestCommandFlagSets(t *testing.T) {
 	}{
 		{[]string{"build"}, "attach config emit-manifest jobs json no-cache offline plan publish verbose"},
 		{[]string{"scratch"}, "config no-cache offline"},
-		{[]string{"observe"}, "config json ndjson offline verbose"},
 		{[]string{"targets"}, "config deps dot json offline rdeps"},
 		{[]string{"verify"}, "fix json"},
 		{[]string{"plugin", "list"}, "config json offline"},

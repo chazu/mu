@@ -175,8 +175,6 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 		Entrypoint:     selected.Entrypoint,
 		Toolchain:      selected.Toolchain,
 		BundleDigest:   resolved.Digest.String(),
-		Schemas:        selected.Schemas,
-		PUDLMappings:   selected.PUDLMappings,
 	}
 	lock.Upsert(entry)
 	if err := plugincatalog.WriteLock(lockPath, lock); err != nil {
@@ -186,17 +184,15 @@ func installCatalogPlugin(ctx context.Context, cli *cliContext, catalogURL strin
 }
 
 // installedPluginMetadata is the cache-side copy of catalog metadata. The
-// extracted bundle deliberately does not need to contain mu.cue, so tools
-// such as pudl can inspect an installed plugin without re-fetching its source
+// extracted bundle deliberately does not need to contain mu.cue, so other
+// tools can inspect an installed plugin without re-fetching its source
 // archive or importing mu's implementation packages.
 type installedPluginMetadata struct {
-	Name         string                      `json:"name"`
-	Version      string                      `json:"version"`
-	BundleDigest string                      `json:"bundle_digest"`
-	Entrypoint   string                      `json:"entrypoint"`
-	Toolchain    string                      `json:"toolchain,omitempty"`
-	Schemas      []plugincatalog.Schema      `json:"schemas,omitempty"`
-	PUDLMappings []plugincatalog.PUDLMapping `json:"pudl_mappings,omitempty"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	BundleDigest string `json:"bundle_digest"`
+	Entrypoint   string `json:"entrypoint"`
+	Toolchain    string `json:"toolchain,omitempty"`
 }
 
 func writeInstalledPluginMetadata(bundleDir string, selected plugincatalog.Plugin, digest cas.Digest) error {
@@ -211,8 +207,6 @@ func writeInstalledPluginMetadata(bundleDir string, selected plugincatalog.Plugi
 		BundleDigest: digest.String(),
 		Entrypoint:   selected.Entrypoint,
 		Toolchain:    selected.Toolchain,
-		Schemas:      selected.Schemas,
-		PUDLMappings: selected.PUDLMappings,
 	}
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {

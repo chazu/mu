@@ -65,6 +65,24 @@ func TestCueDecoder_DecodePluginRejectsNoPluginKey(t *testing.T) {
 	}
 }
 
+// TestCueDecoder_DecodePluginRejectsRemovedSchemas: vendored plugin output
+// schemas were removed, so a manifest that still declares them fails to
+// load instead of silently dropping the files from the bundle.
+func TestCueDecoder_DecodePluginRejectsRemovedSchemas(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mu.cue"), []byte(`plugin: {
+	entrypoint: "plugin.bb"
+	schemas: [{module: "mu/x", version: "v1", path: "schemas/mu/x"}]
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cueDecoder{}.DecodePlugin(dir)
+	if err == nil || !strings.Contains(err.Error(), "plugin.schemas was removed") {
+		t.Fatalf("DecodePlugin error = %v, want \"plugin.schemas was removed\"", err)
+	}
+}
+
 // TestCueDecoder_RejectsInvalid exercises a few schema-violation cases.
 // Each fixture is a directory under testdata/ containing a single
 // mu.cue that violates #ProjectConfig.

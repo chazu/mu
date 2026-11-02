@@ -108,8 +108,8 @@ mu build //hello
 ```
 
 That's the whole loop — no toolchain bootstrap needed for Go plugins. The
-SDK derives capabilities from which handlers (Plan, Observe,
-ResolveSecret, StoreSecret) are non-nil. Full SDK reference:
+SDK derives capabilities from which handlers (Plan, ResolveSecret,
+StoreSecret) are non-nil. Full SDK reference:
 `mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
 
 ### Alternative: Babashka (or any other language)
@@ -142,7 +142,6 @@ mu scratch    Build toolchains from scratch
 mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
 mu targets    List targets; --deps/--rdeps show dependency chains (tree/DOT/JSON)
 mu plugin     List, inspect, and install plugins
-mu observe    Ask plugins to report current state
 mu verify     Validate CAS integrity
 mu guide      Quick-reference help topics
 mu version
@@ -159,7 +158,7 @@ Use `--catalog URL` or `MU_PLUGIN_CATALOG` for a catalog mirror or local test
 server.
 
 Run `mu guide` for the topic index. Each topic has its own page:
-`overview`, `mu.cue`, `plugins`, `build`, `observe`, `cache`,
+`overview`, `mu.cue`, `plugins`, `build`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
 `secret-providers`, `sandbox`, `sdk`.
 
@@ -181,20 +180,18 @@ Run `mu guide` for the topic index. Each topic has its own page:
 
 | Plugin | Description |
 |--------|-------------|
-| `aws` | AWS resource observer (EC2, VPC, subnets) via AWS CLI |
 | `docker` | Docker image builder |
 | `doppler` | Read-only secret provider over the [Doppler](https://doppler.com) CLI |
 | `file` | File convergence (write/copy/symlink/delete) + sealed-output capture |
 | `go` | Go binaries (cross-compile, tags, ldflags, race) |
-| `host` | Remote host observer over SSH |
-| `k8s` | Kubernetes convergence + drift + Secret capture |
+| `k8s` | Kubernetes apply + Secret capture |
 | `keypair-gen` | ed25519/ECDSA keypair generator → sealed outputs |
 | `lint` | Linter wrapper (check; fix only with `fix: true`) |
 | `pass` | Bidirectional secret provider over [pass](https://passwordstore.org) |
 | `remote-exec` | Run commands over SSH with sealed-output fetch |
 | `remote-file` | Converge a file on a remote host over SSH |
 | `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
-| `terraform` | Infra provisioning + drift + sensitive-output capture |
+| `terraform` | Infra provisioning + sensitive-output capture |
 
 ## Project Status
 

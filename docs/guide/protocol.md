@@ -13,7 +13,7 @@ LIFECYCLE
 
   1. mu starts the plugin process.
   2. mu sends {"method": "discover"} — plugin replies with metadata.
-  3. mu sends plan/observe/resolve_secret/store_secret requests as needed.
+  3. mu sends plan/resolve_secret/store_secret requests as needed.
   4. mu closes stdin when done — plugin exits.
 
   Request deadlines cover waiting for another request, writing stdin, and
@@ -35,14 +35,14 @@ METHODS
       "protocol_version": 1,
       "consumes": ["source:any"],
       "produces": ["binary"],
-      "capabilities": ["discover", "plan", "observe"],
-      "config_schema": {"output": {"type": "string"}},
-      "output_schema": {"module": "mu/plugin", "version": "v1", "definition": "#Type"},
-      "output_schemas": [{"resource_type": "plugin.type", "module": "mu/plugin", "version": "v1", "definition": "#Type"}]
+      "capabilities": ["discover", "plan"],
+      "config_schema": {"output": {"type": "string"}}
     }
 
     Plugins must declare every supported method in `capabilities`.
-    `plan` is required only for build/convergence plugins.
+    `plan` is required only for build/convergence plugins. The old
+    `observe` method was removed (mu is a build tool); a plugin that
+    still advertises it fails discover with a removal error.
 
     Plan-capable plugins should declare `config_schema` (field name ->
     {"type", "description", "default", "required"}): mu validates each
@@ -74,20 +74,6 @@ METHODS
       "declared_outputs": {"binary": "app"}
     }
 
-  observe (optional)
-    Request:  {
-      "method": "observe",
-      "target": {"name": "//infra/vpc", "toolchain": "aws", "config": {...}},
-      "secrets": {"AWS_SECRET_KEY": "actual-value"}
-    }
-    Response: {
-      "current": {
-        "records": [
-          {"_schema": "aws.ec2.vpc", "vpc_id": "vpc-123", "cidr_block": "10.0.0.0/16"}
-        ]
-      }
-    }
-
   resolve_secret (optional)
     Request:  {"method": "resolve_secret", "secret_ref": "deploy/token"}
     Response: {"value": "the-secret-value"}
@@ -104,7 +90,7 @@ METHODS
 
 TARGET INFO FIELDS
 
-  Target info is sent in plan and observe requests. Fields beyond
+  Target info is sent in plan requests. Fields beyond
   the obvious name/toolchain/sources/config:
 
   sealed_inputs       map[NAME]ref — secret refs to resolve before exec.

@@ -45,9 +45,6 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 		Plan: func(ctx context.Context, req muplugin.PlanRequest) (muplugin.PlanResponse, error) {
 			return muplugin.PlanResponse{}, nil
 		},
-		Observe: func(ctx context.Context, req muplugin.ObserveRequest) (muplugin.ObserveResponse, error) {
-			return muplugin.ObserveResponse{}, nil
-		},
 		ResolveSecret: func(ctx context.Context, ref string) (string, error) { return "", nil },
 		StoreSecret:   func(ctx context.Context, req muplugin.StoreSecretRequest) error { return nil },
 	}
@@ -55,7 +52,7 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewDiscoverRequest(), &resp); err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
-	want := []string{"discover", "plan", "observe", "resolve_secret", "store_secret"}
+	want := []string{"discover", "plan", "resolve_secret", "store_secret"}
 	if len(resp.Capabilities) != len(want) {
 		t.Fatalf("capabilities %v, want %v", resp.Capabilities, want)
 	}
@@ -66,20 +63,18 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 	}
 }
 
-func TestObserveOnlyPluginDoesNotAdvertisePlan(t *testing.T) {
+func TestSecretOnlyPluginDoesNotAdvertisePlan(t *testing.T) {
 	p := &muplugin.Plugin{
-		Name:    "observer",
-		Version: "0.1.0",
-		Observe: func(ctx context.Context, req muplugin.ObserveRequest) (muplugin.ObserveResponse, error) {
-			return muplugin.ObserveResponse{Current: map[string]any{"records": []any{}}}, nil
-		},
+		Name:          "resolver",
+		Version:       "0.1.0",
+		ResolveSecret: func(ctx context.Context, ref string) (string, error) { return "v", nil },
 	}
 
 	var disc muplugin.DiscoverResponse
 	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewDiscoverRequest(), &disc); err != nil {
 		t.Fatalf("discover exchange: %v", err)
 	}
-	want := []string{"discover", "observe"}
+	want := []string{"discover", "resolve_secret"}
 	if len(disc.Capabilities) != len(want) {
 		t.Fatalf("capabilities = %v, want %v", disc.Capabilities, want)
 	}
@@ -189,12 +184,25 @@ func TestUnsupportedCapabilityReturnsError(t *testing.T) {
 			return muplugin.PlanResponse{}, nil
 		},
 	}
-	var resp muplugin.ObserveResponse
-	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewObserveRequest(muplugin.TargetInfo{Name: "//x"}, nil, nil), &resp); err != nil {
+	var resp muplugin.ResolveSecretResponse
+	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewResolveSecretRequest("x"), &resp); err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
 	if resp.Error == "" {
 		t.Fatal("expected capability-unsupported error")
+	}
+}
+
+// observe was removed from the protocol; the SDK treats it as any other
+// unknown method.
+func TestObserveMethodIsUnknown(t *testing.T) {
+	p := &muplugin.Plugin{Name: "minimal", Version: "0.1.0"}
+	var resp map[string]string
+	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.Request{Method: "observe"}, &resp); err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if resp["error"] != `unknown method "observe"` {
+		t.Fatalf("error = %q, want unknown method", resp["error"])
 	}
 }
 

@@ -14,8 +14,6 @@ execution when a precondition is already met.
 - `plan` — one action: ssh to host, optionally run `check`, run `command`,
   optionally fetch `sealed_output_files` back into `$MU_SEALED_OUT_DIR`.
 
-No `observe`. A command isn't a resource with state.
-
 ## Config
 
 | field | type | default | notes |

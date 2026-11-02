@@ -19,7 +19,6 @@ var topicFiles = map[string]string{
 	"mu.cue":           "mu-cue.md",
 	"build":            "build.md",
 	"plugins":          "plugins.md",
-	"observe":          "observe.md",
 	"cache":            "cache.md",
 	"secrets":          "secrets.md",
 	"secret-gen":       "secret-gen.md",

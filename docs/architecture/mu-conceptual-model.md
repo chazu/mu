@@ -84,7 +84,7 @@ mu learns what actions to run. A plugin implements these methods:
 -> {"method": "discover"}
 <- {"name": "go", "version": "0.1.0", "protocol_version": 1,
     "consumes": ["go_source"], "produces": ["executable"],
-    "capabilities": ["discover", "plan", "observe"]}
+    "capabilities": ["discover", "plan"]}
 ```
 
 **plan** (optional; required for build/convergence plugins) — "given this
@@ -99,7 +99,6 @@ target, what actions should I run?"
     "declared_outputs": {"executable": "server"}}
 ```
 
-**observe** (optional) — report current state for drift detection
 **resolve_secret** (optional) — resolve a secret reference to its value
 **store_secret** (optional) — write a value to a secret backend
 **advise** (optional) — lifecycle observer, called after build phases complete
@@ -422,7 +421,7 @@ the cached binary to run plugin scripts. This means:
 - The bb runtime is hermetic and version-pinned
 - Plugin authors implement `discover`, plus `plan` when the plugin builds or
   converges targets, and may add optional methods
-  (`observe`, `resolve_secret`, `store_secret`, `advise`)
+  (`resolve_secret`, `store_secret`)
 - Plugins can also be compiled binaries (Go, Rust, etc.) — any language works
 - Plugin directories are deterministically bundled and stored in CAS for
   distribution via digest references

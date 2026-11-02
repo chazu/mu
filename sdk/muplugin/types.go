@@ -21,7 +21,7 @@
 //	}
 //
 // The SDK derives the discover capabilities array from which optional
-// fields (Observe, ResolveSecret, StoreSecret) are non-nil — no
+// fields (Plan, ResolveSecret, StoreSecret) are non-nil — no
 // manual capabilities list.
 //
 // This file defines the wire types. They are the canonical Go
@@ -41,11 +41,10 @@ const ProtocolVersion = 1
 // Request is the unified envelope sent to plugins via NDJSON.
 // Plugins dispatch on the Method field.
 type Request struct {
-	Method             string            `json:"method"`                        // "discover", "plan", "observe", "resolve_secret", or "store_secret"
-	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan" and "observe"
+	Method             string            `json:"method"`                        // "discover", "plan", "resolve_secret", or "store_secret"
+	Target             *TargetInfo       `json:"target,omitempty"`              // set for "plan"
 	Deps               []DepInfo         `json:"deps,omitempty"`                // set for "plan"
-	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan" and "observe"
-	Secrets            map[string]string `json:"secrets,omitempty"`             // set for "observe" — resolved sealed input values
+	ToolchainArtifacts map[string]string `json:"toolchain_artifacts,omitempty"` // set for "plan"
 	SecretRef          string            `json:"secret_ref,omitempty"`          // set for "resolve_secret" and "store_secret"
 	SecretValue        string            `json:"secret_value,omitempty"`        // set for "store_secret" — bytes to persist
 	SecretMode         string            `json:"secret_mode,omitempty"`         // set for "store_secret" — "create" | "overwrite" | "create_if_absent"
@@ -60,31 +59,7 @@ type DiscoverResponse struct {
 	Consumes        []string       `json:"consumes"` // artifact types this plugin can consume
 	Produces        []string       `json:"produces"` // artifact types this plugin can produce
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
-	Capabilities    []string       `json:"capabilities,omitempty"`   // supported methods, e.g. ["discover","plan","observe"]
-	OutputSchema    *SchemaRef     `json:"output_schema,omitempty"`  // legacy single-schema form
-	OutputSchemas   []SchemaRef    `json:"output_schemas,omitempty"` // resource-specific output schemas
-}
-
-// SchemaRef is an optional, declarative reference to a CUE schema that
-// describes the shape of a plugin's output. It is consumed by downstream
-// tools (notably pudl) to classify imported data without re-inferring.
-//
-// The reference is a pointer to a schema; the schema itself is resolved
-// from a vendored module shipped in the plugin bundle, the local schema
-// cache, or (eventually) a remote registry. Plugins do not embed CUE
-// content here.
-//
-// Namespace convention (see brainstorm 2026-05-04-plugin-output-schemas):
-//   - "pudl/..."         → first-party pudl schemas
-//   - "mu/<plugin-name>" → schemas originated by a mu plugin's authors
-//   - anything else      → third-party / user-defined
-type SchemaRef struct {
-	ResourceType string `json:"resource_type,omitempty"` // emitted record type, e.g. "aws.ec2.instance"
-	Module       string `json:"module"`                  // CUE module path, e.g. "mu/aws"
-	Version      string `json:"version"`                 // module version, e.g. "v1"
-	Definition   string `json:"definition,omitempty"`    // optional CUE definition selector, e.g. "#EC2Instance"
-	Description  string `json:"description,omitempty"`   // human-readable summary of the schema's purpose
-	Source       string `json:"source,omitempty"`        // advisory: "vendored" | "remote"
+	Capabilities    []string       `json:"capabilities,omitempty"` // supported methods, e.g. ["discover","plan"]
 }
 
 // HasCapability reports whether the plugin declared support for the given method.
@@ -99,26 +74,6 @@ func (d *DiscoverResponse) HasCapability(method string) bool {
 		}
 	}
 	return false
-}
-
-// ObserveResponse is returned by plugins for method "observe".
-// Plugins report the current state of the resource as structured data.
-// Convergence decisions (converged vs. drifted) are made by pudl, not
-// by the plugin — the plugin is a sensor, not a judge.
-type ObserveResponse struct {
-	Current map[string]any `json:"current,omitempty"` // observed state of the resource
-	Error   string         `json:"error,omitempty"`
-}
-
-// NewObserveRequest returns a Request for the "observe" method.
-// Secrets contains resolved sealed input values (never logged, cached, or stored in CAS).
-func NewObserveRequest(target TargetInfo, toolchainArtifacts map[string]string, secrets map[string]string) Request {
-	return Request{
-		Method:             "observe",
-		Target:             &target,
-		ToolchainArtifacts: toolchainArtifacts,
-		Secrets:            secrets,
-	}
 }
 
 // PlanResponse is returned by plugins for method "plan".
@@ -275,13 +230,6 @@ type PlanRequest struct {
 	Target             TargetInfo
 	Deps               []DepInfo
 	ToolchainArtifacts map[string]string
-}
-
-// ObserveRequest is the ergonomic view of an observe Request for SDK callers.
-type ObserveRequest struct {
-	Target             TargetInfo
-	ToolchainArtifacts map[string]string
-	Secrets            map[string]string
 }
 
 // StoreSecretRequest is the ergonomic view of a store_secret Request.

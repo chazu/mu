@@ -26,7 +26,7 @@ CONFIG FIELDS
                    Produces state.json via `terraform show -json` and
                    outputs.json via `terraform output -json`, declared as
                    artifact types `terraform_state` and `terraform_outputs`
-                   for downstream consumers (e.g. pudl).
+                   for downstream targets.
   binary           Override the CLI to invoke. Accepts a command name or
                    absolute path. If unset, prefers `tofu` (OpenTofu)
                    when on PATH, else falls back to `terraform`.
@@ -44,14 +44,6 @@ EXAMPLES
   With variables and backend config:
     {"dir": "infra/vpc", "var_file": "prod.tfvars",
      "backend_config": {"bucket": "my-tf-state", "key": "vpc/terraform.tfstate"}}
-
-OBSERVATION (DRIFT DETECTION)
-
-  mu observe //infra/vpc
-
-  Runs 'terraform init' then 'terraform plan -detailed-exitcode' to
-  detect drift. Exit code 0 means no changes, exit code 2 means changes
-  detected. Returns plan output as observation data.
 
 ACTIONS GENERATED
 
@@ -142,4 +134,4 @@ SEALED OUTPUTS (sensitive terraform outputs -> secret backend)
 
 CAPABILITIES
 
-  discover, plan, observe
+  discover, plan

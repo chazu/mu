@@ -138,6 +138,9 @@ func rejectRemovedFields(val cue.Value, path string) error {
 	if val.LookupPath(cue.ParsePath("publish.registry")).Exists() {
 		return fmt.Errorf("%s: publish.registry was removed; put the host in publish.repository; %s", path, registryRefHint)
 	}
+	if val.LookupPath(cue.ParsePath("plugin.schemas")).Exists() {
+		return fmt.Errorf("%s: plugin.schemas was removed; mu no longer ships plugin output schemas — delete the field", path)
+	}
 	if val.LookupPath(cue.ParsePath("advice")).Exists() {
 		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
 	}
@@ -172,6 +175,11 @@ func rejectRemovedFields(val cue.Value, path string) error {
 		if t.LookupPath(cue.ParsePath("sealed_routing")).Exists() {
 			name, _ := t.LookupPath(cue.ParsePath("target")).String()
 			return fmt.Errorf("%s: target %q: sealed_routing was removed; strict routing is always on — delete the field", path, name)
+		}
+		if tc, _ := t.LookupPath(cue.ParsePath("toolchain")).String(); tc == "shell" &&
+			t.LookupPath(cue.MakePath(cue.Str("config"), cue.Str("observe_command"))).Exists() {
+			name, _ := t.LookupPath(cue.ParsePath("target")).String()
+			return fmt.Errorf("%s: target %q: observe_command was removed; mu no longer does drift detection — delete the field", path, name)
 		}
 	}
 	return nil

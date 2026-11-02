@@ -20,7 +20,7 @@ import (
 // answered (captured in testdata/parity_bb_responses.ndjson) and requires
 // semantically identical responses. Intentional differences, all in
 // discover: the Go plugin declares a config_schema, no longer advertises
-// observe (mu observe is being removed), and is version 0.2.0.
+// observe (the method was removed), and is version 0.2.0.
 func TestParityWithBB(t *testing.T) {
 	p := newPlugin()
 	schemaJSON, err := json.Marshal(p.ConfigSchema)
@@ -56,16 +56,6 @@ func planOne(t *testing.T, target muplugin.TargetInfo) muplugin.ActionSpec {
 		t.Fatalf("got %d actions, want 1", len(resp.Actions))
 	}
 	return resp.Actions[0]
-}
-
-func TestNoObserve(t *testing.T) {
-	resp, err := muplugin.Exchange(context.Background(), newPlugin(), muplugin.Request{Method: "observe", Target: &muplugin.TargetInfo{Name: "//t"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if msg, _ := resp["error"].(string); !strings.Contains(msg, "not supported") {
-		t.Fatalf("observe: %v", resp)
-	}
 }
 
 // TestWrapperPushesFile executes the planned wrapper against a fake ssh

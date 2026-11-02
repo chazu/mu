@@ -120,6 +120,23 @@ All notable changes to mu are recorded here. The format follows
   `ewe_source`, or a `mu.cue` target with `ewe` or `ewe_source`, is now
   rejected with "ewe actions were removed". `mu build --plan --json` no longer
   emits `ewe_digest`, and mu no longer depends on `github.com/chazu/ewe`.
+- `mu observe` and the `observe` plugin method. mu is a build tool; drift
+  detection existed only for pudl, which no longer drives mu. Running
+  `mu observe` prints a removal error, a plugin that still advertises the
+  `observe` capability fails discover with "capability \"observe\" was
+  removed", and a `shell` target with `config.observe_command` fails to load.
+  The SDK drops `Plugin.Observe`, `ObserveRequest`, `ObserveResponse`,
+  `NewObserveRequest` and `Request.Secrets`; the `observe` guide topic is gone.
+- The observe-only `aws` and `host` plugins. k8s, lint and terraform drop
+  their observe handlers (k8s also drops the observe-only `ignore_paths` and
+  `inventory` config). lint's `working_dir`, previously read only by observe,
+  now sets the lint action's `work_dir`.
+- Plugin output schemas. Discover's `output_schema` / `output_schemas` are
+  gone from the SDK, from discover validation and from `mu plugin info`; a
+  plugin that still sends them has them ignored. A plugin `mu.cue` that sets
+  `plugin.schemas` (vendored CUE schema modules) fails to load. Catalog
+  `schemas` / `pudl_mappings` are no longer copied into `mu.lock` or the
+  installed bundle's `mu-plugin.json`. docs/plugin-output-schemas.md is gone.
 
 ## [v0.3.5] — 2026-08-05
 

@@ -25,7 +25,8 @@ CONFIG FIELDS
   env            Complete environment for the command (optional). When
                  unset the action inherits mu's environment (PATH, HOME,
                  ...); when set it replaces it, so include PATH.
-  working_dir    Working directory for the command (optional).
+  working_dir    Working directory for the command, relative to the
+                 project root (optional; becomes the action's work_dir).
 
 EXAMPLES
 
@@ -53,18 +54,10 @@ EXAMPLES
     targets: [{
       target: "//lint"
       toolchain: "shell"
-      kind: "kit"
       sources: []
       deps: ["//lint/go-vet", "//lint/gofmt"]
       config: {command: ["true"], impure: false}
     }]
-
-OBSERVATION
-
-  mu observe //lint/go-vet
-
-  Runs the lint command and returns exit code and output. Convergence
-  decisions are made by the caller — the plugin just reports results.
 
 ACTIONS GENERATED
 
@@ -74,4 +67,4 @@ ACTIONS GENERATED
 
 CAPABILITIES
 
-  discover, plan, observe
+  discover, plan
