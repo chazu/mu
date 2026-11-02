@@ -26,7 +26,9 @@ CONFIG FIELDS
               scheme:path. The scheme must resolve to a plugin
               declaring the store_secret capability.
   derivation  (required) []string — argv whose stdout becomes the
-              stored value.
+              stored value. If it exits non-zero, or its output is
+              empty (after the optional newline strip), the build
+              fails and nothing is stored.
   mode        (optional) "create" | "overwrite" | "create_if_absent"
               (default).
   env         (optional) Extra env vars for the derivation.

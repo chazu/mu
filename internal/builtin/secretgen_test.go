@@ -3,11 +3,14 @@ package builtin
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/chazu/mu/internal/cas/oci"
 	"github.com/chazu/mu/internal/config"
+	"github.com/chazu/mu/internal/dag"
 	"github.com/chazu/mu/internal/plugin"
 )
 
@@ -128,6 +131,97 @@ func TestSecretGenPlan_KeepTrailingNewline(t *testing.T) {
 	value := readFile(t, dir+"/VALUE")
 	if !strings.HasSuffix(value, "hunter2\n") {
 		t.Errorf("stored value = %q, want trailing newline preserved", value)
+	}
+}
+
+// runSecretGen plans a secret-gen target and executes its action through
+// the real executor, returning the values routed to store_secret and the
+// failure error (nil on success).
+func runSecretGen(t *testing.T, cfg map[string]any) ([]string, error) {
+	t.Helper()
+	actions, _, err := SecretGenPlan(config.Target{Name: "//x", Toolchain: "secret-gen", Config: cfg})
+	if err != nil {
+		t.Fatalf("SecretGenPlan: %v", err)
+	}
+	spec := actions[0]
+	env := map[string]string{"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
+	for k, v := range spec.Env {
+		env[k] = v
+	}
+	g := dag.NewGraph()
+	if err := g.AddAction(&dag.Action{
+		ID:                spec.ID,
+		Command:           spec.Command,
+		Env:               env,
+		WorkDir:           t.TempDir(),
+		Impure:            true,
+		SealedOutputs:     spec.SealedOutputs,
+		SealedOutputModes: spec.SealedOutputModes,
+	}); err != nil {
+		t.Fatalf("AddAction: %v", err)
+	}
+	store, err := oci.NewLocal(filepath.Join(t.TempDir(), "cas"))
+	if err != nil {
+		t.Fatalf("oci.NewLocal: %v", err)
+	}
+	var stored []string
+	ex := &dag.Executor{
+		Store:   store,
+		Workers: 1,
+		SealedOutputWriter: func(_ context.Context, _, value, _ string) error {
+			stored = append(stored, value)
+			return nil
+		},
+	}
+	res, err := ex.Execute(context.Background(), g)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(res.Failed) > 0 {
+		return stored, res.Failed[0].Err
+	}
+	return stored, nil
+}
+
+func TestSecretGenExecute(t *testing.T) {
+	cases := []struct {
+		name        string
+		derivation  []any
+		keepNewline bool
+		want        string // stored value; "" means the build must fail
+	}{
+		{"failing derivation", []any{"false"}, false, ""},
+		{"failing derivation keep newline", []any{"false"}, true, ""},
+		{"strips one newline", []any{"printf", `abc\n\n`}, false, "abc\n"},
+		{"strips newline", []any{"printf", `abc\n`}, false, "abc"},
+		{"keep newline", []any{"printf", `abc\n`}, true, "abc\n"},
+		{"empty output", []any{"true"}, false, ""},
+		{"empty output keep newline", []any{"true"}, true, ""},
+		{"only newline", []any{"echo"}, false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stored, err := runSecretGen(t, map[string]any{
+				"ref":                   "pass:x/y",
+				"derivation":            tc.derivation,
+				"keep_trailing_newline": tc.keepNewline,
+			})
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("build succeeded, want failure (stored %q)", stored)
+				}
+				if len(stored) != 0 {
+					t.Fatalf("stored %q on failure, want nothing", stored)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("build failed: %v", err)
+			}
+			if len(stored) != 1 || stored[0] != tc.want {
+				t.Fatalf("stored = %q, want [%q]", stored, tc.want)
+			}
+		})
 	}
 }
 

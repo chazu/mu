@@ -149,7 +149,7 @@ func TestExecuteRechecksSealedOutputPolicyAgainstTamperedPlan(t *testing.T) {
 		Config: &config.ProjectConfig{
 			Targets: []config.Target{{
 				Name: "//secrets/admin", Toolchain: "secret-gen",
-				Config: map[string]any{"ref": "pass:registry/admin", "derivation": []any{"true"}},
+				Config: map[string]any{"ref": "pass:registry/admin", "derivation": []any{"echo", "hunter2"}},
 			}},
 			Secrets: &config.SecretsConfig{WritableRefs: []string{"pass:registry/*"}},
 			Plugins: []config.PluginDef{{Name: "pass", Command: mockPluginCommand(t, "mock_provider.sh")}},
