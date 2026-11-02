@@ -69,8 +69,8 @@ See [`docs/cue-conventions.md`](docs/cue-conventions.md). In short:
 mu build --plan //...           # load, validate and plan without running
 mu build //target               # build; --no-cache to ignore cached results
 mu build --emit-manifest //...  # build and print a JSON manifest (for CI)
-mu target list                  # targets defined in this project
-mu graph //target               # dependency chain (--reverse, --dot, --json)
+mu targets                      # targets defined in this project (--json)
+mu targets --deps //target      # dependency chain (--rdeps, --dot, --json)
 mu plugin list                  # registered plugins; `mu plugin info <name>`
 mu cache ls                     # cached action results; also size, clean, push
 mu guide <topic>                # reference topics; `mu guide` lists them
