@@ -69,8 +69,9 @@ CONFIG FIELDS
               newline matters, e.g. a PEM block whose consumers
               expect it.
 
-  sources, outputs, and network are not used and are ignored if
-  present. The derivation runs without network access.
+  Any other config field, or a field of the wrong type, is a load
+  error. The target's sources are not used. The derivation runs
+  without network access.
 
 PICKING A MODE
 

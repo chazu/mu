@@ -4,6 +4,13 @@
 //   - #ProjectConfig: the root mu.cue of a repository.
 //   - #PluginConfig:  the mu.cue of a plugin directory (has a "plugin" key).
 //
+// Every definition is closed: a field the schema does not declare is a load
+// error, so a typo (writable_ref, sealed_routng) fails instead of being
+// silently ignored. The one open struct is a plugin target's config, which
+// the plugin validates against the config_schema it reports from discover.
+// The builtin shell and secret-gen toolchains have no discover step, so
+// their config is closed here (#ShellConfig, #SecretGenConfig).
+//
 // This schema enforces structural constraints only. Cross-record constraints
 // such as "target names must be unique" and "plugin names must be unique"
 // remain the responsibility of the Go validator in internal/config.
@@ -17,14 +24,15 @@ package mu
 	publish?: #PublishConfig
 	plugins?: [...#PluginDef]
 	secrets?: #SecretsConfig
-	...
+	// A plugin directory's mu.cue is also walked as a sub-config of the
+	// project that contains it, so its manifest key is allowed here.
+	plugin?: #PluginManifest
 }
 
 // #PublishConfig describes the target of `mu build --publish`: repository is
 // the base reference "host/namespace" each target's slug is appended to.
 #PublishConfig: {
 	repository?: string & !=""
-	...
 }
 
 // #SecretsConfig declares project-wide policy for the secret subsystem.
@@ -34,7 +42,6 @@ package mu
 // current behavior). Setting it to [] means "deny all writes".
 #SecretsConfig: {
 	writable_refs?: [...string]
-	...
 }
 
 // #PluginConfig is the schema for a plugin directory's mu.cue.
@@ -43,7 +50,6 @@ package mu
 	plugin: #PluginManifest
 	targets?: [...#Target]
 	toolchains?: [...#Toolchain]
-	...
 }
 
 // #TargetName matches either a fully-qualified label ("//path/to/name")
@@ -56,12 +62,49 @@ package mu
 	toolchain?: string & !=""
 	sources?: [...string]
 	deps?: [...string]
-	config?: {...}
 	sealed_inputs?: {[string]: string}
 	sealed_input_modes?: {[string]: "env" | "file"}
 	sealed_outputs?: {[string]: string}
 	sealed_output_modes?: {[string]: "create" | "overwrite" | "create_if_absent"}
-	...
+
+	// config is free-form for plugin toolchains (the plugin validates it
+	// against its discover config_schema). The builtin toolchains have no
+	// plugin, so the schema closes their config. The branches must be
+	// exclusive: unifying #ShellConfig with an open {...} would reopen it.
+	_builtin: *"" | string
+	if toolchain != _|_ {
+		_builtin: toolchain
+	}
+	if _builtin == "shell" {
+		config!: #ShellConfig
+	}
+	if _builtin == "secret-gen" {
+		config!: #SecretGenConfig
+	}
+	if _builtin != "shell" && _builtin != "secret-gen" {
+		config?: {...}
+	}
+}
+
+// #ShellConfig is the config of a builtin "shell" target (see
+// internal/builtin/shell.go).
+#ShellConfig: {
+	command!: [string, ...string]
+	env?: {[string]: string}
+	network?: bool
+	impure?:  bool
+	outputs?: [...string]
+	host_paths?: [...string]
+	env_passthrough?: [...string]
+}
+
+// #SecretGenConfig is the config of a builtin "secret-gen" target (see
+// internal/builtin/secretgen.go). The destination is the target's single
+// sealed_outputs entry, not a config field.
+#SecretGenConfig: {
+	derivation!: [string, ...string]
+	env?: {[string]: string}
+	keep_trailing_newline?: bool
 }
 
 // #SHA256 is a lowercase 64-character hex digest.
@@ -73,7 +116,6 @@ package mu
 	url?:          string
 	sha256?:       #SHA256
 	strip_prefix?: string
-	...
 }
 
 // #Toolchain describes a toolchain and its base environment.
@@ -81,7 +123,6 @@ package mu
 	toolchain: string & !=""
 	from:      string & !=""
 	config:    #ToolchainConfig
-	...
 }
 
 // #PluginDef describes an external plugin. It must declare exactly one
@@ -126,7 +167,6 @@ package mu
 	path?:   string & !=""
 	remote?: string & !=""
 	push?:   string & !=""
-	...
 }
 
 // #PluginManifest is the "plugin" key in a plugin directory's mu.cue.
@@ -135,5 +175,4 @@ package mu
 	toolchain?: string
 	files?: [...string]
 	guide?: string
-	...
 }

@@ -194,6 +194,8 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	// 5. Validate target configs against plugin schemas.
 	for _, t := range targets {
 		if t.Toolchain == "shell" || t.Toolchain == "secret-gen" {
+			// Builtins have no discover schema; schema.cue checks their
+			// config at load time and the planners reject wrong types.
 			continue
 		}
 		info := mgr.DiscoverInfo(t.Toolchain)

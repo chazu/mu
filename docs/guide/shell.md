@@ -23,6 +23,9 @@ CONFIG FIELDS
   impure            bool (optional, default true) — skip CAS cache.
   outputs           []string (optional) — declared output files.
 
+  config is required. Any other field, or a field of the wrong type
+  (network: "no"), is a load error.
+
   observe_command was removed along with mu observe; a config that still
   sets it fails to load.
 

@@ -27,10 +27,12 @@ import (
 // is silently lost.
 //
 // ctx is an optional leading phrase, such as "unifying mu.cue with
-// #ProjectConfig". root is the unified cue.Value from which target names
-// are looked up; the zero cue.Value (from cue.Value{}) is accepted and
-// simply skips the lookup.
-func formatCueError(ctx string, root cue.Value, err error) error {
+// #ProjectConfig". root is the user's decoded cue.Value, from which target
+// names and fallback positions are looked up; unified is root unified with
+// the schema definition, consulted for the fields a closed struct allows so
+// an unknown field gets a did-you-mean. Either may be the zero cue.Value,
+// which simply skips that lookup.
+func formatCueError(ctx string, root, unified cue.Value, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -44,7 +46,7 @@ func formatCueError(ctx string, root cue.Value, err error) error {
 	lines := make([]string, 0, len(es))
 	seen := make(map[string]bool, len(es))
 	for _, e := range es {
-		l := formatCueDiagnostic(root, e)
+		l := formatCueDiagnostic(root, unified, e)
 		if seen[l] {
 			continue
 		}
@@ -60,10 +62,24 @@ func formatCueError(ctx string, root cue.Value, err error) error {
 }
 
 // formatCueDiagnostic renders a single CUE error as one line.
-func formatCueDiagnostic(root cue.Value, e cueerrors.Error) string {
-	where := describeWhere(root, stripDefPrefix(e.Path()))
+func formatCueDiagnostic(root, unified cue.Value, e cueerrors.Error) string {
+	path := stripDefPrefix(e.Path())
+	where := describeWhere(root, path)
 	hint := rewriteHint(e)
-	pos := describePos(bestPos(e))
+	if format, _ := e.Msg(); format == "field not allowed" {
+		if s := suggestField(unified, path); s != "" {
+			hint += fmt.Sprintf("; did you mean %q?", s)
+		}
+	}
+	p := bestPos(e)
+	if !p.IsValid() || isSchemaFile(p.Filename()) {
+		// A missing required field has no position in the user's file;
+		// point at the nearest enclosing value the user did write.
+		if up := ancestorPos(root, path); up.IsValid() {
+			p = up
+		}
+	}
+	pos := describePos(p)
 	var b strings.Builder
 	if where != "" {
 		b.WriteString(where)
@@ -160,7 +176,7 @@ func rewriteHint(e cueerrors.Error) string {
 	format, args := e.Msg()
 	switch {
 	case format == "field not allowed":
-		return "unexpected field (closed struct does not permit it)"
+		return "unknown field"
 	case format == "field is required but not present":
 		return "missing required field"
 	case strings.HasPrefix(format, "conflicting values ") &&
@@ -219,6 +235,99 @@ func rewriteHint(e cueerrors.Error) string {
 	}
 	// Fallback: render raw format with its args.
 	return fmt.Sprintf(format, args...)
+}
+
+// suggestField returns the field allowed at path's parent in unified whose
+// name is closest to path's last segment, or "" when none is close enough
+// to be a likely typo.
+func suggestField(unified cue.Value, path []string) string {
+	if !unified.Exists() || len(path) == 0 {
+		return ""
+	}
+	bad := path[len(path)-1]
+	parent := unified.LookupPath(selectorPath(path[:len(path)-1]))
+	if !parent.Exists() {
+		return ""
+	}
+	it, err := parent.Fields(cue.Optional(true))
+	if err != nil {
+		return ""
+	}
+	maxDist := 2
+	if len(bad) <= 4 {
+		maxDist = 1
+	}
+	best, bestDist := "", maxDist+1
+	for it.Next() {
+		name := it.Selector().Unquoted()
+		if name == bad || !parent.Allows(cue.Str(name)) {
+			continue
+		}
+		if d := editDistance(bad, name); d < bestDist || (d == bestDist && name < best) {
+			best, bestDist = name, d
+		}
+	}
+	return best
+}
+
+// ancestorPos returns the position of the nearest value along path (the
+// path itself first, then each parent) that exists in root and has a
+// position, or token.NoPos.
+func ancestorPos(root cue.Value, path []string) token.Pos {
+	if !root.Exists() {
+		return token.NoPos
+	}
+	for n := len(path); n > 0; n-- {
+		if v := root.LookupPath(selectorPath(path[:n])); v.Exists() {
+			if p := v.Pos(); p.IsValid() {
+				return p
+			}
+		}
+	}
+	return token.NoPos
+}
+
+// selectorPath turns error-path segments into a cue.Path, treating numeric
+// segments as list indices.
+func selectorPath(segs []string) cue.Path {
+	sels := make([]cue.Selector, 0, len(segs))
+	for _, s := range segs {
+		if isNumeric(s) {
+			n, _ := strconv.Atoi(s)
+			sels = append(sels, cue.Index(n))
+			continue
+		}
+		sels = append(sels, cue.Str(s))
+	}
+	return cue.MakePath(sels...)
+}
+
+// editDistance is the optimal-string-alignment distance between a and b:
+// insertions, deletions, substitutions, and adjacent transpositions each
+// cost 1.
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	d := make([][]int, len(ra)+1)
+	for i := range d {
+		d[i] = make([]int, len(rb)+1)
+		d[i][0] = i
+	}
+	for j := range d[0] {
+		d[0][j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
+			if i > 1 && j > 1 && ra[i-1] == rb[j-2] && ra[i-2] == rb[j-1] {
+				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+			}
+		}
+	}
+	return d[len(ra)][len(rb)]
 }
 
 // fmtArg formats a single CUE diagnostic argument. CUE hands us types

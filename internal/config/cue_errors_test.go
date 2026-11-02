@@ -19,6 +19,7 @@ func TestFormatCueError_Golden(t *testing.T) {
 		"missing_required",
 		"regex_mismatch",
 		"closed_struct",
+		"unknown_field",
 	}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
