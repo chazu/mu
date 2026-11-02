@@ -17,6 +17,12 @@ All notable changes to mu are recorded here. The format follows
 
 ### Fixed
 
+- Action cache keys no longer depend on where the project is checked out.
+  The key hashed the absolute work directory and project root, so two
+  checkouts of the same commit (or two machines sharing a remote cache) never
+  shared entries. It now hashes the work directory relative to the project
+  root (action-key encoding v4). Existing action results miss once and
+  rebuild; no migration is needed, and stored blobs remain reusable.
 - Pure actions that consume another action's output now miss the cache when
   that output changes. Upstream-produced inputs (`{action:id}` refs and a
   dependency's output paths) used to hash as a zero placeholder, so a

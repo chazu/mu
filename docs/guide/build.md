@@ -107,7 +107,8 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
   direct host operations. Explicit env maps, including {}, replace inheritance.
   VM and sandbox execution never imports arbitrary parent variables.
 
-  Coordinator actions carry project_root in plan-v2 and cache identity.
+  Coordinator actions carry project_root in plan-v2; cache identity uses only
+  the work directory relative to it, so it does not depend on checkout path.
   Working-directory resolution permits internal relative symlinks and rejects
   external links. Execution reopens and pins the directory before cache or
   provider access; the child uses fchdir on its inherited descriptor. Relative

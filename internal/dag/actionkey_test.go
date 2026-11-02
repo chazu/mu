@@ -1,6 +1,7 @@
 package dag_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/chazu/mu/internal/cas"
@@ -252,5 +253,41 @@ func TestActionKey_SealedOutputModeAffectsKey(t *testing.T) {
 	a2.SealedOutputModes = map[string]string{"TOKEN": "overwrite"}
 	if dag.ComputeActionKey(a1) == dag.ComputeActionKey(&a2) {
 		t.Fatal("sealed output store mode must affect action key")
+	}
+}
+
+// --- mu-bei.5: the checkout location must not enter the cache key ---
+
+func checkoutAction(root, rel string) *dag.Action {
+	a := baseAction()
+	a.ProjectRoot = root
+	a.WorkDir = filepath.Join(root, rel)
+	return a
+}
+
+func TestActionKey_IndependentOfCheckoutPath(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	for _, rel := range []string{".", "pkg/app"} {
+		if dag.ComputeActionKey(checkoutAction(first, rel)) != dag.ComputeActionKey(checkoutAction(second, rel)) {
+			t.Fatalf("work_dir %q: identical projects at different paths have different keys", rel)
+		}
+	}
+	// An empty WorkDir means the project root, as the coordinator resolves it.
+	implicit := checkoutAction(first, ".")
+	implicit.WorkDir = ""
+	if dag.ComputeActionKey(implicit) != dag.ComputeActionKey(checkoutAction(second, ".")) {
+		t.Fatal("empty work_dir and project-root work_dir have different keys")
+	}
+}
+
+func TestActionKey_RelativeWorkDirAffectsKey(t *testing.T) {
+	root := t.TempDir()
+	keys := map[cas.ActionKey]string{}
+	for _, rel := range []string{".", "a", "b", "a/b"} {
+		key := dag.ComputeActionKey(checkoutAction(root, rel))
+		if prev, dup := keys[key]; dup {
+			t.Fatalf("work_dirs %q and %q have the same key", prev, rel)
+		}
+		keys[key] = rel
 	}
 }

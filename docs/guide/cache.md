@@ -17,13 +17,16 @@ HOW CACHING WORKS
   - Sorted declared output paths and sandbox source paths
   - Network flag
   - Impure flag
-  - Work directory and coordinator project root
+  - Work directory relative to the project root (slash-separated). The
+    project root itself is not hashed, so the same commit checked out at
+    different paths, or on different machines, shares cache entries.
   - Sealed-input refs and modes (NOT values)
   - Sealed-output destination refs and effective store modes
 
   Action-key encoding v3 records the clean-environment and rooted-execution
-  contract. Upgrading invalidates previous action results once; regenerate
-  saved exact-plan approvals. Content-addressed blobs remain reusable.
+  contract. v4 hashes the project-relative work directory instead of the
+  absolute work directory and project root. Each upgrade invalidates previous
+  action results once; content-addressed blobs remain reusable.
 
   Key encoding is versioned and length-prefixed, so embedded newlines or
   separators in arguments and metadata cannot alias another action. This
