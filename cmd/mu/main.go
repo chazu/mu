@@ -63,7 +63,7 @@ func run(cmd string, args []string) int {
 	case "observe":
 		return runObserve(args)
 	case "verify":
-		return runVerify(args)
+		return runVerifyMoved()
 	case "guide":
 		return runGuide(args)
 	case "version":
@@ -103,7 +103,6 @@ Commands:
   targets    List targets and their dependency chains (alias t)
   plugin (p) List and inspect plugins
   observe    Check current state of targets (drift detection)
-  verify     Re-hash CAS blobs, check schema namespace conventions, report issues
   guide      Quick-reference guides for mu features
   version    Print the mu version
   help       Show help for mu or a command (mu help <command> [<subcommand>])

@@ -27,7 +27,7 @@
 // `.(int)` was performed on 2026-04-23. Only three float64 assertions were
 // found, none of them operating on config-originating values:
 //
-//   - cmd/mu/verify_test.go:158       — reads JSON stdout of `mu verify
+//   - cmd/mu/cache_verify_test.go     — reads JSON stdout of `mu cache verify
 //                                        --json`; always goes through
 //                                        encoding/json, never CUE. Left as-is.
 //

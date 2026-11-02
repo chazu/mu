@@ -449,7 +449,8 @@ Commands:
   ls        List cached action results and toolchains
   inspect   Show details of a cached item
   size      Show total cache disk usage
-  clean     Remove unreachable blobs (GC)
+  clean     Remove unreachable blobs (GC) and stale plugin versions
+  verify    Re-hash blobs and check action results (--fix repairs)
   push      Push the cached results of [targets] (default //...) to cache.push
 
 Registry credentials: mu login <host> / mu logout <host>.`)
@@ -465,6 +466,8 @@ Registry credentials: mu login <host> / mu logout <host>.`)
 		return runCacheSize(args[1:])
 	case "clean":
 		return runCacheClean(args[1:])
+	case "verify":
+		return runCacheVerify(args[1:])
 	case "push":
 		return runCachePush(args[1:])
 	case "login", "logout":

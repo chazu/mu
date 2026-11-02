@@ -133,7 +133,7 @@ func TestCommandFlagSets(t *testing.T) {
 		{[]string{"scratch"}, "config no-cache offline"},
 		{[]string{"observe"}, "config json ndjson offline verbose"},
 		{[]string{"targets"}, "config deps dot json offline rdeps"},
-		{[]string{"verify"}, "fix json"},
+		{[]string{"cache", "verify"}, "config fix json"},
 		{[]string{"plugin", "list"}, "config json offline"},
 		{[]string{"plugin", "info"}, "config digest json offline"},
 		{[]string{"plugin", "install"}, "catalog config offline"},

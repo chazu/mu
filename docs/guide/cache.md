@@ -116,6 +116,8 @@ INSPECTING THE CACHE
   mu cache clean --all-plugins     Also keep only the newest version of every
                                    installed plugin.
   mu cache clean --dry-run         Report what would be removed.
+  mu cache verify [--fix]          Check blob and result integrity (see
+                                   VERIFYING CACHE INTEGRITY).
 
   GC roots are the action results plus the plugin bundle digests the
   project pins (mu.lock bundle_digest, mu.cue plugin digest).
@@ -163,9 +165,19 @@ VERIFYING CACHE INTEGRITY
   tampering) fails the read and is deleted, so a cached action re-executes
   and the next lookup re-fetches or rebuilds instead of reusing it.
 
-  mu verify                        Re-hash all blobs, report corruption.
-  mu verify --json                 Output as JSON.
-  mu verify --fix                  Delete corrupt blobs.
+  mu cache verify                  Re-hash all blobs and check that every
+                                   action result's outputs (and a toolchain
+                                   receipt's artifacts) are present and intact.
+                                   Exits 1 on any problem.
+  mu cache verify --fix            Delete corrupt blobs and every action
+                                   result that references a corrupt or missing
+                                   blob (or cannot be read); those actions
+                                   rebuild next time. Exits 0 once the
+                                   remaining cache is consistent.
+  mu cache verify --json           Output as JSON.
+
+  --fix holds the cache lock exclusively, like clean. The old top-level
+  `mu verify` now only points here.
 
 REMOTE CACHE
 

@@ -65,7 +65,7 @@ const (
 )
 
 // resolveOpts selects which heavy resources Resolve should materialize.
-// Light subcommands (e.g. mu cache, mu verify) skip project-root / config
+// Light subcommands (e.g. the mu cache inspection commands) skip project-root / config
 // entirely.
 type resolveOpts struct {
 	NeedProjectRoot bool
