@@ -30,6 +30,7 @@ func TestActionKey_PureDefaultEqualsExplicitCleanEnvironment(t *testing.T) {
 }
 
 func TestActionKey_BareAndEmptySandboxDiffer(t *testing.T) {
+	t.Setenv(dag.SandboxEnvVar, "") // with MU_SANDBOX=1 both would be sandboxed
 	a, b := baseAction(), baseAction()
 	b.Toolchain = map[string]cas.Digest{}
 	if dag.ComputeActionKey(a) == dag.ComputeActionKey(b) {

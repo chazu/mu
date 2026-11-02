@@ -188,7 +188,7 @@ func TestSandboxedActionUpstreamOutputs(t *testing.T) {
 		ID:           "by-path",
 		Command:      []string{"sh", "-c", "cat gen/gen.txt > copy.txt"},
 		Inputs:       map[string]cas.Digest{"gen": {}},
-		InputSources: map[string]dag.InputSource{"gen": {ProducerID: "gen", OutputPath: "gen/gen.txt"}},
+		InputSources: map[string]dag.InputSource{"gen": {ProducerID: "gen", OutputPath: "gen.txt"}},
 		InputPaths:   map[string]string{"gen": "gen/gen.txt"},
 		Outputs:      []string{"copy.txt"}, Env: map[string]string{}, DependsOn: []string{"gen"},
 		ProjectRoot: project, WorkDir: project,

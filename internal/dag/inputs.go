@@ -76,23 +76,12 @@ func (c completedAction) outputDigest(path string) (cas.Digest, error) {
 	if d, ok := c.outputs[path]; ok && !d.IsZero() {
 		return d, nil
 	}
-	// The consumer may spell the path differently: "./x" vs "x", or
-	// project-relative ("sub/x") for a producer whose work_dir is "sub". The
-	// coordinator matches producers on cleaned project paths; do the same.
-	sub, subErr := workSubdir(c.action)
-	for _, declared := range c.action.Outputs {
-		same := filepath.Clean(declared) == filepath.Clean(path)
-		if !same && subErr == nil && !filepath.IsAbs(declared) {
-			same = filepath.Join(sub, declared) == filepath.Clean(path)
-		}
-		if !same {
-			continue
-		}
-		if d := c.outputs[declared]; !d.IsZero() {
+	// The consumer may spell the path differently ("./x" vs "x"); the
+	// coordinator matches producers on cleaned paths, so do the same here.
+	for declared, d := range c.outputs {
+		if filepath.Clean(declared) == filepath.Clean(path) && !d.IsZero() {
 			return d, nil
 		}
-		path = declared
-		break
 	}
 	f, closeFn, err := openActionOutput(c.action, path)
 	if err != nil {

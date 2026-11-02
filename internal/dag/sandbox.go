@@ -185,11 +185,10 @@ func (e *Executor) sandboxInputs(a *Action) ([]sandboxInput, error) {
 			}
 			continue
 		}
+		// InputSource.OutputPath is the producer's own spelling (relative to
+		// its work_dir); InputPaths holds the consumer's project path.
 		path, ok := a.InputPaths[name]
-		if !ok && upstream {
-			path = src.OutputPath
-		}
-		if !ok && !upstream {
+		if !ok {
 			return nil, fmt.Errorf("input %q has no project path and cannot be placed in the sandbox", name)
 		}
 		files = append(files, sandboxInput{name, filepath.Clean(filepath.FromSlash(path)), a.Inputs[name], upstream})
