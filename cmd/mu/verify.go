@@ -14,7 +14,7 @@ import (
 func runVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	ctx := newCLIContext("verify", fs)
+	ctx := newCLIContext("verify", fs, useJSON)
 	fix := fs.Bool("fix", false, "delete corrupt blobs")
 	if code, ok := parseFlags(fs, args, "verify [flags]"); !ok {
 		return code

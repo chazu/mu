@@ -20,7 +20,7 @@ const targetsSynopsis = "targets [flags] [pattern...]\n       mu targets [flags]
 func runTargets(args []string) int {
 	fs := flag.NewFlagSet("targets", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("targets", fs)
+	cli := newCLIContext("targets", fs, useConfig, useJSON, useOffline)
 	deps := fs.String("deps", "", "show the dependency chain of `target` (what it depends on)")
 	rdeps := fs.String("rdeps", "", "show the reverse dependency chain of `target` (what depends on it)")
 	dot := fs.Bool("dot", false, "emit Graphviz DOT format")

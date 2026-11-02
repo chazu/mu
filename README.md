@@ -148,7 +148,8 @@ mu guide      Quick-reference help topics
 mu version
 ```
 
-Shared flags: `--json`, `--verbose`, `--config PATH`.
+Common flags, on the commands that use them: `--config PATH`, `--json`,
+`--verbose`, `--offline`. Run `mu <command> -h` for a command's flags.
 
 Plugins are distributed through the official GitHub release catalog.
 Use `mu plugin install NAME[@VERSION]` to download and verify a release

@@ -27,7 +27,7 @@ func defaultPluginCatalogURL() string {
 func runPluginInstall(args []string) int {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin install", fs)
+	cli := newCLIContext("plugin install", fs, useConfig, useOffline)
 	catalogURL := fs.String("catalog", defaultPluginCatalogURL(), "catalog URL (or MU_PLUGIN_CATALOG)")
 	if code, ok := parseFlags(fs, args, "plugin install [flags] <name[@version]>"); !ok {
 		return code

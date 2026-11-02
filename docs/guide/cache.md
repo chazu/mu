@@ -112,6 +112,9 @@ INSPECTING THE CACHE
                                    and stale staging (see below).
   mu cache clean --dry-run         Report what would be removed.
 
+  ls, inspect, size and clean read ~/.mu/cache. With --config PATH they
+  read the cache.path set in that mu.cue instead (when it sets one).
+
 STAGING AND CRASH CLEANUP
 
   mu writes temporary files next to their destination and publishes them
