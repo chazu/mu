@@ -18,6 +18,8 @@ HOW CACHING WORKS
   - Sorted input paths (where each input lands in the sandbox work tree)
   - Sorted toolchain artifact paths and digests, and whether the action runs
     sandboxed (MU_SANDBOX=1 or named toolchains) or bare
+  - Sorted granted host_paths, each with its identity (a file's content
+    digest; only the path for a directory)
   - Sorted declared output paths
   - Network flag
   - Impure flag

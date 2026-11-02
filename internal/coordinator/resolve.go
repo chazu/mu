@@ -123,6 +123,11 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			return nil, err
 		}
 
+		hostPaths, err := resolveHostPaths(spec)
+		if err != nil {
+			return nil, err
+		}
+
 		workDir := projectRoot
 		if spec.WorkDir != "" {
 			workDir = filepath.Join(projectRoot, spec.WorkDir)
@@ -225,6 +230,7 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			InputSources:      inputSources,
 			InputPaths:        inputPaths,
 			Toolchain:         toolchain,
+			HostPaths:         hostPaths,
 			Outputs:           spec.Outputs,
 			DependsOn:         dependsOn,
 			Env:               env,
@@ -312,6 +318,57 @@ func resolveEnvPassthrough(spec plugin.ActionSpec) ([]string, error) {
 		seen[name] = struct{}{}
 	}
 	return append([]string(nil), spec.EnvPassthrough...), nil
+}
+
+// resolveHostPaths validates an action's host_paths and records an identity
+// for each: "file:<digest>" for a regular file (its content, read through
+// symlinks), "dir" for a directory. A directory's contents are not hashed:
+// granting one means trusting that host directory, as documented in
+// `mu guide protocol`. Paths must be absolute and clean, and "/" is refused
+// because granting it would undo the sandbox's confinement.
+func resolveHostPaths(spec plugin.ActionSpec) (map[string]string, error) {
+	if len(spec.HostPaths) == 0 {
+		return nil, nil
+	}
+	paths := make(map[string]string, len(spec.HostPaths))
+	for _, p := range spec.HostPaths {
+		// Clean leaves no ".." in an absolute path, so this also rejects them.
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+			return nil, fmt.Errorf("action %q host_paths: %q must be an absolute, clean path (no \"..\")", spec.ID, p)
+		}
+		if filepath.Dir(p) == p {
+			return nil, fmt.Errorf("action %q host_paths: granting %s would disable sandbox confinement", spec.ID, p)
+		}
+		if _, dup := paths[p]; dup {
+			return nil, fmt.Errorf("action %q host_paths: duplicate path %q", spec.ID, p)
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, fmt.Errorf("action %q host_paths: %w", spec.ID, err)
+		}
+		switch {
+		case info.IsDir():
+			paths[p] = "dir"
+		case info.Mode().IsRegular():
+			d, err := hashHostFile(p)
+			if err != nil {
+				return nil, fmt.Errorf("action %q host_paths: %w", spec.ID, err)
+			}
+			paths[p] = "file:" + d.String()
+		default:
+			return nil, fmt.Errorf("action %q host_paths: %s is neither a file nor a directory", spec.ID, p)
+		}
+	}
+	return paths, nil
+}
+
+func hashHostFile(path string) (cas.Digest, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return cas.Digest{}, err
+	}
+	defer f.Close()
+	return cas.ComputeDigest(f)
 }
 
 // openProjectFile allows project-relative paths and absolute paths lexically

@@ -45,12 +45,13 @@ func (s *Sandbox) execIsolated(ctx context.Context, command []string, env map[st
 	}
 
 	cfg := initConfig{
-		RootDir: s.rootDir,
-		WorkDir: s.workDir,
-		Cwd:     s.VisiblePath(filepath.Join("work", s.cwdRel)),
-		Command: command,
-		Env:     s.namespaceEnv(env),
-		Network: network,
+		RootDir:   s.rootDir,
+		WorkDir:   s.workDir,
+		Cwd:       s.VisiblePath(filepath.Join("work", s.cwdRel)),
+		Command:   command,
+		Env:       s.namespaceEnv(env),
+		Network:   network,
+		HostPaths: s.HostPaths,
 	}
 
 	cfgJSON, err := json.Marshal(cfg)
@@ -110,6 +111,8 @@ type initConfig struct {
 	Command []string `json:"command"`
 	Env     []string `json:"env"`
 	Network bool     `json:"network"`
+	// HostPaths are bind-mounted read-only at the same path in the new root.
+	HostPaths []string `json:"host_paths,omitempty"`
 }
 
 // RunInit is called early in main() when os.Args[1] == "__sandbox_init__".
@@ -149,6 +152,13 @@ func RunInit() {
 		fatal("mount private /proc: %v", err)
 	}
 
+	// Granted host paths, read-only at the same path inside the new root.
+	for _, p := range cfg.HostPaths {
+		if err := bindReadOnly(p, filepath.Join(cfg.RootDir, p)); err != nil {
+			fatal("grant host path %s: %v", p, err)
+		}
+	}
+
 	// 5. pivot_root
 	putold := filepath.Join(cfg.RootDir, ".pivot_root")
 	os.MkdirAll(putold, 0o700)
@@ -166,8 +176,9 @@ func RunInit() {
 	os.RemoveAll("/.pivot_root")
 
 	// Separate writable mounts before making the root mount read-only.
+	// Recursive, so read-only grants nested under them stay visible.
 	for _, dir := range []string{"/work", "/out", "/tmp"} {
-		if err := syscall.Mount(dir, dir, "", syscall.MS_BIND, ""); err != nil {
+		if err := syscall.Mount(dir, dir, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
 			fatal("bind writable %s: %v", dir, err)
 		}
 	}
@@ -204,6 +215,30 @@ func RunInit() {
 	if err := syscall.Exec(argv0, cfg.Command, cfg.Env); err != nil {
 		fatal("exec %s: %v", argv0, err)
 	}
+}
+
+// bindReadOnly bind-mounts the host path src at dst (creating a mount point
+// of the same kind) and remounts it read-only.
+func bindReadOnly(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		err = os.MkdirAll(dst, 0o755)
+	} else if err = os.MkdirAll(filepath.Dir(dst), 0o755); err == nil {
+		var f *os.File
+		if f, err = os.OpenFile(dst, os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			err = f.Close()
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err := syscall.Mount(src, dst, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+		return err
+	}
+	return syscall.Mount("", dst, "", syscall.MS_REMOUNT|syscall.MS_BIND|syscall.MS_RDONLY, "")
 }
 
 func setupMinimalDev(rootfs string) {

@@ -42,6 +42,12 @@ type Sandbox struct {
 	// Stdout overrides where the sandboxed command's stdout is written.
 	// Nil means os.Stdout.
 	Stdout io.Writer
+
+	// HostPaths are absolute host paths (files or directories) the command
+	// may read and execute: Seatbelt allows them in the profile, Linux
+	// namespaces bind-mount them read-only at the same path. Copy isolation
+	// confines nothing, so they need no grant there.
+	HostPaths []string
 }
 
 // Level returns the actual isolation level achieved by this sandbox.

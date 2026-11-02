@@ -72,6 +72,12 @@ type Action struct {
 	// Toolchain sandboxes a pure action even when MU_SANDBOX is off.
 	Toolchain map[string]cas.Digest
 
+	// HostPaths maps absolute host paths granted read+exec inside the
+	// sandbox to an identity of what they pointed at when planned:
+	// "file:<digest>" for a regular file, "dir" for a directory (the
+	// directory's contents are trusted, not hashed). Both enter the action key.
+	HostPaths map[string]string
+
 	// InputPaths maps file input names to their project-relative,
 	// slash-separated paths. A sandboxed action finds each such input at
 	// work/<path>; the sandbox's work tree mirrors the project root. Inputs

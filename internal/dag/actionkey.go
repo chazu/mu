@@ -58,6 +58,9 @@ func ComputeActionKey(a *Action) cas.ActionKey {
 	for _, name := range sortedKeys(a.Toolchain) {
 		field("toolchain", name, a.Toolchain[name].String())
 	}
+	for _, path := range sortedKeys(a.HostPaths) {
+		field("host_path", path, a.HostPaths[path])
+	}
 	field("sandbox", strconv.FormatBool(a.Sandboxed()))
 	for _, name := range sortedStrings(a.Outputs) {
 		field("output", name)

@@ -6,6 +6,24 @@ import (
 	"github.com/chazu/mu/internal/config"
 )
 
+func TestShellPlan_HostPaths(t *testing.T) {
+	target := config.Target{
+		Name: "//tool", Toolchain: "shell",
+		Config: map[string]any{"command": []any{"cowsay"}, "impure": false, "host_paths": []any{"/opt/homebrew/bin"}},
+	}
+	actions, _, err := ShellPlan(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := actions[0].HostPaths; len(got) != 1 || got[0] != "/opt/homebrew/bin" {
+		t.Fatalf("HostPaths = %v", got)
+	}
+	target.Config["host_paths"] = "/opt/homebrew/bin"
+	if _, _, err := ShellPlan(target); err == nil {
+		t.Fatal("string host_paths accepted")
+	}
+}
+
 func TestShellPlan_BasicCommand(t *testing.T) {
 	target := config.Target{
 		Name:      "//deploy",

@@ -22,6 +22,10 @@ CONFIG FIELDS
   network           bool (optional, default false) — allow network access.
   impure            bool (optional, default true) — skip CAS cache.
   outputs           []string (optional) — declared output files.
+  host_paths        []string (optional) — absolute host paths (files or
+                    directories) the command may read and execute inside
+                    the sandbox, e.g. ["/opt/homebrew/bin"] for a pure
+                    target running a Homebrew tool. See `mu guide protocol`.
   observe_command   []string (optional) — command for drift detection.
 
 AGGREGATION TARGETS

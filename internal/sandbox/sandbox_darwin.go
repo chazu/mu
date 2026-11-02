@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func detectIsolation() IsolationLevel {
@@ -130,12 +131,37 @@ func (s *Sandbox) generateSBPL(network bool) string {
   (global-name "com.apple.system.notification_center"))
 (allow signal (target self))
 `
+	if grants := s.hostPathRules(); grants != "" {
+		profile += "\n;; Granted host paths (host_paths)\n" + grants
+	}
 	if network {
 		profile += "\n;; Network allowed\n(allow network-outbound)\n(allow network-bind)\n"
 	} else {
 		profile += "\n;; Network denied\n(deny network-outbound)\n(deny network-inbound)\n(deny network-bind)\n"
 	}
 	return profile
+}
+
+// hostPathRules allows read and exec of each granted host path. The kernel
+// matches real paths, so a path behind a symlink (/var -> /private/var,
+// /opt/homebrew/bin/go -> ../Cellar/...) is granted under both spellings.
+func (s *Sandbox) hostPathRules() string {
+	var b strings.Builder
+	for _, p := range s.HostPaths {
+		paths := []string{p}
+		if real, err := filepath.EvalSymlinks(p); err == nil && real != p {
+			paths = append(paths, real)
+		}
+		for _, path := range paths {
+			fmt.Fprintf(&b, "(allow file-read* process-exec (subpath %s))\n", sbplString(path))
+		}
+	}
+	return b.String()
+}
+
+// sbplString quotes s as an SBPL string literal.
+func sbplString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // IsSandboxInit always returns false on macOS (no re-exec pattern needed).

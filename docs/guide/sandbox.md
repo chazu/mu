@@ -23,6 +23,10 @@ WHAT A SANDBOXED ACTION SEES
     tmp/             $TMPDIR
     sealed/          file-mode sealed inputs (0600), removed right after exit
 
+  Host paths named in the action's "host_paths" are readable and executable
+  at their own absolute paths (read-only); nothing else from the host is,
+  apart from the platform's system directories.
+
   Without a declared PATH the action gets bin/ plus /usr/bin:/bin. After the
   command exits, each declared output is taken from out/ or the working
   directory and copied back to the host work directory. Outputs must be

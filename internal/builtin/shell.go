@@ -20,6 +20,8 @@ import (
 //   - network:         bool (optional, default false) — allow network access
 //   - impure:          bool (optional, default true) — skip CAS cache
 //   - outputs:         []string (optional) — declared output files
+//   - host_paths:      []string (optional) — absolute host paths granted
+//     read+exec inside the sandbox (pure actions; see ActionSpec.HostPaths)
 //   - observe_command: []string (optional) — command for drift detection
 func ShellPlan(target config.Target) ([]plugin.ActionSpec, map[string]string, error) {
 	cfg := target.Config
@@ -45,6 +47,10 @@ func ShellPlan(target config.Target) ([]plugin.ActionSpec, map[string]string, er
 
 	// Parse optional outputs.
 	outputs, _ := parseStringSlice(cfg, "outputs")
+	hostPaths, err := parseStringSlice(cfg, "host_paths")
+	if err != nil {
+		return nil, nil, fmt.Errorf("shell target %q: %w", target.Name, err)
+	}
 
 	// Build input map from target sources (hashed for action key).
 	inputs := make(map[string]string, len(target.Sources))
@@ -60,6 +66,8 @@ func ShellPlan(target config.Target) ([]plugin.ActionSpec, map[string]string, er
 		Env:     env,
 		Network: network,
 		Impure:  impure,
+
+		HostPaths: hostPaths,
 	}
 
 	return []plugin.ActionSpec{action}, nil, nil
