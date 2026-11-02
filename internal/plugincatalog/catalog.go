@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/registryhttp"
 )
 
@@ -233,7 +232,7 @@ func (c *Catalog) Select(name, version string) (Plugin, error) {
 
 // DownloadAsset fetches one catalog asset and verifies its SHA-256 hash.
 func DownloadAsset(ctx context.Context, p Plugin, destPath string) error {
-	if err := builtin.ForgeFetch(ctx, p.AssetURL, p.SHA256, destPath); err != nil {
+	if err := registryhttp.Fetch(ctx, p.AssetURL, p.SHA256, destPath); err != nil {
 		return fmt.Errorf("download plugin %q: %w", p.Name, err)
 	}
 	return nil

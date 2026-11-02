@@ -16,10 +16,10 @@ import (
 	"strings"
 
 	"github.com/chazu/mu/internal/archive"
-	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 // Builder fetches, extracts, verifies, and registers toolchains.
@@ -81,7 +81,7 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 		return err == nil && actual.Hash == tc.Config.SHA256
 	}()
 	if !cached {
-		if err := builtin.ForgeFetch(ctx, tc.Config.URL, tc.Config.SHA256, archivePath); err != nil {
+		if err := registryhttp.Fetch(ctx, tc.Config.URL, tc.Config.SHA256, archivePath); err != nil {
 			return fmt.Errorf("required toolchain archive unavailable locally: %w", err)
 		}
 	}

@@ -64,7 +64,14 @@ IMPLICIT CONTRACTS
 FAILURE MODES
 
   SHA-256 mismatch
-    ForgeFetch aborts. Fix the sha256 in mu.cue.
+    The download aborts without retrying. Fix the sha256 in mu.cue.
+
+  Download fails
+    Network errors and HTTP 5xx/429 are retried 3 times with backoff;
+    any other non-200 status (404, 403, ...) fails at once with the
+    status in the error. A download larger than 4 GiB is rejected
+    (raise with MU_ARCHIVE_MAX_BYTES, see EXTRACTION LIMITS). Errors
+    show the URL without its query string or credentials.
 
   Unknown archive extension
     Falls back to extractRawBinary: copies the file to

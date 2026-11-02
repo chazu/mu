@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/chazu/mu/internal/archive"
-	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/plugin"
@@ -489,8 +488,8 @@ func (r *PluginResolver) resolveRemote(ctx context.Context, p config.PluginDef) 
 		tmp.Close()
 		defer os.Remove(tmpPath)
 
-		if err := builtin.ForgeFetch(ctx, p.URL, p.SHA256, tmpPath); err != nil {
-			return nil, fmt.Errorf("fetch %s: %w", p.URL, err)
+		if err := registryhttp.Fetch(ctx, p.URL, p.SHA256, tmpPath); err != nil {
+			return nil, fmt.Errorf("fetch plugin %q: %w", p.Name, err)
 		}
 
 		f, err := os.Open(tmpPath)
