@@ -1,6 +1,6 @@
 unifying mu.cue with #ProjectConfig:
-  field combination rejected by schema disjunction at schema.cue:104:13
-  field combination rejected by schema disjunction at schema.cue:113:13
-  field combination rejected by schema disjunction at schema.cue:119:13
-  field combination rejected by schema disjunction at schema.cue:97:12
+  field combination rejected by schema disjunction at schema.cue:101:13
+  field combination rejected by schema disjunction at schema.cue:110:13
+  field combination rejected by schema disjunction at schema.cue:116:13
+  field combination rejected by schema disjunction at schema.cue:94:12
   plugins[0]: no disjunction variant accepts this value

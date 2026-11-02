@@ -112,9 +112,6 @@ Plugins receive **toolchain artifacts** in plan requests — the content-address
 binaries and files that were produced by the scratch build. This is how a Go
 plugin knows where the `go` binary lives.
 
-Targets with a `plan` field (a pith VM program) skip plugin dispatch entirely —
-the coordinator interprets the inline program instead.
-
 ### 4. Target
 
 A declared build unit. Defined in `mu.cue`. A target says "I want to build
@@ -129,9 +126,6 @@ Target = {
   config:         map[any]            # plugin-specific configuration
   sealed_inputs:  map[name -> ref]    # secret references resolved at runtime
   sealed_outputs: map[name -> ref]    # secret capture destinations
-  sealed_routing: "strict" | unset    # explicit vs convenience action routing
-  plan:           pith.#Program       # inline planning (optional, replaces plugin dispatch)
-  transform:      pith.#Program       # inter-target data reshaping (optional)
 }
 ```
 
@@ -139,10 +133,10 @@ The coordinator resolves targets into a dependency-ordered list, asks each
 target's plugin to plan it, and merges the resulting action subgraphs into a
 single global DAG.
 
-Target sealed maps are capability availability, not secret values. In default
-mode the coordinator retains legacy inheritance conveniences. In strict mode,
-each action must explicitly claim exact declared refs/modes; all inputs must be
-used and every output must have one writer. Planning validates this routing
+Target sealed maps are capability availability, not secret values. Each action
+must explicitly claim exact declared refs/modes; all inputs must be used and
+every output must have one writer. The only implicit claim: a plan with exactly
+one action and no claims gets the target's maps. Planning validates this routing
 without resolving providers. Resolution happens only when an action executes.
 
 Targets can depend on other targets. When target A depends on target B, B's
@@ -200,8 +194,8 @@ internally using built-in logic:
 This is baked into the mu binary because you need tools before you can run
 tools — the tool-fetcher must be built in.
 
-The `MU_SCRATCH` environment variable allows overriding this with an external
-executable, should anyone need custom scratch build logic.
+Scratch only installs pre-compiled tools. Source-only tools are built in a
+normal target, and downstream targets consume its output.
 
 ```
                     ┌──────────────────────────────────┐
@@ -336,7 +330,6 @@ Step 6: Nothing to execute
 │  Scratch environment       (fetch/extract/store) │
 │  Sandbox execution         (hermetic rootfs)     │
 │  Sealed inputs/outputs     (secret lifecycle)    │
-│  Inline programs           (pith VM)             │
 │  Advice protocol           (lifecycle observers) │
 │                                                  │
 ├─────────────────────────────────────────────────┤

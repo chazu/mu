@@ -120,6 +120,21 @@ func (s *DiskStore) Get(_ context.Context, dgst Digest) (io.ReadCloser, error) {
 // it to its digest. The name is derived from the bytes actually written, so a
 // blob is digest-verified before it becomes visible.
 func (s *DiskStore) Put(ctx context.Context, r io.Reader) (Digest, error) {
+	return s.put(ctx, r, nil)
+}
+
+// PutExpected is Put for bytes claimed to be want, such as a remote fetch. A
+// mismatch is discarded before anything becomes visible and returns an error
+// matching ErrDigestMismatch.
+func (s *DiskStore) PutExpected(ctx context.Context, want Digest, r io.Reader) error {
+	if err := want.Validate(); err != nil {
+		return fmt.Errorf("cas: put blob %s: %w", want, err)
+	}
+	_, err := s.put(ctx, r, &want)
+	return err
+}
+
+func (s *DiskStore) put(ctx context.Context, r io.Reader, want *Digest) (Digest, error) {
 	tmp, err := s.createTemp("blob-")
 	if err != nil {
 		return Digest{}, fmt.Errorf("cas: put blob: %w", err)
@@ -138,6 +153,9 @@ func (s *DiskStore) Put(ctx context.Context, r io.Reader) (Digest, error) {
 		return Digest{}, fmt.Errorf("cas: put blob: %w", err)
 	}
 	dgst := NewSHA256(hex.EncodeToString(h.Sum(nil)))
+	if want != nil && dgst != *want {
+		return Digest{}, fmt.Errorf("cas: put blob %s: %w: content hashes to %s", *want, ErrDigestMismatch, dgst)
+	}
 	dest := filepath.Join(s.blobDir(), dgst.Hash)
 	if _, err := os.Stat(dest); err == nil {
 		// Content-addressed: an existing file already holds these bytes.

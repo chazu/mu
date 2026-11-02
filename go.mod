@@ -8,8 +8,6 @@ require (
 	oras.land/oras-go/v2 v2.6.0
 )
 
-require github.com/chazu/pith v0.3.0
-
 require golang.org/x/sync v0.20.0
 
 require (
@@ -21,14 +19,13 @@ require (
 )
 
 require (
-	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819 // indirect
+	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
-	github.com/chazu/ewe v0.1.0
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect

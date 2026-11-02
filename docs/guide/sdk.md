@@ -52,7 +52,6 @@ CAPABILITY DERIVATION
     Observe        adds "observe"
     ResolveSecret  adds "resolve_secret"
     StoreSecret    adds "store_secret"
-    Advise         adds "advise" (also set AdvisePhases)
 
   This eliminates the most common bb-plugin bug: declaring a capability
   in the discover response but forgetting to wire the handler (or vice
@@ -71,8 +70,6 @@ THE PLUGIN STRUCT
       Observe       func(ctx, ObserveRequest) (ObserveResponse, error)  // optional
       ResolveSecret func(ctx, ref string) (string, error)               // optional
       StoreSecret   func(ctx, StoreSecretRequest) error                 // optional
-      Advise        func(ctx, AdviseRequest) error                      // optional
-      AdvisePhases  []string                                            // used only if Advise != nil
   }
 
   Methods:
@@ -161,18 +158,15 @@ HOST ENVIRONMENT
         EnvPassthrough: []string{"HOME", "PATH", "GOCACHE"},
     }
 
-WHEN TO USE GO vs BB vs PITH
+WHEN TO USE GO vs BB
 
   Go SDK         when you need static compilation, fast startup, or
                  strong typing. Production plugins. Default choice.
   bb             when you're sketching and want REPL-style iteration.
                  Cost: bb toolchain dependency on every host.
-  pith VM        when the plugin is pure data transformation and
-                 doesn't need a process. See `mu guide pith-plugins`.
 
 SEE ALSO
 
   mu guide plugins      — plugin structure, manifest, distribution
   mu guide protocol     — NDJSON wire format (language-agnostic spec)
-  mu guide pith-plugins — inline VM-based plugins
   examples/plugins/hello-go/ — canonical Go example

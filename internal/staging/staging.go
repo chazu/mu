@@ -15,7 +15,7 @@
 //
 // Disk capacity policy. mu does not preflight free space. The expanded size
 // of a compressed tar stream is unknown until it is read, free-space checks
-// race with every other writer, and the extraction budget (archivelimit)
+// race with every other writer, and the extraction budget (internal/archive)
 // already bounds the worst case. Instead every writer removes its partial
 // output on failure (including ENOSPC), and this sweeper reclaims whatever a
 // crash strands.
@@ -71,7 +71,6 @@ func DefaultRules(home, tmp string) []Rule {
 		{Dir: filepath.Join(cache, "ingest")},
 		{Dir: filepath.Join(mu, "plugins"), Prefixes: []string{".bundle-", ".plugin-"}, Depth: 1},
 		{Dir: filepath.Join(mu, "toolchains"), Prefixes: []string{".tool-"}, Depth: 2},
-		{Dir: mu, Prefixes: []string{".discover-cache-"}},
 		{Dir: tmp, Prefixes: []string{
 			"mu-cas-replay-", "mu-oci-blob-", "mu-plugin-fetch-", "mu-plugin-install-",
 			"mu-sandbox-", "mu-sbpl-", "mu-out-", "mu-sealed-in-", "mu-sealed-out-",

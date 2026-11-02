@@ -49,11 +49,11 @@ func outageBuild(t *testing.T, root string, args ...string) (int, []byte) {
 func outageFixture(t *testing.T, registry string, onlyRemote bool, targets []map[string]any, plugins []map[string]any) string {
 	t.Helper()
 	root := t.TempDir()
-	backends := []map[string]any{{"type": "oci", "registry": registry}}
+	cache := map[string]any{"remote": registry}
 	if !onlyRemote {
-		backends = append([]map[string]any{{"type": "disk", "path": filepath.Join(root, "cache")}}, backends...)
+		cache["path"] = filepath.Join(root, "cache")
 	}
-	cfg := map[string]any{"cache": map[string]any{"backends": backends, "write_through": true}, "targets": targets}
+	cfg := map[string]any{"cache": cache, "targets": targets}
 	if plugins != nil {
 		cfg["plugins"] = plugins
 	}
@@ -83,6 +83,9 @@ func TestColdLocalBuildSurvivesSilentRegistryOnceForDependentActions(t *testing.
 	}
 	if requests.Load() != 1 {
 		t.Fatalf("retried unavailable optional registry %d times", requests.Load())
+	}
+	if n := strings.Count(string(output), "remote cache unavailable"); n != 1 {
+		t.Fatalf("want exactly one remote-cache warning, got %d:\n%s", n, output)
 	}
 	for i := 0; i < 4; i++ {
 		if data, err := os.ReadFile(filepath.Join(root, fmt.Sprintf("out%d", i))); err != nil || string(data) != "done" {

@@ -31,8 +31,6 @@ func runGuide(args []string) int {
 		printGuideBuild()
 	case "observe":
 		printGuideObserve()
-	case "pudl":
-		printGuidePudl()
 	case "cache":
 		printGuideCache()
 	case "secrets":
@@ -47,12 +45,8 @@ func runGuide(args []string) int {
 		printGuideProtocol()
 	case "secret-providers":
 		printGuideSecretProviders()
-	case "pith-plugins":
-		printGuidePithPlugins()
 	case "sandbox":
 		printGuideSandbox()
-	case "advice":
-		printGuideAdvice()
 	case "sdk":
 		printGuideSDK()
 	case "plugin":
@@ -98,7 +92,6 @@ func printGuideMuJSON()          { printTopic("mu.cue") }
 func printGuideBuild()           { printTopic("build") }
 func printGuidePlugins()         { printTopic("plugins") }
 func printGuideObserve()         { printTopic("observe") }
-func printGuidePudl()            { printTopic("pudl") }
 func printGuideCache()           { printTopic("cache") }
 func printGuideSecrets()         { printTopic("secrets") }
 func printGuideSecretGen()       { printTopic("secret-gen") }
@@ -106,9 +99,7 @@ func printGuideToolchains()      { printTopic("toolchains") }
 func printGuideShell()           { printTopic("shell") }
 func printGuideSecretProviders() { printTopic("secret-providers") }
 func printGuideProtocol()        { printTopic("protocol") }
-func printGuidePithPlugins()     { printTopic("pith-plugins") }
 func printGuideSandbox()         { printTopic("sandbox") }
-func printGuideAdvice()          { printTopic("advice") }
 func printGuideSDK()             { printTopic("sdk") }
 
 // printGuideForPlugin finds and prints the guide text for a named plugin.

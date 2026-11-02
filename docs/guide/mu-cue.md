@@ -51,13 +51,13 @@ TARGET FIELDS
   sealed_output_modes  {NAME: "create" | "overwrite" |
                        "create_if_absent"} — store mode per output
                        (optional, default overwrite).
-  sealed_routing       "strict" — require actions to claim target-level
-                       sealed declarations explicitly (optional).
 
 TARGET NAMING
 
   Targets are named "//path/name". Subdirectory targets are auto-prefixed:
-  a target "mylib" in foo/mu.cue becomes "//foo/mylib".
+  a target "mylib" in foo/mu.cue becomes "//foo/mylib". A subdirectory
+  mu.cue may also use absolute names, but only under its own directory
+  ("//foo", "//foo/...", "//foo:..."); anything else is a load error.
 
 CONFIG MERGING
 
@@ -65,6 +65,19 @@ CONFIG MERGING
   mu.cue files in subdirectories. Targets from subdirectories are merged
   with paths rebased relative to the project root. Globs in sources are
   expanded. Hidden directories (.git, .claude, etc.) and testdata/ are skipped.
+  A subdirectory with its own cue.mod/ is a separate project and is not
+  merged (nor is anything below it).
+
+  Rules for subdirectory mu.cue files (each violation is a load error
+  naming the file):
+
+  - cache, publish and secrets are project-wide and may only be set in
+    the root mu.cue.
+  - A plugin or toolchain name may be declared in only one mu.cue across
+    the project; a redeclaration names both files.
+  - Plugin paths are rebased onto the project root: script always, and
+    command[0] only when it starts with "./" or "../". Other command
+    elements are passed through unchanged, so "sh -c '...a/b...'" is safe.
 
 SECRETS POLICY
 
@@ -74,30 +87,30 @@ SECRETS POLICY
   match is rejected at plan time. Omit the block to allow all
   writes; set to [] for explicit deny-all. See 'mu guide secrets'.
 
-STRICT SEALED ROUTING
+SEALED ROUTING
 
-  sealed_routing: "strict"
+  Target-level sealed maps are the complete allow-list. Plan actions must
+  claim each sealed name they use with the exact target ref and effective
+  mode. Every declared input must be claimed by at least one action; every
+  output by exactly one action. Undeclared claims, unused declarations,
+  mode/ref changes, and ambiguous outputs fail during planning. If the plan
+  has exactly one action and it makes no sealed claims, mu fills its claims
+  from the target maps. Planning never resolves provider values; each
+  claiming action resolves its inputs immediately before execution.
 
-  Strict mode treats target-level sealed maps as the complete capability
-  declaration. Plan actions must claim each input they consume using the
-  exact target ref and effective mode. Every declared input must be claimed
-  by at least one action; every output by exactly one action. Undeclared
-  claims, unused declarations, mode/ref changes, and ambiguous outputs fail
-  during planning. Planning never resolves provider values; each claiming
-  action resolves its inputs immediately before execution. Without
-  sealed_routing, the existing target-to-action convenience behavior remains
-  in effect. PUDL-generated targets use strict mode.
+  The former sealed_routing field was removed (routing is always strict);
+  setting it is a load error.
 
 CACHE CONFIG
 
   cache: {
-      backends: [
-          {type: "disk", path: "~/.mu/cache", max_size: "10GB"},
-          {type: "oci", registry: "ghcr.io/org/cache"},
-      ]
-      write_through: true
-      read_repair:   true
+      path:   "~/.mu/cache"              // optional; local store (default shown)
+      remote: "ghcr.io/org/mu-cache"     // optional; read-only remote cache
+      push:   {registry: "ghcr.io", repository: "org/mu-cache"}   // mu cache push
   }
+
+  Local disk plus at most one read-only remote. The old cache.backends,
+  read_repair, and write_through fields are rejected. See `mu guide cache`.
 
 SEE ALSO
 

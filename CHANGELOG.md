@@ -5,6 +5,20 @@ All notable changes to mu are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Strict sealed routing is the only mode.** A target's `sealed_inputs` /
+  `sealed_outputs` are the complete allow-list: every action claim must match a
+  declared name, ref, and mode; every declared input must be claimed at least
+  once and every declared output exactly once. Previously, without
+  `sealed_routing: "strict"`, mu copied target inputs onto every unclaimed
+  action and never checked an action's own claims, so a plugin could claim a
+  ref the target never declared. One convenience remains: a plan with exactly
+  one action and no claims gets the target's maps. The `sealed_routing` field
+  was removed; setting it is a load error. secret-gen targets must declare
+  `sealed_outputs: {VALUE: <ref>}` with the matching mode until `config.ref`
+  goes away.
+
 ### Added
 
 - **`doppler` secret provider plugin** (babashka, read-only). Refs look like
@@ -50,6 +64,24 @@ All notable changes to mu are recorded here. The format follows
   `script`, `url` or `command` source with the pinned digest. Previously they
   added `digest` alongside it, which the schema rejects, leaving `mu.cue`
   unloadable.
+
+### Removed
+
+- The pith VM. Targets can no longer carry inline `plan` or `transform`
+  programs, and actions can no longer carry a `body`. A `mu.cue` target that
+  sets `plan`, `transform` or `body` fails to load, and a plugin plan response
+  with an action `body` is rejected. Use a `shell` target or a plugin that
+  emits commands. The `pith-plugins` guide topic and the pith examples are
+  gone, and mu no longer depends on `github.com/chazu/pith`.
+- ewe actions (`ewe_source` on an action, run in-process by `internal/ewesink`).
+  They ran inside the mu process, so they could never be sandboxed, and they
+  carried known bugs: paging followed `Link: rel=next` to any host with the
+  auth headers attached, query-string secrets could appear in error text,
+  requests had no timeout or size limit and ignored `--offline` and
+  `network: false`, and the actions could be cached. A plan response with
+  `ewe_source`, or a `mu.cue` target with `ewe` or `ewe_source`, is now
+  rejected with "ewe actions were removed". `mu build --plan --json` no longer
+  emits `ewe_digest`, and mu no longer depends on `github.com/chazu/ewe`.
 
 ## [v0.3.5] — 2026-08-05
 

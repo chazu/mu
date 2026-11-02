@@ -255,64 +255,21 @@ func TestValidate_DuplicatePluginNames(t *testing.T) {
 
 // --- Cache validation ---
 
-func TestValidate_InvalidCacheBackendType(t *testing.T) {
-	cfg := &ProjectConfig{
-		Cache: &CacheConfig{
-			Backends: []CacheBackend{
-				{Type: "s3", Path: "/tmp/cache"},
-			},
-		},
-	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for invalid cache backend type")
-	}
-	if !strings.Contains(err.Error(), "type must be \"disk\" or \"oci\"") {
-		t.Fatalf("unexpected error message: %v", err)
+func TestValidate_CacheRemoteMustBeRepositoryReference(t *testing.T) {
+	for _, remote := range []string{"oci://ghcr.io/acme/cache", "https://ghcr.io/acme/cache", "ghcr.io"} {
+		err := Validate(&ProjectConfig{Cache: &CacheConfig{Remote: remote}})
+		if err == nil || !strings.Contains(err.Error(), "cache.remote") {
+			t.Errorf("remote %q: err = %v, want cache.remote error", remote, err)
+		}
 	}
 }
 
-func TestValidate_DiskBackendMissingPath(t *testing.T) {
+func TestValidate_ValidCacheConfig(t *testing.T) {
 	cfg := &ProjectConfig{
 		Cache: &CacheConfig{
-			Backends: []CacheBackend{
-				{Type: "disk", Path: ""},
-			},
-		},
-	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for disk backend missing path")
-	}
-	if !strings.Contains(err.Error(), "disk backend requires \"path\"") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
-}
-
-func TestValidate_OCIBackendMissingRegistry(t *testing.T) {
-	cfg := &ProjectConfig{
-		Cache: &CacheConfig{
-			Backends: []CacheBackend{
-				{Type: "oci", Registry: ""},
-			},
-		},
-	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for oci backend missing registry")
-	}
-	if !strings.Contains(err.Error(), "oci backend requires \"registry\"") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
-}
-
-func TestValidate_ValidCacheBackends(t *testing.T) {
-	cfg := &ProjectConfig{
-		Cache: &CacheConfig{
-			Backends: []CacheBackend{
-				{Type: "disk", Path: "/tmp/cache"},
-				{Type: "oci", Registry: "ghcr.io/example"},
-			},
+			Path:   "/tmp/cache",
+			Remote: "ghcr.io/example/mu-cache",
+			Push:   &CachePush{Registry: "ghcr.io", Repository: "example/mu-cache"},
 		},
 	}
 	if err := Validate(cfg); err != nil {
@@ -331,11 +288,7 @@ func TestValidate_FullValidConfig(t *testing.T) {
 		Plugins: []PluginDef{
 			{Name: "go-plugin", Command: []string{"./plugins/go"}},
 		},
-		Cache: &CacheConfig{
-			Backends: []CacheBackend{
-				{Type: "disk", Path: "/tmp/cache"},
-			},
-		},
+		Cache: &CacheConfig{Path: "/tmp/cache"},
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("expected full valid config to pass, got: %v", err)

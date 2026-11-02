@@ -14,21 +14,73 @@ import (
 )
 
 func TestStrictSealedRoutingFakeProviderEndToEnd(t *testing.T) {
+	runSealedRoutingEndToEnd(t, "explicit")
+}
+
+// TestSealedRoutingSingleActionAutoClaim covers the one routing convenience: a
+// lone action that makes no claims of its own is given the target's sealed
+// maps, and the build reads and stores through the provider.
+func TestSealedRoutingSingleActionAutoClaim(t *testing.T) {
+	runSealedRoutingEndToEnd(t, "bare")
+}
+
+func TestSealedRoutingRejectsUndeclaredActionClaim(t *testing.T) {
+	t.Setenv("MU_STRICT_SECRET_HELPER", "1")
+	t.Setenv("MU_STRICT_HELPER_PLAN", "undeclared")
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Plugins: []config.PluginDef{{Name: "fake", Command: strictHelperCommand()}},
+			Targets: []config.Target{{Name: "//undeclared", Toolchain: "fake"}},
+		},
+		Store: newTestStore(t), Workers: 1,
+	}
+	_, err := c.Plan(context.Background(), []string{"//undeclared"})
+	if err == nil || !contains(err.Error(), `claims undeclared input "STOLEN"`) {
+		t.Fatalf("Plan error = %v, want undeclared sealed input claim", err)
+	}
+}
+
+func TestSealedRoutingMultiActionPlanDoesNotInherit(t *testing.T) {
+	t.Setenv("MU_STRICT_SECRET_HELPER", "1")
+	t.Setenv("MU_STRICT_HELPER_PLAN", "two-bare")
+	c := &Coordinator{
+		ProjectRoot: t.TempDir(),
+		Config: &config.ProjectConfig{
+			Plugins: []config.PluginDef{{Name: "fake", Command: strictHelperCommand()}},
+			Targets: []config.Target{{
+				Name: "//multi", Toolchain: "fake",
+				SealedInputs: map[string]string{"IN": "fake:source"},
+			}},
+		},
+		Store: newTestStore(t), Workers: 1,
+	}
+	_, err := c.Plan(context.Background(), []string{"//multi"})
+	if err == nil || !contains(err.Error(), `declared input "IN" is not claimed`) {
+		t.Fatalf("Plan error = %v, want unclaimed input on a multi-action plan", err)
+	}
+}
+
+func strictHelperCommand() []string {
+	return []string{os.Args[0], "-test.run=^TestStrictSecretPluginHelperProcess$"}
+}
+
+func runSealedRoutingEndToEnd(t *testing.T, planShape string) {
 	stateDir := t.TempDir()
 	storedPath := filepath.Join(stateDir, "stored-secret")
 	modePath := filepath.Join(stateDir, "stored-mode")
 	t.Setenv("MU_STRICT_SECRET_HELPER", "1")
+	t.Setenv("MU_STRICT_HELPER_PLAN", planShape)
 	t.Setenv("MU_STRICT_INPUT_SECRET", "runtime-only-value")
 	t.Setenv("MU_STRICT_STORED_PATH", storedPath)
 	t.Setenv("MU_STRICT_MODE_PATH", modePath)
-	command := []string{os.Args[0], "-test.run=^TestStrictSecretPluginHelperProcess$"}
 	c := &Coordinator{
 		ProjectRoot: t.TempDir(),
 		Config: &config.ProjectConfig{
-			Plugins: []config.PluginDef{{Name: "fake", Command: command}},
+			Plugins: []config.PluginDef{{Name: "fake", Command: strictHelperCommand()}},
 			Secrets: &config.SecretsConfig{WritableRefs: []string{"fake:*"}},
 			Targets: []config.Target{{
-				Name: "//strict/sealed", Toolchain: "fake", SealedRouting: "strict",
+				Name: "//strict/sealed", Toolchain: "fake",
 				SealedInputs:      map[string]string{"IN": "fake:source"},
 				SealedInputModes:  map[string]string{"IN": "env"},
 				SealedOutputs:     map[string]string{"OUT": "fake:destination"},
@@ -85,9 +137,11 @@ func TestStrictSealedRoutingFakeProviderEndToEnd(t *testing.T) {
 }
 
 // TestStrictSecretPluginHelperProcess is an NDJSON planner/provider launched as
-// a subprocess by TestStrictSealedRoutingFakeProviderEndToEnd. It copies target
-// declarations to one explicit action and records provider writes only in the
-// test's private directory.
+// a subprocess by the sealed-routing tests. MU_STRICT_HELPER_PLAN picks the plan
+// shape: by default it copies target declarations to one explicit action;
+// "bare" emits that action with no claims; "two-bare" adds a second unclaimed
+// action; "undeclared" claims a ref the target never declared. Provider writes
+// land only in the test's private directory.
 func TestStrictSecretPluginHelperProcess(t *testing.T) {
 	if os.Getenv("MU_STRICT_SECRET_HELPER") != "1" {
 		return
@@ -106,11 +160,23 @@ func TestStrictSecretPluginHelperProcess(t *testing.T) {
 				Capabilities: []string{"discover", "plan", "resolve_secret", "store_secret"},
 			})
 		case "plan":
-			_ = encoder.Encode(plugin.PlanResponse{Actions: []plugin.ActionSpec{{
+			copyAction := plugin.ActionSpec{
 				ID: "copy", Command: []string{"sh", "-c", `printf '%s' "$IN" > "$MU_SEALED_OUT_DIR/OUT"`},
-				SealedInputs: request.Target.SealedInputs, SealedInputModes: request.Target.SealedInputModes,
-				SealedOutputs: request.Target.SealedOutputs, SealedOutputModes: request.Target.SealedOutputModes,
-			}}})
+			}
+			actions := []plugin.ActionSpec{copyAction}
+			switch os.Getenv("MU_STRICT_HELPER_PLAN") {
+			case "bare":
+			case "two-bare":
+				actions = append(actions, plugin.ActionSpec{ID: "other", Command: []string{"true"}})
+			case "undeclared":
+				actions[0].SealedInputs = map[string]string{"STOLEN": "fake:anything"}
+			default:
+				actions[0].SealedInputs = request.Target.SealedInputs
+				actions[0].SealedInputModes = request.Target.SealedInputModes
+				actions[0].SealedOutputs = request.Target.SealedOutputs
+				actions[0].SealedOutputModes = request.Target.SealedOutputModes
+			}
+			_ = encoder.Encode(plugin.PlanResponse{Actions: actions})
 		case "resolve_secret":
 			_ = encoder.Encode(plugin.ResolveSecretResponse{Value: os.Getenv("MU_STRICT_INPUT_SECRET")})
 		case "store_secret":

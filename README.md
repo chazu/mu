@@ -24,11 +24,12 @@ Plugins decide what to build and how. mu executes.
 ### Core Primitives
 
 - **Artifacts** — content-addressed blobs stored by SHA-256 hash
-- **Actions** — hermetic transformations: input artifacts → output artifacts
+- **Actions** — commands that turn input artifacts into output artifacts, cached by a key over their inputs
 - **Plugins** — external executables that emit action subgraphs via NDJSON protocol
 - **Toolchains** — built from scratch as content-addressed artifacts (download, verify, extract)
-- **Sealed I/O** — provider-backed values resolved at execution time; strict
-  action routing is available for generated least-privilege targets
+- **Sealed I/O** — provider-backed values resolved at execution time, never
+  stored in the cache or manifest; each action claims exactly the sealed
+  names its target declares
 
 ### Design Principles
 
@@ -108,7 +109,7 @@ mu build //hello
 
 That's the whole loop — no toolchain bootstrap needed for Go plugins. The
 SDK derives capabilities from which handlers (Plan, Observe,
-ResolveSecret, StoreSecret, Advise) are non-nil. Full SDK reference:
+ResolveSecret, StoreSecret) are non-nil. Full SDK reference:
 `mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
 
 ### Alternative: Babashka (or any other language)
@@ -139,10 +140,9 @@ Working examples in [`examples/`](examples/). CUE syntax in [`docs/cue-conventio
 mu build      Build targets
 mu scratch    Build toolchains from scratch
 mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
-mu target     List and inspect targets
-mu graph      Show dependency chains (ASCII/DOT/JSON)
+mu targets    List targets; --deps/--rdeps show dependency chains (tree/DOT/JSON)
 mu plugin     List, inspect, and install plugins
-mu observe    Drift detection (pipe --json into pudl)
+mu observe    Ask plugins to report current state
 mu verify     Validate CAS integrity
 mu guide      Quick-reference help topics
 mu version
@@ -158,40 +158,29 @@ Use `--catalog URL` or `MU_PLUGIN_CATALOG` for a catalog mirror or local test
 server.
 
 Run `mu guide` for the topic index. Each topic has its own page:
-`overview`, `mu.cue`, `plugins`, `build`, `observe`, `pudl`, `cache`,
+`overview`, `mu.cue`, `plugins`, `build`, `observe`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
-`secret-providers`, `pith-plugins`, `sandbox`, `advice`, `sdk`.
+`secret-providers`, `sandbox`, `sdk`.
 
 ## Topics
 
 | Topic | Where |
 |-------|-------|
 | Conceptual model, primitives, hermeticity | [`docs/architecture/mu-conceptual-model.md`](docs/architecture/mu-conceptual-model.md) |
-| BRICK ecosystem (mu + pudl) | [`docs/architecture/brick-ecosystem.md`](docs/architecture/brick-ecosystem.md) |
-| BRICK project layout | [`docs/architecture/brick-project-guide.md`](docs/architecture/brick-project-guide.md) |
 | CUE config reference | [`docs/cue-conventions.md`](docs/cue-conventions.md) · `mu guide mu.cue` |
 | Plugin protocol (NDJSON) | `mu guide protocol` · [`docs/plugin-output-schemas.md`](docs/plugin-output-schemas.md) |
 | Writing plugins | `mu guide plugins` |
-| Inline programs (pith VM) | `mu guide pith-plugins` |
 | Sealed inputs/outputs (secrets) | `mu guide secrets` · [`docs/sealed-input-delivery-modes.md`](docs/sealed-input-delivery-modes.md) · [`docs/secrets-write-policy.md`](docs/secrets-write-policy.md) |
 | Secret-gen toolchain | `mu guide secret-gen` · [`docs/secret-gen-toolchain.md`](docs/secret-gen-toolchain.md) |
 | Sandbox model | `mu guide sandbox` |
 | Toolchains from scratch | `mu guide toolchains` |
 | Cache (CAS + OCI remote) | `mu guide cache` |
-| pudl integration | `mu guide pudl` |
-
-When PUDL owns a `#SystemModel`, use `pudl run` or the exact-set
-`pudl run-set`; PUDL invokes mu internally. PUDL-generated targets opt into
-`sealed_routing: "strict"`, which requires plugin actions to claim exact sealed
-refs/modes instead of inheriting target-wide access. The retired
-`pudl drift`/`pudl export-actions` workflow is not part of the current CLI.
 
 ## Bundled Plugins
 
 | Plugin | Description |
 |--------|-------------|
 | `aws` | AWS resource observer (EC2, VPC, subnets) via AWS CLI |
-| `cowsay` | Demo text transformation |
 | `docker` | Docker image builder |
 | `doppler` | Read-only secret provider over the [Doppler](https://doppler.com) CLI |
 | `file` | File convergence (write/copy/symlink/delete) + sealed-output capture |
@@ -199,23 +188,19 @@ refs/modes instead of inheriting target-wide access. The retired
 | `host` | Remote host observer over SSH |
 | `k8s` | Kubernetes convergence + drift + Secret capture |
 | `keypair-gen` | ed25519/ECDSA keypair generator → sealed outputs |
-| `lint` | Linter wrapper (observe + fix) |
+| `lint` | Linter wrapper (check; fix only with `fix: true`) |
 | `pass` | Bidirectional secret provider over [pass](https://passwordstore.org) |
 | `remote-exec` | Run commands over SSH with sealed-output fetch |
 | `remote-file` | Converge a file on a remote host over SSH |
-| `scratch` | Toolchain bootstrapping |
 | `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
 | `terraform` | Infra provisioning + drift + sensitive-output capture |
-| `void` | Build webhook reporter (advice plugin) |
-| `zig` | Zig toolchain |
 
 ## Project Status
 
-v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, pith VM, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
+v0.1.0 — coordinator functional end-to-end. CAS, DAG, parallel executor, sandbox (Linux namespaces + macOS Seatbelt), NDJSON plugins, CUE config, sealed inputs/outputs, plugin distribution via OCI, `mu verify`, `mu graph`, `mu guide`.
 
 ### Roadmap
 
-- Tiered cache composition (read-repair, write-through)
 - CLI polish: color output, consistent `--json`
 - GOCACHEPROG bridge
 - 1Password / OPA / buildpack / ko plugins

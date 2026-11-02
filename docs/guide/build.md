@@ -7,20 +7,19 @@ USAGE
 FLAGS
 
   --plan            Show planned actions without executing (dry run).
-  --dry-run         Alias for --plan.
-  --json            Output as JSON.
-  --emit-manifest   Emit a build manifest to stdout (for pudl's ACUTE loop).
-  --expect-plan-sha256 HEX
-                    Plan once, compare exact plan-v2 identity, and execute that
-                    same in-memory graph only on a match.
+  --json            With --plan, emit the plan as JSON (requires --plan; use
+                    --emit-manifest for a machine-readable build result).
+  --emit-manifest   Emit a build manifest as JSON to stdout (for CI).
   --no-cache        Skip action-result reads; retain dependency CAS storage.
   --offline         Use local dependencies; disable Mu-owned remote access.
-  --no-discover-cache
-                    Force live plugin discovery instead of its digest cache.
   --jobs N          Max parallel actions (default: NumCPU).
   --config PATH     Path to mu.cue (default: discover by walking up).
   --verbose         Show plugin I/O.
-  --publish         Publish each successful target's outputs as an artifact.
+  --publish         Publish each requested target's outputs as an artifact.
+                    Wildcards (//pkg/...) are expanded; matched targets
+                    with no outputs are skipped. A target named explicitly
+                    with no outputs, or a publish that would push nothing,
+                    fails before anything is pushed.
   --attach TYPE=PATH
                     Attach a referrer file to the published artifact
                     (repeatable; requires --publish).
@@ -30,7 +29,7 @@ EXAMPLES
   mu build //cmd/myapp                     Build a single target.
   mu build //cmd/myapp //lib/utils         Build multiple targets.
   mu build --plan //cmd/myapp              Preview the action DAG.
-  mu build --plan --json //cmd/myapp       Emit exact plan schema v2.
+  mu build --plan --json //cmd/myapp       Emit plan schema v2 as JSON.
   mu build --emit-manifest //cmd/myapp     Build and emit manifest JSON.
   mu build --no-cache //cmd/myapp          Force full rebuild.
   mu build --jobs 4 //cmd/myapp            Limit parallelism.
@@ -38,12 +37,11 @@ EXAMPLES
 JSON PLAN CONTRACT
 
   `mu build --plan --json` emits plan schema version 2. Its top-level fields
-  are version, plan_sha256, targets, plugins, actions, and summary. The digest
-  commits the canonical document with plan_sha256 omitted. Plugin rows commit
+  are version, targets, plugins, actions, and summary. Plugin rows record
   resolved content digest, version, protocol version, and capabilities. Each
   action includes its ID,
-  computed action_key, and every execution-affecting field: command or body,
-  ewe_digest, input digests, outputs, dependencies, environment, sealed refs
+  computed action_key, and every execution-affecting field: command, input
+  digests, outputs, dependencies, environment, sealed refs
   and modes, network/work-dir/project-root/impure/retry settings, toolchain digests, and
   sources. Empty optional fields may be omitted.
 
@@ -53,13 +51,9 @@ JSON PLAN CONTRACT
   pending_inputs instead, and their digests in inputs are zero placeholders.
 
   Planning resolves file and toolchain digests but never secret values. Sealed
-  provider refs and modes are non-secret plan metadata and are projected so an
-  exact-plan consumer such as PUDL can validate and hash the executable plan.
-  Build manifests remain a separate schema and omit provider refs and values.
-
-  `--expect-plan-sha256` is mutually exclusive with planning and publishing.
-  It rejects mutable zero-digest command plugins, compares before any secret
-  read or action, and executes the same PlanResult that was compared.
+  provider refs and modes are non-secret plan metadata and are projected for
+  inspection. Build manifests remain a separate schema and omit provider refs
+  and values.
 
 BUILD PIPELINE
 
@@ -92,8 +86,11 @@ ACTION CACHING
 
 OTHER COMMANDS
 
-  mu target list                List all targets in the project.
-  mu target list --json         List targets as JSON.
+  mu targets [pattern...]       List targets (all, or those matching).
+  mu targets --json             List targets as JSON.
+  mu targets --deps <target>    Show what a target depends on (tree).
+  mu targets --rdeps <target>   Show what depends on a target.
+  mu targets --dot [...]        Emit Graphviz DOT (exclusive with --json).
 
 ACTION ENVIRONMENT AND WORK DIRECTORY
 

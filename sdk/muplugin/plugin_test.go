@@ -50,14 +50,12 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 		},
 		ResolveSecret: func(ctx context.Context, ref string) (string, error) { return "", nil },
 		StoreSecret:   func(ctx context.Context, req muplugin.StoreSecretRequest) error { return nil },
-		Advise:        func(ctx context.Context, req muplugin.AdviseRequest) error { return nil },
-		AdvisePhases:  []string{"after-build"},
 	}
 	var resp muplugin.DiscoverResponse
 	if err := muplugin.ExchangeInto(t.Context(), p, muplugin.NewDiscoverRequest(), &resp); err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
-	want := []string{"discover", "plan", "observe", "resolve_secret", "store_secret", "advise"}
+	want := []string{"discover", "plan", "observe", "resolve_secret", "store_secret"}
 	if len(resp.Capabilities) != len(want) {
 		t.Fatalf("capabilities %v, want %v", resp.Capabilities, want)
 	}
@@ -65,9 +63,6 @@ func TestDiscoverAddsOptionalCapabilities(t *testing.T) {
 		if resp.Capabilities[i] != c {
 			t.Fatalf("capability[%d] = %q, want %q", i, resp.Capabilities[i], c)
 		}
-	}
-	if len(resp.AdvisePhases) != 1 || resp.AdvisePhases[0] != "after-build" {
-		t.Fatalf("advise_phases %v", resp.AdvisePhases)
 	}
 }
 

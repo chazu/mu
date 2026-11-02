@@ -106,12 +106,29 @@ func (d cueDecoder) DecodePlugin(pluginDir string) (*PluginConfig, error) {
 	return &cfg, nil
 }
 
+// cacheMigrationHint shows the cache block that replaced cache.backends,
+// read_repair, and write_through.
+const cacheMigrationHint = `
+  cache: {
+    path?:   "~/.mu/cache"                // the old disk backend's path
+    remote?: "<host>/<namespace>/<repo>"  // the old oci backend's registry; read-only
+    push?:   {registry: "<host>", repository: "<namespace>/<repo>"}  // mu cache push
+  }`
+
 // rejectRemovedFields fails the load when mu.cue still sets a field that mu
 // no longer supports. The schema is open, so without this check such a field
 // would decode to nothing and be silently ignored.
 func rejectRemovedFields(val cue.Value, path string) error {
 	if val.LookupPath(cue.ParsePath("preprocessor")).Exists() {
 		return fmt.Errorf("%s: preprocessor was removed; write sub-directory configs as mu.cue", path)
+	}
+	for _, field := range []string{"backends", "read_repair", "write_through"} {
+		if val.LookupPath(cue.MakePath(cue.Str("cache"), cue.Str(field))).Exists() {
+			return fmt.Errorf("%s: cache.%s was removed; the cache is now local disk plus one optional read-only remote:%s", path, field, cacheMigrationHint)
+		}
+	}
+	if val.LookupPath(cue.ParsePath("advice")).Exists() {
+		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
 	}
 	targets := val.LookupPath(cue.ParsePath("targets"))
 	if !targets.Exists() {
@@ -128,6 +145,22 @@ func rejectRemovedFields(val cue.Value, path string) error {
 				name, _ := t.LookupPath(cue.ParsePath("target")).String()
 				return fmt.Errorf("%s: target %q: kind/implements were removed; delete the %q field", path, name, field)
 			}
+		}
+		for _, field := range []string{"plan", "transform", "body"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: inline pith programs were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
+		for _, field := range []string{"ewe", "ewe_source"} {
+			if t.LookupPath(cue.ParsePath(field)).Exists() {
+				name, _ := t.LookupPath(cue.ParsePath("target")).String()
+				return fmt.Errorf("%s: target %q: ewe actions were removed; use a shell target or a plugin (delete the %q field)", path, name, field)
+			}
+		}
+		if t.LookupPath(cue.ParsePath("sealed_routing")).Exists() {
+			name, _ := t.LookupPath(cue.ParsePath("target")).String()
+			return fmt.Errorf("%s: target %q: sealed_routing was removed; strict routing is always on — delete the field", path, name)
 		}
 	}
 	return nil

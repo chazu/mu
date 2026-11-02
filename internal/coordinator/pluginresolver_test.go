@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chazu/mu/internal/archivelimit"
+	"github.com/chazu/mu/internal/archive"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 )
@@ -503,9 +503,8 @@ func TestExtractDirFromCAS_EnforcesExtractionLimits(t *testing.T) {
 		n                int
 		size             int64
 	}{
-		{"entries", archivelimit.EnvMaxEntries, "3", 4, 1},
-		{"file bytes", archivelimit.EnvMaxFileBytes, "10", 1, 11},
-		{"total bytes", archivelimit.EnvMaxTotalBytes, "100", 3, 40},
+		{"file bytes", archive.EnvMaxBytes, "10", 1, 11},
+		{"total bytes", archive.EnvMaxBytes, "100", 3, 40},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -516,7 +515,7 @@ func TestExtractDirFromCAS_EnforcesExtractionLimits(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := &PluginResolver{Store: store, CacheDir: t.TempDir()}
-			if _, err := r.extractDirFromCAS(context.Background(), "test", digest); !errors.Is(err, archivelimit.ErrExceeded) {
+			if _, err := r.extractDirFromCAS(context.Background(), "test", digest); !errors.Is(err, archive.ErrExceeded) {
 				t.Fatalf("extractDirFromCAS = %v, want ErrExceeded", err)
 			}
 			entries, _ := os.ReadDir(filepath.Join(r.CacheDir, "test"))

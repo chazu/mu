@@ -518,6 +518,26 @@ func TestManagerStartAndPlan(t *testing.T) {
 	}
 }
 
+// Every Manager.Start runs a live discover and validates it; there is no
+// cached response that could bypass ValidateDiscoverResponse.
+func TestManagerStartValidatesDiscover(t *testing.T) {
+	m := plugin.NewManager(".")
+	if err := m.Register(plugin.PluginDef{
+		Name:    "bad",
+		Command: []string{"bash", testdataPath("mock_bad_capability.sh")},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		m.Close()
+		t.Fatal("Start succeeded with an invalid discover response")
+	}
+	if !strings.Contains(err.Error(), "invalid discover response") {
+		t.Fatalf("Start error = %v, want invalid discover response", err)
+	}
+}
+
 func TestManagerUnknownToolchain(t *testing.T) {
 	m := plugin.NewManager(".")
 	ctx := context.Background()

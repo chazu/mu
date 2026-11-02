@@ -11,9 +11,13 @@ import (
 	"strings"
 )
 
-// ErrUnavailable marks a remote backend outage, rather than a confirmed miss.
-// Optional result caches may fall back; missing required artifacts must report it.
-var ErrUnavailable = errors.New("remote cache unavailable")
+// ErrNotFound marks a confirmed miss from a remote store, as opposed to a
+// failure to reach it. The local DiskStore reports misses as fs.ErrNotExist.
+var ErrNotFound = errors.New("not found")
+
+// ErrDigestMismatch marks content whose bytes do not hash to the digest it
+// was requested or stored under.
+var ErrDigestMismatch = errors.New("digest mismatch")
 
 // Digest identifies a blob by its hash algorithm and hex-encoded hash value.
 type Digest struct {

@@ -39,9 +39,6 @@ func actionRefID(value string) string {
 // so the DAG executes in the correct order. This lets a dependent target
 // consume a dep's declared output by path without needing to wait for
 // execution during planning.
-// An ewe populator program named by spec.EweSource is hashed into store at plan
-// time (the plugin CAS idiom) and carried as an EweRef digest; store may be nil
-// only when no spec uses EweSource.
 func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string, store cas.Store, crossTargetProducers map[string]string) ([]*dag.Action, error) {
 	actions := make([]*dag.Action, 0, len(specs))
 
@@ -166,28 +163,6 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 			}
 		}
 
-		// An ewe populator program: resolve the path within projectRoot, hash
-		// its contents into the CAS, and carry the digest. The program reaches
-		// execute time as inert content-addressed text.
-		var eweRef cas.Digest
-		if spec.EweSource != "" {
-			if store == nil {
-				return nil, fmt.Errorf("resolve action %q: ewe_source set but no CAS store provided", spec.ID)
-			}
-			dgst, err := func() (cas.Digest, error) {
-				f, err := openProjectFile(projectRoot, spec.EweSource)
-				if err != nil {
-					return cas.Digest{}, err
-				}
-				defer f.Close()
-				return store.Put(ctx, f)
-			}()
-			if err != nil {
-				return nil, fmt.Errorf("resolve action %q: ewe_source %q: %w", spec.ID, spec.EweSource, err)
-			}
-			eweRef = dgst
-		}
-
 		if spec.TimeoutS < 0 || spec.Retries < 0 || spec.RetryBackoffMs < 0 {
 			return nil, fmt.Errorf("action %q: timeout_s, retries, and retry_backoff_ms must be non-negative", spec.ID)
 		}
@@ -224,8 +199,6 @@ func Resolve(ctx context.Context, specs []plugin.ActionSpec, projectRoot string,
 		actions = append(actions, &dag.Action{
 			ID:                spec.ID,
 			Command:           spec.Command,
-			Body:              spec.Body,
-			EweRef:            eweRef,
 			Inputs:            inputs,
 			InputSources:      inputSources,
 			Outputs:           spec.Outputs,

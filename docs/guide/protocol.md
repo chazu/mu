@@ -13,7 +13,7 @@ LIFECYCLE
 
   1. mu starts the plugin process.
   2. mu sends {"method": "discover"} — plugin replies with metadata.
-  3. mu sends plan/observe/resolve_secret/store_secret/advise requests as needed.
+  3. mu sends plan/observe/resolve_secret/store_secret requests as needed.
   4. mu closes stdin when done — plugin exits.
 
   Request deadlines cover waiting for another request, writing stdin, and
@@ -109,25 +109,19 @@ TARGET INFO FIELDS
                       $MU_SEALED_OUT_DIR/<NAME>; mu routes
                       through the scheme's plugin's store_secret.
   sealed_output_modes map[NAME]mode — store mode per output.
-  sealed_routing      "strict" — action claims must exactly cover the
-                      target declarations; no implicit inheritance.
 
-  In convenience mode, mu may inherit target sealed maps onto emitted
-  ActionSpecs. In strict mode the plugin must put exact claims on the actions
-  that need them: every target input is claimed at least once, and every target
-  output exactly once. Mu validates claim names, refs, and effective modes
-  during planning. Provider values are still resolved only immediately before
-  each action executes.
+  Target sealed maps are the allow-list. The plugin puts exact claims on the
+  actions that need them: every target input is claimed at least once, and
+  every target output exactly once. Mu validates claim names, refs, and
+  effective modes during planning. The one exception: a plan with exactly one
+  action that makes no sealed claims has its claims filled from the target
+  maps. Provider values are still resolved only immediately before each
+  action executes.
 
 ACTION SPEC FIELDS
 
   id                  Unique within the subgraph.
   command             []string — the command to execute.
-  body                []any — pith VM program; mutually exclusive with
-                      command (optional).
-  ewe_source          string — project-relative path to an ewe populator
-                      .cue program; mutually exclusive with command/body
-                      (optional).
   inputs              map[name]path — input files (paths resolved to CAS digests).
   outputs             []string — declared output file paths.
   depends_on          []string — IDs of actions this depends on (within subgraph).

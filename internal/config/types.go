@@ -8,7 +8,6 @@ type ProjectConfig struct {
 	Publish    *PublishConfig `json:"publish,omitempty"`
 	Plugins    []PluginDef    `json:"plugins,omitempty"`
 	Secrets    *SecretsConfig `json:"secrets,omitempty"`
-	Advice     []AdviceDef    `json:"advice,omitempty"`
 }
 
 // SecretsConfig holds project-wide policy for the secret subsystem.
@@ -40,9 +39,6 @@ type Target struct {
 	SealedInputModes  map[string]string `json:"sealed_input_modes,omitempty"`  // name → delivery mode: "env" (default) or "file"
 	SealedOutputs     map[string]string `json:"sealed_outputs,omitempty"`      // file name → secret ref; action writes to $MU_SEALED_OUT_DIR/<name>
 	SealedOutputModes map[string]string `json:"sealed_output_modes,omitempty"` // file name → store mode: create, overwrite, or create_if_absent
-	SealedRouting     string            `json:"sealed_routing,omitempty"`      // empty = convenience routing; "strict" = explicit action claims
-	Plan              []any             `json:"plan,omitempty"`                // pith plan program (alternative to plugin planning)
-	Transform         []any             `json:"transform,omitempty"`           // pith transform program (runs after deps complete)
 }
 
 // Toolchain describes a build toolchain and its base environment.
@@ -75,17 +71,6 @@ type PluginDef struct {
 	Digest  string   `json:"digest,omitempty"`
 }
 
-// AdviceDef declares an advice plugin and its configuration.
-// Advice plugins are observers — they react to build lifecycle events
-// (e.g., posting results to a webhook) but do not produce build actions.
-// Advice errors are non-fatal to the build.
-type AdviceDef struct {
-	Plugin       string            `json:"plugin"`                  // plugin name (must match a plugin in plugins[])
-	Phases       []string          `json:"phases,omitempty"`        // lifecycle phases: "after-build", etc.
-	Config       map[string]any    `json:"config,omitempty"`        // plugin-specific configuration
-	SealedInputs map[string]string `json:"sealed_inputs,omitempty"` // name → secret ref for advice secrets
-}
-
 // PluginManifest is the "plugin" key in a plugin directory's mu.cue.
 // It declares the entrypoint, optional runtime toolchain, and files to
 // include in the CAS bundle.
@@ -116,12 +101,16 @@ type PluginConfig struct {
 	Toolchains []Toolchain     `json:"toolchains,omitempty"`
 }
 
-// CacheConfig configures the build cache system.
+// CacheConfig configures the build cache: the local disk store plus at most
+// one read-only remote. Path is the local store's directory (default
+// ~/.mu/cache; ~ and $VARS expand). Remote is an OCI repository reference
+// ("host/namespace/repo") consulted on local misses; whatever it serves is
+// digest-verified and copied into the local store. Push is used only by
+// `mu cache push`.
 type CacheConfig struct {
-	Backends     []CacheBackend `json:"backends,omitempty"`
-	ReadRepair   bool           `json:"read_repair,omitempty"`
-	WriteThrough bool           `json:"write_through,omitempty"`
-	Push         *CachePush     `json:"push,omitempty"`
+	Path   string     `json:"path,omitempty"`
+	Remote string     `json:"remote,omitempty"`
+	Push   *CachePush `json:"push,omitempty"`
 }
 
 // CachePush configures the target of `mu cache push`. Registry is the OCI
@@ -141,14 +130,4 @@ type CachePush struct {
 type PublishConfig struct {
 	Registry   string `json:"registry,omitempty"`
 	Repository string `json:"repository,omitempty"`
-}
-
-// CacheBackend describes a single cache backend (disk or OCI registry).
-type CacheBackend struct {
-	Type     string `json:"type"`               // "disk" or "oci"
-	Path     string `json:"path,omitempty"`     // for disk
-	Registry string `json:"registry,omitempty"` // for oci
-	MaxSize  string `json:"max_size,omitempty"`
-	Read     *bool  `json:"read,omitempty"`
-	Write    *bool  `json:"write,omitempty"`
 }

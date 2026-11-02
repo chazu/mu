@@ -1,0 +1,18 @@
+{"name":"pass","version":"0.3.0","protocol_version":1,"description":"Resolve and store secrets via the pass password manager","consumes":[],"produces":[],"capabilities":["discover","resolve_secret","store_secret"]}
+{"value":"hunter2"}
+{"value":"hunter2\nuser: admin\nurl: https://example.test"}
+{"value":"-----BEGIN TEST KEY-----\nabc def\n-----END TEST KEY-----"}
+{"error":"pass show failed (exit 1): Error: missing/entry is not in the password store."}
+{}
+{"error":"pass entry already exists: new/a"}
+{}
+{"value":"v1"}
+{}
+{"value":"v4"}
+{"value":"v4\nline2"}
+{}
+{"value":"no-mode"}
+{"error":"unknown secret_mode: bogus"}
+{"error":"store_secret requires secret_value"}
+{}
+{"value":"created"}

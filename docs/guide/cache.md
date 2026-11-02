@@ -1,13 +1,14 @@
 mu guide cache — content-addressed storage and action caching
 
 mu stores all build artifacts in a local content-addressed store (CAS).
-The default location is ~/.mu/cache/. Remote caches are OCI registries.
+The default location is ~/.mu/cache/ (cache.path). One OCI registry may be
+configured as a read-only remote cache (cache.remote); `mu cache push`
+publishes local results to a registry (cache.push).
 
 HOW CACHING WORKS
 
   Each build action has a cache key (sha256) computed from:
   - Command (argv, original order)
-  - Inline pith body or ewe program digest, when present
   - Sorted input digests (sha256 of each input file). Inputs produced by
     another action use the digest of what that action actually produced,
     filled in after it runs and before this action's cache lookup.
@@ -32,8 +33,7 @@ HOW CACHING WORKS
   Key encoding is versioned and length-prefixed, so embedded newlines or
   separators in arguments and metadata cannot alias another action. This
   encoding replaces legacy keys: existing action results miss once and
-  rebuild; their content-addressed blobs remain reusable. Saved exact-plan
-  approvals must be regenerated because plans include action keys.
+  rebuild; their content-addressed blobs remain reusable.
 
   Cache key INCLUDES (non-secret metadata):
     sealed_input refs       Changing pass:foo/v1 → pass:foo/v2 invalidates.
@@ -67,16 +67,8 @@ HOW CACHING WORKS
   receipts. The OCI envelope and output-digest shape remain compatible.
   On cache miss: action runs, outputs are hashed and stored in CAS.
 
-  Tiered cache writes stream directly to the local store when write-through
-  is disabled. Write-through and blob read-repair replay a private temporary
-  file instead of buffering the whole artifact in memory. Blob read-repair
-  verifies the source digest before repairing any lower layer. A Get reader
-  owns its replay file until Close; callers must close abandoned reads too.
-  Temporary disk space scales with blob size. Cancellation is checked between
-  reads and transfers; an arbitrary reader already blocked in I/O must provide
-  its own interruption mechanism.
-  Action-result read-repair streams output blobs and publishes the local
-  result only after every transfer succeeds and returns the expected digest.
+  Builds write only to the local store. A local miss falls back to the
+  remote cache, if one is configured (see REMOTE CACHE).
 
 LOCAL LAYOUT
 
@@ -126,7 +118,7 @@ STAGING AND CRASH CLEANUP
   atomically: scratch extraction (~/.mu/cache/extract/.extract-*),
   downloads (.fetch-*), cache writes (~/.mu/cache/ingest), plugin bundles (.bundle-*, .plugin-*),
   toolchain binaries (.tool-*), schema installs (.tmp-*), and, in the
-  system temp directory, cache replay and blob spools, sandbox roots, and
+  system temp directory, registry upload spools, sandbox roots, and
   sealed-value directories (mu-*). A writer removes its own partial output
   on any failure, including a full disk.
 
@@ -149,20 +141,44 @@ VERIFYING CACHE INTEGRITY
   mu verify --json                 Output as JSON.
   mu verify --fix                  Delete corrupt blobs.
 
-REMOTE REGISTRY
+REMOTE CACHE
 
-  The CAS can be backed by a remote OCI registry so cached actions are
-  shared across machines. Configure the push destination in mu.cue:
+  A remote cache shares built results across machines. It is one OCI
+  repository, read-only to builds:
 
-    cache: push: {
-      registry:   "registry.example.com"   // OCI registry host
-      repository: "mu-cache"                // repository path within it
+    cache: {
+      path:   "~/.mu/cache"                      // optional; the default
+      remote: "registry.example.com/acme/mu-cache"
+      push:   {registry: "registry.example.com", repository: "acme/mu-cache"}
     }
 
-  Both fields are required for push. Pull-side backends are configured
-  separately under cache.backends (type "oci", with a registry host).
+  remote is a full repository reference ("host/namespace/repo", no scheme).
+  On a local miss, mu looks the action up in the remote. A remote result is
+  used only if every output blob it names downloads and hashes to its
+  digest; the blobs and the result are then written into the local store and
+  served from there, so each entry crosses the network once. Content that
+  does not match its digest is rejected, never stored, and the action is
+  rebuilt locally. A blob read (mu fetching an input or artifact by digest)
+  falls back to the remote the same way.
 
-  PUSHING
+  Builds never write to the remote. Results reach it only through
+  `mu cache push`.
+
+  The remote is optional. The first remote failure (unreachable, timeout,
+  auth error) prints one warning and switches the rest of that command to
+  local-only; the build continues, rebuilding whatever it cannot find
+  locally. The next command tries the remote again. Warm local results never
+  contact the remote. --offline skips the remote entirely.
+
+  Earlier releases configured a list under cache.backends, with read_repair
+  and write_through flags. Those fields are rejected at load with a hint:
+  replace the disk backend with cache.path (or drop it to use the default)
+  and the oci backend with cache.remote.
+
+PUSHING
+
+  cache.push names the registry host and repository `mu cache push` writes
+  to. Both fields are required for push.
 
     mu cache push                  Copy cached action results and their output
                                    blobs from the local CAS to cache.push's
@@ -172,8 +188,8 @@ REMOTE REGISTRY
   The OCI manifest and tag for each local result are built at push time;
   output blobs the registry already has are not uploaded again.
   Tags are derived (action-*); only the registry and repository are
-  configurable. Plugins are distributed through the GitHub release catalog
-  (`mu plugin install`), not the OCI cache.
+  configurable. To read what you push, set cache.remote to
+  "<push.registry>/<push.repository>".
 
 AUTHENTICATION
 
@@ -192,13 +208,13 @@ AUTHENTICATION
       never needs a credential-helper binary (e.g. docker-credential-desktop).
       The Docker chain (~/.docker/config.json) is consulted as a read-only
       fallback, so existing `docker login` / `oras login` sessions still work.
-    Reads (OCI cache backends)
+    Reads (cache.remote)
       Resolve credentials ONLY through the Docker chain (~/.docker/config.json);
       ~/.mu/credentials.json is not consulted. Access is anonymous if none
       is found. localhost / 127.0.0.1 registries use plain HTTP.
 
   Because of this asymmetry, `mu cache login` covers push but not pull: to
-  authenticate a private read backend you also need `docker login`.
+  authenticate a private remote cache you also need `docker login`.
 
 PLUGIN STORAGE
 
@@ -222,15 +238,11 @@ REMOTE METADATA BUDGETS
 
 REGISTRY OUTAGES AND LOCAL OPERATION
 
-  OCI caches are optional. Every CLI build retains an authoritative local CAS;
-  if cache.backends begins with OCI, Mu inserts ~/.mu/cache before it and
-  repairs remote hits locally. Configured remote writes remain best-effort.
-
-  Remote existence/action-result probes have a two-second budget covering auth
-  and metadata reads. Concurrent cold actions share the initial reachability
-  probe. A failing registry is skipped for the rest of that store/command;
-  the next invocation retries it. Warm local receipts need no registry request.
-  Parent cancellation does not mark a healthy registry unavailable.
+  The remote cache is optional (see REMOTE CACHE). Remote action-result
+  lookups have a two-second budget covering auth and metadata reads. The
+  first failure disables the remote for the rest of the command with one
+  warning; the next command retries it. Warm local results need no registry
+  request. Cancelling the command does not count as a remote failure.
 
   Registry and Mu-managed download clients bound connect/TLS setup to three
   seconds, response-header waits to five seconds, and read/write inactivity
@@ -247,8 +259,8 @@ REGISTRY OUTAGES AND LOCAL OPERATION
 
   --offline uses local/cached CUE modules and source/toolchain artifacts. Missing
   required data fails with its requested identity; another plugin/toolchain
-  version is never substituted. Network performed by plugins, external
-  MU_SCRATCH commands, and actions remains their own contract.
+  version is never substituted. Network performed by plugins and actions
+  remains their own contract.
   --offline is rejected for registry publication, login, and remote discovery.
   Local inspection and cache-push dry-run remain available.
 

@@ -86,11 +86,12 @@ WRITING A PLUGIN
       }
 
     Build with `go build -o myplugin .` and reference the binary in
-    mu.cue. Full SDK reference: 'mu guide sdk'. Canonical example:
-    examples/plugins/hello-go/.
+    mu.cue (see GO PLUGINS below). Full SDK reference: 'mu guide sdk'.
+    Canonical example: examples/plugins/hello-go/.
 
-    Reference ports in this repo: plugins/{scratch,file,host,
-    keypair-gen,pass,remote-exec,remote-file}/main.go.
+    In-tree Go plugins: plugins/{pass,keypair-gen}. Go ports that are
+    not yet their plugin's entrypoint: plugins/{file,host,remote-exec,
+    remote-file}/main.go.
 
   OTHER LANGUAGES
 
@@ -151,12 +152,13 @@ WRITING A PLUGIN
   SEALED ACTION ROUTING
 
     TargetInfo carries sealed_inputs, sealed_input_modes, sealed_outputs,
-    sealed_output_modes, and sealed_routing. In convenience mode mu retains its
-    inheritance behavior. When sealed_routing is "strict", emit explicit action
-    claims using the exact target refs and effective modes. Each declared input
-    must be claimed by at least one action; each output by exactly one. Do not
-    resolve provider values in the plugin planner: mu resolves inputs only when
-    the claiming action is about to execute.
+    and sealed_output_modes. Emit explicit action claims using the exact
+    target refs and effective modes. Each declared input must be claimed by
+    at least one action; each output by exactly one. A single-action plan
+    may leave its claims empty and mu fills them from the target maps;
+    multi-action plans get nothing implicitly. Do not resolve provider
+    values in the plugin planner: mu resolves inputs only when the claiming
+    action is about to execute.
 
 PLUGIN DIRECTORY STRUCTURE
 
@@ -180,6 +182,50 @@ PLUGIN DIRECTORY STRUCTURE
 
   A project plugin entry with `script:` pointing into the directory is
   bundled into the local CAS on demand when a build resolves it.
+
+GO PLUGINS
+
+  mu never compiles a plugin. A Go plugin is run as a prebuilt
+  executable; how that executable gets built depends on the path:
+
+  Local plugin directory ("script": "plugins/<name>"):
+    The manifest's entrypoint names the compiled binary and omits
+    "toolchain" (no toolchain = execute directly):
+
+      plugin: {
+        entrypoint: "plugin"
+        files: ["plugin", "GUIDE.md"]
+        guide: "GUIDE.md"
+      }
+
+    Build the binary into the directory before mu resolves the plugin;
+    resolution fails with "entrypoint ... not found" until you do:
+
+      go build -trimpath -o plugins/<name>/plugin ./plugins/<name>
+
+    mu then bundles the listed files (binary included) into a
+    deterministic tar, stores it in the CAS and runs the extracted
+    copy under ~/.mu/plugins/<name>/bundle-<hash>/. The plugin identity
+    is that bundle digest, so it changes exactly when the binary (or
+    another bundled file) changes; -trimpath keeps rebuilds of the same
+    source with the same Go version byte-identical across checkouts.
+    The in-tree convention is to name the binary "plugin" (ignored by
+    .gitignore).
+
+  Catalog install ('mu plugin install <name>'):
+    The catalog entry declares the entrypoint and a build command, e.g.
+    {"entrypoint": "plugin", "build": {"command": ["go", "build",
+    "-trimpath", "-o", "plugin", "."]}}. If the entrypoint is missing
+    from the downloaded source package, mu runs the build command in
+    the package directory (Go must be installed), then bundles the
+    directory as above and pins the digest in mu.cue and mu.lock.
+
+  Direct command ("command": ["/path/to/binary"]):
+    Not bundled or cached; useful while iterating on a plugin.
+
+  Plugins written with sdk/muplugin are unit-tested in-process with
+  muplugin.Exchange; see plugins/pass/main_test.go for an end-to-end
+  test that registers a plugin directory the way a project does.
 
 MANAGING PLUGINS
 
@@ -286,8 +332,8 @@ PLUGIN GUIDES
       - If the plugin is itself a secret provider (resolve_secret /
         store_secret), describe its ref grammar and any 'raw:' /
         scoping prefixes — see 'mu guide secret-providers'.
-      - State whether the plugin emits exact action claims suitable for
-        `sealed_routing: "strict"`. PUDL-generated targets require them.
+      - State which actions claim which sealed names (mu rejects
+        undeclared or unclaimed names at plan time).
 
     OBSERVATION OUTPUT (omit if no observe capability)
       Sketch the shape of the JSON the plugin returns. If you ship

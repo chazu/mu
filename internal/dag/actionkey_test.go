@@ -135,7 +135,7 @@ func TestActionKey_EnvOrderIndependent(t *testing.T) {
 }
 
 // TestActionKey_ConfigFormatInvariant verifies the claim made in
-// docs/scout-cue-migration.md §"Cache-key verification": the action cache key
+// docs/archive/scout-cue-migration.md §"Cache-key verification": the action cache key
 // is a pure function of the resolved Action struct, independent of the source
 // config format (mu.json, mu.cue) and its serialization (whitespace, key
 // order, etc.). As long as two config files decode to semantically-equivalent
@@ -198,11 +198,11 @@ func TestActionKey_ConfigFormatInvariant(t *testing.T) {
 func sealedBodyAction() *dag.Action {
 	return &dag.Action{
 		ID:               "fetch:run",
-		Body:             []any{"'TOKEN", "secret/get"},
+		Command:          []string{"sh", "-c", "curl -H \"PRIVATE-TOKEN: $TOKEN\" \"$BASE\""},
 		Env:              map[string]string{"BASE": "https://gitlab.com"},
 		SealedInputs:     map[string]string{"TOKEN": "pass:gitlab/token"},
 		SealedInputModes: map[string]string{"TOKEN": "env"},
-		Impure:           true, // bodies that touch secrets are impure in practice
+		Impure:           true, // actions that touch secrets are impure in practice
 	}
 }
 

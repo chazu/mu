@@ -10,16 +10,12 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/chazu/mu/internal/builtin"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
-	"github.com/chazu/mu/internal/coordinator/discovercache"
 	"github.com/chazu/mu/internal/dag"
-	"github.com/chazu/mu/internal/pithvm"
 	"github.com/chazu/mu/internal/plugin"
-	"github.com/chazu/pith"
 )
 
 // ToolchainBuilder builds toolchains from scratch before the planning phase.
@@ -37,10 +33,6 @@ type Coordinator struct {
 	ToolchainRegistry *ToolchainRegistry
 	Builder           ToolchainBuilder // optional; set to enable toolchain scratch build
 	Workers           int              // 0 = runtime.NumCPU()
-
-	// NoDiscoverCache disables the plugin discover response cache for this
-	// build (no reads, no writes). Useful when hacking on a plugin locally.
-	NoDiscoverCache bool
 
 	// Verbose increases coordinator-level log verbosity when true. Cache
 	// layer events (hit/miss/repair) are surfaced at info level instead
@@ -119,9 +111,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	}
 	needed := make(map[string]bool)
 	for _, target := range targets {
-		if len(target.Plan) == 0 {
-			needed[target.Toolchain] = true
-		}
+		needed[target.Toolchain] = true
 	}
 	var planningPlugins []config.PluginDef
 	for _, definition := range c.Config.Plugins {
@@ -192,51 +182,11 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		}
 	}
 
-	// Consult the discover cache before starting. Entries are keyed by CAS
-	// digest; command plugins (zero digest) are never cached.
-	var dcache *discovercache.Cache
-	if !c.NoDiscoverCache {
-		if p := discovercache.DefaultPath(); p != "" {
-			dcache = discovercache.Open(p)
-			seeded := make(map[string]*plugin.DiscoverResponse)
-			for _, rp := range resolvedPlugins {
-				if rp.Digest.Hash == "" {
-					continue
-				}
-				if resp, ok := dcache.Get(rp.Digest); ok {
-					seeded[rp.Def.Name] = resp
-				}
-			}
-			if len(seeded) > 0 {
-				mgr.SetCachedDiscover(seeded)
-			}
-		}
-	}
-
 	if err := mgr.Start(ctx); err != nil {
 		return nil, fmt.Errorf("coordinator: starting plugins: %w", err)
 	}
 	// Plugins are only needed for planning. Shut them down before returning.
 	defer mgr.Close()
-
-	// Persist any discover responses obtained live this build.
-	if dcache != nil {
-		digestByName := make(map[string]cas.Digest, len(resolvedPlugins))
-		for _, rp := range resolvedPlugins {
-			digestByName[rp.Def.Name] = rp.Digest
-		}
-		for _, name := range mgr.NewlyDiscovered() {
-			d, ok := digestByName[name]
-			if !ok || d.Hash == "" {
-				continue
-			}
-			info := mgr.DiscoverInfo(name)
-			if info == nil {
-				continue
-			}
-			_ = dcache.Put(d, info)
-		}
-	}
 
 	// 4. Resolve target graph (topological order, leaves first).
 	// The target set was resolved before any dependency bootstrap.
@@ -290,19 +240,6 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			}
 			planActions = actions
 			declaredOutputs = declared
-		} else if len(t.Plan) > 0 {
-			// Inline pith plan program — run the VM to emit action specs.
-			vm := pith.New(ctx)
-			buf := &pithvm.ActionBuffer{}
-			pithvm.RegisterPlanDrivers(vm, t.Config, buf)
-			if err := vm.Run(t.Plan); err != nil {
-				return nil, fmt.Errorf("coordinator: target %q plan: %w", t.Name, err)
-			}
-			// Convert emitted action maps to ActionSpecs.
-			for _, m := range buf.Actions {
-				spec := mapToActionSpec(m)
-				planActions = append(planActions, spec)
-			}
 		} else {
 			ti := plugin.TargetInfo{
 				Name:              t.Name,
@@ -313,7 +250,6 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 				SealedInputModes:  t.SealedInputModes,
 				SealedOutputs:     t.SealedOutputs,
 				SealedOutputModes: t.SealedOutputModes,
-				SealedRouting:     t.SealedRouting,
 			}
 
 			// Thread each dep's declared_outputs (artifact-type → path,
@@ -338,73 +274,12 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			declaredOutputs = plan.Outputs
 		}
 
-		// Inject a synthetic transform action if the target has a Transform program.
-		// The transform must wait for all dependency targets to complete,
-		// then plan actions within this target depend on _transform.
-		if len(t.Transform) > 0 {
-			var depActionIDs []string
-			for _, depName := range t.Deps {
-				prefix := depName + ":"
-				for _, a := range graph.Actions() {
-					if strings.HasPrefix(a.ID, prefix) {
-						depActionIDs = append(depActionIDs, a.ID)
-					}
-				}
-			}
-			transformAction := plugin.ActionSpec{
-				ID:        "_transform",
-				Body:      t.Transform,
-				Outputs:   []string{},
-				DependsOn: depActionIDs,
-			}
-			for i := range planActions {
-				planActions[i].DependsOn = append(planActions[i].DependsOn, "_transform")
-			}
-			planActions = append([]plugin.ActionSpec{transformAction}, planActions...)
-		}
-
-		if t.SealedRouting == "strict" {
-			if err := validateStrictSealedRouting(t, planActions); err != nil {
-				return nil, fmt.Errorf("coordinator: target %q: %w", t.Name, err)
-			}
-		} else {
-			// Apply target-level sealed_inputs to plan/transform-emitted actions.
-			// The plugin path threads these through TargetInfo, but pith plan
-			// programs emit bare action specs, so the coordinator attaches the
-			// target's sealed_inputs (and modes) to any emitted action that did
-			// not declare its own. This is what lets a pith body read a secret via
-			// secret/get / env-mode injection.
-			if len(t.SealedInputs) > 0 {
-				for i := range planActions {
-					if len(planActions[i].SealedInputs) == 0 {
-						planActions[i].SealedInputs = cloneStringMap(t.SealedInputs)
-						if len(t.SealedInputModes) > 0 {
-							planActions[i].SealedInputModes = cloneStringMap(t.SealedInputModes)
-						}
-					}
-				}
-			}
-
-			// Apply target-level sealed_outputs as a convenience: if the target
-			// declares them and no plan action set its own, attach them to the
-			// single action in the plan. Multi-action plans must have the
-			// plugin route sealed_outputs to the correct action explicitly.
-			if len(t.SealedOutputs) > 0 {
-				anyExplicit := false
-				for _, a := range planActions {
-					if len(a.SealedOutputs) > 0 {
-						anyExplicit = true
-						break
-					}
-				}
-				if !anyExplicit {
-					if len(planActions) != 1 {
-						return nil, fmt.Errorf("coordinator: target %q: sealed_outputs declared at target level but plan has %d actions; route them explicitly via the plugin", t.Name, len(planActions))
-					}
-					planActions[0].SealedOutputs = cloneStringMap(t.SealedOutputs)
-					planActions[0].SealedOutputModes = cloneStringMap(t.SealedOutputModes)
-				}
-			}
+		// Target-level sealed maps are the complete allow-list; actions
+		// claim from it explicitly (a lone action with no claims of its own
+		// is filled from the target maps).
+		autoClaimSingleAction(t, planActions)
+		if err := validateSealedRouting(t, planActions); err != nil {
+			return nil, fmt.Errorf("coordinator: target %q: %w", t.Name, err)
 		}
 
 		// Prefix action IDs with target name to avoid cross-target collisions.
@@ -566,7 +441,7 @@ func collectSealedProviders(graph *dag.Graph, plugins []ResolvedPlugin, inputs b
 func collectPluginIdentities(targets []config.Target, graph *dag.Graph, resolved []ResolvedPlugin, mgr *plugin.Manager) []PluginIdentity {
 	used := make(map[string]struct{})
 	for _, target := range targets {
-		if target.Toolchain != "" && target.Toolchain != "shell" && target.Toolchain != "secret-gen" && len(target.Plan) == 0 {
+		if target.Toolchain != "" && target.Toolchain != "shell" && target.Toolchain != "secret-gen" {
 			used[target.Toolchain] = struct{}{}
 		}
 	}
@@ -778,17 +653,15 @@ func (c *Coordinator) Execute(ctx context.Context, plan *PlanResult) (*BuildResu
 	return br, nil
 }
 
-// Build orchestrates the full build pipeline: Plan() + Execute() + advice + bundle plugins.
+// Build orchestrates the full build pipeline: Plan() + Execute() + bundle plugins.
 func (c *Coordinator) Build(ctx context.Context, targetNames []string) (*BuildResult, error) {
 	return c.BuildValidated(ctx, targetNames, nil)
 }
 
 // BuildValidated plans once, invokes validate before any execution boundary,
 // then executes and finalizes that exact PlanResult. A validation error stops
-// before sealed providers, actions, advice, or plugin bundling are invoked.
+// before sealed providers, actions, or plugin bundling are invoked.
 func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, validate func(*PlanResult) error) (*BuildResult, error) {
-	start := time.Now()
-
 	plan, err := c.Plan(ctx, targetNames)
 	if err != nil {
 		return nil, err
@@ -803,132 +676,7 @@ func (c *Coordinator) BuildValidated(ctx context.Context, targetNames []string, 
 		return result, err
 	}
 
-	// Run after-build advice (non-fatal).
-	c.runAfterBuildAdvice(ctx, result, targetNames, time.Since(start))
-
 	return result, nil
-}
-
-// runAfterBuildAdvice starts advice plugins, sends them the build manifest,
-// and shuts them down. Errors are logged but never fail the build.
-func (c *Coordinator) runAfterBuildAdvice(ctx context.Context, result *BuildResult, targetNames []string, elapsed time.Duration) {
-	if len(c.Config.Advice) == 0 {
-		return
-	}
-
-	// Filter to advice defs that want "after-build".
-	var afterBuild []config.AdviceDef
-	for _, a := range c.Config.Advice {
-		for _, phase := range a.Phases {
-			if phase == "after-build" {
-				afterBuild = append(afterBuild, a)
-				break
-			}
-		}
-	}
-	if len(afterBuild) == 0 {
-		return
-	}
-
-	// Resolve + start only the plugins referenced by advice defs.
-	home, _ := os.UserHomeDir()
-	resolver := &PluginResolver{
-		Store:       c.Store,
-		ProjectRoot: c.ProjectRoot,
-		CacheDir:    filepath.Join(home, ".mu", "plugins"),
-	}
-
-	// Find the PluginDef for each advice plugin.
-	pluginsByName := make(map[string]config.PluginDef)
-	for _, p := range c.Config.Plugins {
-		pluginsByName[p.Name] = p
-	}
-
-	var toResolve []config.PluginDef
-	for _, a := range afterBuild {
-		if pd, ok := pluginsByName[a.Plugin]; ok {
-			toResolve = append(toResolve, pd)
-		} else {
-			fmt.Fprintf(os.Stderr, "  advice: plugin %q not found in plugins[]\n", a.Plugin)
-		}
-	}
-	if len(toResolve) == 0 {
-		return
-	}
-
-	resolved, err := resolver.Resolve(ctx, toResolve)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "  advice: resolve plugins: %v\n", err)
-		return
-	}
-
-	mgr := plugin.NewManager(c.ProjectRoot)
-	if resolvedNeedsRuntime(resolved) {
-		registry := c.ToolchainRegistry
-		if registry == nil {
-			registry = NewToolchainRegistry(c.Store)
-		}
-		bbPath, err := c.resolveScriptRuntime(ctx, registry)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  advice: resolve script runtime: %v\n", err)
-			return
-		}
-		mgr.SetScriptRuntime(bbPath)
-	}
-
-	for _, rp := range resolved {
-		if err := mgr.Register(rp.Def); err != nil {
-			fmt.Fprintf(os.Stderr, "  advice: register %q: %v\n", rp.Def.Name, err)
-			return
-		}
-	}
-
-	if err := mgr.Start(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "  advice: start plugins: %v\n", err)
-		return
-	}
-	defer mgr.Close()
-
-	// Build manifest and context.
-	manifest := NewManifest(result, result.ExecResult, result.Targets, elapsed)
-	advCtx := &plugin.AdviseContext{
-		ProjectRoot: c.ProjectRoot,
-		Targets:     targetNames,
-		DurationS:   elapsed.Seconds(),
-	}
-	advCtx.GitSHA, advCtx.GitBranch, advCtx.GitDirty = gitInfo(c.ProjectRoot)
-
-	// Collect per-plugin configs and resolve sealed inputs.
-	configs := make(map[string]map[string]any)
-	secrets := make(map[string]map[string]string)
-	for _, a := range afterBuild {
-		if a.Config != nil {
-			configs[a.Plugin] = a.Config
-		}
-		// Sealed inputs for advice are resolved here. For now, pass as-is
-		// (refs, not values) — full secret resolution requires the secret
-		// provider plugins which may not be running. The advice plugin is
-		// responsible for resolving its own secrets if needed.
-		if len(a.SealedInputs) > 0 {
-			secrets[a.Plugin] = a.SealedInputs
-		}
-	}
-
-	mgr.Advise(ctx, "after-build", manifest, advCtx, configs, secrets)
-}
-
-// gitInfo returns the current HEAD SHA, branch, and dirty state.
-func gitInfo(projectRoot string) (sha, branch string, dirty bool) {
-	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--short", "HEAD").Output(); err == nil {
-		sha = strings.TrimSpace(string(out))
-	}
-	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		branch = strings.TrimSpace(string(out))
-	}
-	if err := exec.Command("git", "-C", projectRoot, "diff", "--quiet", "HEAD").Run(); err != nil {
-		dirty = true
-	}
-	return
 }
 
 // ObserveResult holds the observation result for a single target.
@@ -1255,101 +1003,6 @@ func cloneStringMap(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// mapToActionSpec converts a map[string]any (emitted by a pith plan program)
-// into a plugin.ActionSpec. Only recognized keys are mapped; unknown keys are
-// silently ignored so that plan programs can evolve independently of the spec.
-func mapToActionSpec(m map[string]any) plugin.ActionSpec {
-	var spec plugin.ActionSpec
-	if id, ok := m["id"].(string); ok {
-		spec.ID = id
-	}
-	if cmd, ok := m["command"].([]any); ok {
-		for _, c := range cmd {
-			if s, ok := c.(string); ok {
-				spec.Command = append(spec.Command, s)
-			}
-		}
-	}
-	if body, ok := m["body"].([]any); ok {
-		spec.Body = body
-	}
-	if es, ok := m["eweSource"].(string); ok {
-		spec.EweSource = es
-	}
-	if outputs, ok := m["outputs"].([]any); ok {
-		for _, o := range outputs {
-			if s, ok := o.(string); ok {
-				spec.Outputs = append(spec.Outputs, s)
-			}
-		}
-	}
-	if deps, ok := m["depends_on"].([]any); ok {
-		for _, d := range deps {
-			if s, ok := d.(string); ok {
-				spec.DependsOn = append(spec.DependsOn, s)
-			}
-		}
-	}
-	if env, ok := m["env"].(map[string]any); ok {
-		spec.Env = make(map[string]string, len(env))
-		for k, v := range env {
-			if s, ok := v.(string); ok {
-				spec.Env[k] = s
-			}
-		}
-	}
-	if inputs, ok := m["inputs"].(map[string]any); ok {
-		spec.Inputs = make(map[string]string, len(inputs))
-		for k, v := range inputs {
-			if s, ok := v.(string); ok {
-				spec.Inputs[k] = s
-			}
-		}
-	}
-	if wd, ok := m["work_dir"].(string); ok {
-		spec.WorkDir = wd
-	}
-	if si, ok := m["sealed_inputs"].(map[string]any); ok {
-		spec.SealedInputs = make(map[string]string, len(si))
-		for k, v := range si {
-			if s, ok := v.(string); ok {
-				spec.SealedInputs[k] = s
-			}
-		}
-	}
-	if sm, ok := m["sealed_input_modes"].(map[string]any); ok {
-		spec.SealedInputModes = make(map[string]string, len(sm))
-		for k, v := range sm {
-			if s, ok := v.(string); ok {
-				spec.SealedInputModes[k] = s
-			}
-		}
-	}
-	if so, ok := m["sealed_outputs"].(map[string]any); ok {
-		spec.SealedOutputs = make(map[string]string, len(so))
-		for k, v := range so {
-			if s, ok := v.(string); ok {
-				spec.SealedOutputs[k] = s
-			}
-		}
-	}
-	if sm, ok := m["sealed_output_modes"].(map[string]any); ok {
-		spec.SealedOutputModes = make(map[string]string, len(sm))
-		for k, v := range sm {
-			if s, ok := v.(string); ok {
-				spec.SealedOutputModes[k] = s
-			}
-		}
-	}
-	if imp, ok := m["impure"].(bool); ok {
-		spec.Impure = imp
-	}
-	if net, ok := m["network"].(bool); ok {
-		spec.Network = net
-	}
-	return spec
 }
 
 // prefixActions rewrites action IDs and DependsOn references with a target
