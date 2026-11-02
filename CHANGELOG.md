@@ -164,6 +164,24 @@ All notable changes to mu are recorded here. The format follows
   `plugin.schemas` (vendored CUE schema modules) fails to load. Catalog
   `schemas` / `pudl_mappings` are no longer copied into `mu.lock` or the
   installed bundle's `mu-plugin.json`. docs/plugin-output-schemas.md is gone.
+- The advice lifecycle. The top-level `advice` field, the after-build
+  advice phase, the `advise` plugin method and capability, `advise_phases` in
+  discover, the SDK's advise types, and the `advice` guide topic are gone (the
+  `void` plugin went with them, above). A `mu.cue` that sets `advice` fails
+  to load with "advice was removed", and a plugin that still lists the
+  `advise` capability fails discover as an unknown capability. Run post-build
+  hooks as a target, or as a CI step that reads `mu build --emit-manifest`.
+- The plugin discover cache and `--no-discover-cache`. Every plugin now gets
+  one live, validated discover per run; the cache only skipped one round-trip
+  to a process that was spawned anyway, and its entries bypassed discover
+  validation. Passing `--no-discover-cache` is an unknown-flag error. An old
+  `~/.mu/discover-cache.json` is no longer read or written and can be
+  deleted.
+- OCI plugin distribution: `mu plugin push` and `mu plugin list --remote`,
+  with the OCI plugin index behind them and `mu verify`'s plugin
+  schema-namespace lint. The GitHub release catalog (`mu plugin install`) is
+  the only plugin distribution channel. `mu build --publish` and
+  `mu cache push` are unaffected.
 
 ## [v0.3.5] — 2026-08-05
 

@@ -19,8 +19,10 @@ CONFIG FIELDS
 
   command           []string (required) — the command to run.
   env               map[string]string (optional) — environment variables.
-  network           bool (optional, default false) — allow network access.
-  impure            bool (optional, default true) — skip CAS cache.
+  network           bool (optional, default false) — allow network access
+                    (enforced only for pure targets, in the sandbox).
+  impure            bool (optional, default true) — run on the host and skip
+                    the CAS cache; false runs in the sandbox and caches.
   outputs           []string (optional) — declared output files.
   host_paths        []string (optional) — absolute host paths (files or
                     directories) the command may read and execute inside
@@ -59,6 +61,11 @@ AGGREGATION TARGETS
 
 IMPURE VS PURE
 
-  Shell targets default to impure (skip cache). Set "impure": false
+  Shell targets default to impure: the command runs on the host, sees the
+  whole filesystem and network, and is never cached. Set "impure": false
   for cacheable operations like linting or code generation where the
-  output is fully determined by the inputs.
+  output is fully determined by the inputs. A pure shell target runs in the
+  sandbox (`mu guide sandbox`): it sees only its sources, the system
+  directories and its host_paths, has no network unless "network": true,
+  and must declare relative outputs. A shell target cannot name a scratch
+  toolchain, so a tool outside /bin and /usr/bin needs host_paths.

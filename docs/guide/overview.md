@@ -17,6 +17,10 @@ THE MENTAL MODEL
   - plugins          translate targets into actions (how to get there)
   - the coordinator  resolves the cross-target action graph
   - the executor     runs the DAG, caches by content
+  - the sandbox      runs each pure action with only its declared inputs,
+                     toolchains and host_paths (plus system directories)
+                     and no network unless network: true; impure actions
+                     run on the host, uncached
   - the CAS          stores blobs and action results, keyed by sha256
   - sealed_inputs    resolve secrets for actions (read side)
   - sealed_outputs   capture secrets from actions (write side)
@@ -42,12 +46,19 @@ WHAT TO READ NEXT
   Authoring a project:    mu guide mu.cue → mu guide build
   Writing a plugin:       mu guide plugins → mu guide protocol
   Working with secrets:   mu guide secrets → mu guide secret-gen
+  Sandbox and isolation:  mu guide sandbox
   Hermetic toolchains:    mu guide toolchains
   Caching/CAS internals:  mu guide cache
 
 KEY DESIGN PRINCIPLES
 
   1. Everything that runs is an action with a deterministic cache key.
+     Pure actions run sandboxed: they see their inputs, named toolchains,
+     granted host_paths and the system directories, and the key covers
+     all but the system directories (a granted directory by path only).
+     The sandbox is kernel-enforced on macOS (Seatbelt) and Linux
+     (namespaces; not yet tested on a Linux host); without either, mu
+     warns and falls back to copy isolation, which enforces nothing.
   2. Plugins are sensors and planners; they never mutate the graph
      after it's built.
   3. Secrets values never enter the cache, manifests, or logs.

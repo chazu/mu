@@ -59,7 +59,7 @@ METHODS
       "method": "plan",
       "target": {"name": "//app", "toolchain": "go", "sources": [...], "config": {...}},
       "deps": [{"target": "//lib", "artifacts": {"binary": "lib/libfoo.a"}}],
-      "toolchain_artifacts": {"go": "/path/to/go"}
+      "toolchain_artifacts": {"bin/go": "sha256:..."}
     }
     Response: {
       "actions": [
@@ -127,7 +127,10 @@ ACTION SPEC FIELDS
                       (optional). Only the names enter the cache key, never
                       the values: use this (not env) to forward HOME, PATH,
                       GOCACHE, SSH_AUTH_SOCK, ... without baking host values
-                      into the plan. Applies to pure and impure actions.
+                      into the plan. Applies to pure and impure actions; a
+                      sandboxed action always gets the sandbox's own HOME and
+                      TMPDIR, and a forwarded host path is usable there only
+                      if it is visible (an input or a host_paths grant).
   sealed_inputs       map[NAME]ref — secret refs, resolved at runtime (optional).
   sealed_input_modes  map[NAME]mode — "env" (default) or "file" (optional).
   sealed_outputs      map[NAME]ref — destinations for $MU_SEALED_OUT_DIR/<NAME>
@@ -135,16 +138,22 @@ ACTION SPEC FIELDS
   sealed_output_modes map[NAME]mode — store mode per output:
                       "create" | "overwrite" | "create_if_absent".
                       Default "overwrite".
-  network             bool — whether action needs network (honor system).
+  network             bool — allow network access (default false). Pure
+                      actions run in the sandbox, where false is
+                      kernel-enforced under Seatbelt and Linux namespaces
+                      (not under copy isolation). Impure actions run on the
+                      host, where it restricts nothing. See `mu guide sandbox`.
   work_dir            string — working directory relative to project root (optional).
-  impure              bool — skip CAS cache (optional; forced true
-                      when sealed_outputs is non-empty).
+  impure              bool — run on the host, outside the sandbox, and skip
+                      the CAS cache (optional; forced true when
+                      sealed_outputs is non-empty). Pure actions (the default)
+                      run in the sandbox and are cached.
   toolchains          []string — names of `from: "scratch"` toolchains the
                       action needs (optional, pure actions only). Their files
                       are unpacked into the sandbox root (bin/ is on PATH; a
                       raw binary "<name>" lands at bin/<name>) and hashed into
-                      the action key. Naming one sandboxes the action. An
-                      unknown name is a plan error. See `mu guide sandbox`.
+                      the action key. An unknown name, or a toolchain on an
+                      impure action, is a plan error. See `mu guide sandbox`.
   host_paths          []string — absolute, clean host paths (files or
                       directories) granted read+exec inside the sandbox, for
                       tools that cannot be scratch toolchains (optional).
@@ -174,6 +183,9 @@ ACTION ENVIRONMENT
     2. env_passthrough — each named host variable that is set.
     3. MU_OUT / MU_SEALED_OUT_DIR — per-execution runtime paths.
     4. sealed_inputs — env-mode values, file-mode paths. Secrets always win.
+  A sandboxed action then gets HOME and TMPDIR set to the sandbox's own
+  directories, and the sandbox bin/ prepended to PATH (/usr/bin:/bin when no
+  PATH is declared).
 
 INTER-ACTION REFERENCES
 
