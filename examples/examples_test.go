@@ -126,7 +126,6 @@ func planAll(t *testing.T, dir string, cfg *config.ProjectConfig) int {
 		Config:            cfg,
 		Store:             store,
 		ToolchainRegistry: coordinator.NewToolchainRegistry(store),
-		NoDiscoverCache:   true,
 	}
 	plan, err := c.Plan(registryhttp.WithOffline(context.Background()), []string{"//..."})
 	if err != nil {

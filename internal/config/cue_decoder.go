@@ -127,6 +127,9 @@ func rejectRemovedFields(val cue.Value, path string) error {
 			return fmt.Errorf("%s: cache.%s was removed; the cache is now local disk plus one optional read-only remote:%s", path, field, cacheMigrationHint)
 		}
 	}
+	if val.LookupPath(cue.ParsePath("advice")).Exists() {
+		return fmt.Errorf("%s: advice was removed; run post-build hooks as a target or a CI step reading --emit-manifest", path)
+	}
 	targets := val.LookupPath(cue.ParsePath("targets"))
 	if !targets.Exists() {
 		return nil

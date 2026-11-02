@@ -52,7 +52,6 @@ CAPABILITY DERIVATION
     Observe        adds "observe"
     ResolveSecret  adds "resolve_secret"
     StoreSecret    adds "store_secret"
-    Advise         adds "advise" (also set AdvisePhases)
 
   This eliminates the most common bb-plugin bug: declaring a capability
   in the discover response but forgetting to wire the handler (or vice
@@ -71,8 +70,6 @@ THE PLUGIN STRUCT
       Observe       func(ctx, ObserveRequest) (ObserveResponse, error)  // optional
       ResolveSecret func(ctx, ref string) (string, error)               // optional
       StoreSecret   func(ctx, StoreSecretRequest) error                 // optional
-      Advise        func(ctx, AdviseRequest) error                      // optional
-      AdvisePhases  []string                                            // used only if Advise != nil
   }
 
   Methods:

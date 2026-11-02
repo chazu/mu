@@ -27,7 +27,6 @@ Plugins and integration:
 Execution:
 
   mu guide sandbox       Hermetic isolation: copy, Seatbelt, namespaces
-  mu guide advice        Build lifecycle observers (after-build hooks)
 
 Operations:
 

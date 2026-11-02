@@ -91,8 +91,7 @@ func TestPlan_TargetDepEdgesRootsToLeaves(t *testing.T) {
 			}},
 			Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
 		},
-		Store:           newTestStore(t),
-		NoDiscoverCache: true,
+		Store: newTestStore(t),
 	}
 	plan, err := c.Plan(context.Background(), []string{"//use"})
 	if err != nil {
@@ -142,8 +141,7 @@ func TestPlan_ProducerForPathNormalised(t *testing.T) {
 					}},
 					Plugins: []config.PluginDef{{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")}},
 				},
-				Store:           newTestStore(t),
-				NoDiscoverCache: true,
+				Store: newTestStore(t),
 			}
 			plan, err := c.Plan(context.Background(), []string{"//a-prod", "//b-cons"})
 			if err != nil {

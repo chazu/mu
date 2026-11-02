@@ -34,10 +34,9 @@ type Manager struct {
 }
 
 type pluginEntry struct {
-	def           PluginDef
-	process       *Process
-	discover      *DiscoverResponse
-	freshDiscover bool // true if discover was obtained live on the most recent Start
+	def      PluginDef
+	process  *Process
+	discover *DiscoverResponse
 }
 
 // NewManager creates a Manager but does not start any plugins.
@@ -78,42 +77,6 @@ func (m *Manager) Logs(name string) []string {
 	return entry.process.Logs()
 }
 
-// SetCachedDiscover pre-seeds plugin discover responses so Start will skip
-// the discover RPC for each named plugin. The plugin process is still
-// spawned — only the round-trip is avoided. Must be called after Register
-// but before Start. Entries for unknown plugin names are silently ignored.
-func (m *Manager) SetCachedDiscover(cached map[string]*DiscoverResponse) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for name, resp := range cached {
-		if resp == nil {
-			continue
-		}
-		entry, ok := m.plugins[name]
-		if !ok {
-			continue
-		}
-		cpy := *resp
-		entry.discover = &cpy
-	}
-}
-
-// NewlyDiscovered returns the names of plugins whose discover response was
-// obtained live during the most recent Start call (i.e. not seeded via
-// SetCachedDiscover). Callers use this to persist fresh entries into a
-// discover cache.
-func (m *Manager) NewlyDiscovered() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]string, 0, len(m.plugins))
-	for name, entry := range m.plugins {
-		if entry.freshDiscover {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
 // Register adds a plugin definition. A later Start starts only new definitions.
 func (m *Manager) Register(def PluginDef) error {
 	m.mu.Lock()
@@ -150,15 +113,8 @@ func (m *Manager) Start(ctx context.Context) error {
 		toStart = append(toStart, resolved{name: name, entry: entry, command: command})
 	}
 
-	// Reset fresh-discover flags from any prior Start.
-	for _, entry := range m.plugins {
-		entry.freshDiscover = false
-	}
-
-	// Start all plugins in parallel. If a plugin's discover response was
-	// pre-seeded via SetCachedDiscover, skip the discover RPC — the content-
-	// addressed plugin binary is byte-identical to what produced the cached
-	// response, so the response cannot have changed.
+	// Start all plugins in parallel; each gets exactly one live discover,
+	// which Process.Discover validates.
 	g, gctx := errgroup.WithContext(ctx)
 	for _, r := range toStart {
 		r := r // capture loop var
@@ -174,22 +130,11 @@ func (m *Manager) Start(ctx context.Context) error {
 			}
 			r.entry.process = proc
 
-			if r.entry.discover != nil {
-				// Cached — skip discover RPC. Still run a protocol-version
-				// sanity check against the cached value.
-				if r.entry.discover.ProtocolVersion != ProtocolVersion {
-					return fmt.Errorf("plugin %q: cached protocol version %d incompatible with v%d",
-						r.name, r.entry.discover.ProtocolVersion, ProtocolVersion)
-				}
-				return nil
-			}
-
 			resp, err := proc.Discover(gctx)
 			if err != nil {
 				return err
 			}
 			r.entry.discover = resp
-			r.entry.freshDiscover = true
 			return nil
 		})
 	}
@@ -319,36 +264,6 @@ func (m *Manager) StoreSecret(ctx context.Context, pluginName, ref, value, mode 
 	}
 
 	return entry.process.StoreSecret(ctx, ref, value, mode)
-}
-
-// Advise sends an advise request to all plugins registered for the given phase.
-// Errors are logged but do not fail the build — advice is supplementary.
-// Returns the responses from plugins that were called.
-func (m *Manager) Advise(ctx context.Context, phase string, manifest any, advCtx *AdviseContext, configs map[string]map[string]any, secrets map[string]map[string]string) []AdviseResponse {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var responses []AdviseResponse
-	for name, entry := range m.plugins {
-		if entry.process == nil || entry.discover == nil {
-			continue
-		}
-		if !entry.discover.HasCapability("advise") || !entry.discover.HasAdvisePhase(phase) {
-			continue
-		}
-		cfg := configs[name]
-		sec := secrets[name]
-		resp, err := entry.process.Advise(ctx, phase, manifest, advCtx, cfg, sec)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  advice %s/%s: %v\n", name, phase, err)
-			continue
-		}
-		if resp.Error != "" {
-			fmt.Fprintf(os.Stderr, "  advice %s/%s: %s\n", name, phase, resp.Error)
-		}
-		responses = append(responses, *resp)
-	}
-	return responses
 }
 
 // DiscoverInfo returns a copy of the discover response for a plugin, or nil if not found.

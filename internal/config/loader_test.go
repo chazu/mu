@@ -132,7 +132,6 @@ func TestLoad_MergeSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(sub, "mu.cue"), `
-toolchains: [{toolchain: "go", from: "scratch"}]
 targets: [{target: "server", toolchain: "go", sources: ["*.go"]}]
 `)
 
@@ -169,7 +168,6 @@ func TestLoad_MultipleSubdir(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeFile(t, filepath.Join(dir, "mu.cue"), `
-toolchains: [{toolchain: "go", from: "scratch"}]
 targets: [{target: "lib", toolchain: "go", sources: ["*.go"]}]
 `)
 	}
@@ -193,22 +191,145 @@ func TestLoad_AlreadyPrefixedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(sub, "mu.cue"), `
-toolchains: [{toolchain: "go", from: "scratch"}]
-targets: [{target: "//explicit/name", toolchain: "go", sources: ["*.go"]}]
+targets: [
+  {target: "//pkg/name", toolchain: "go", sources: ["*.go"]},
+  {target: "//pkg:colon", toolchain: "go", sources: ["*.go"]},
+  {target: "//pkg", toolchain: "go", sources: ["*.go"]},
+]
 `)
 
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	var found bool
+	found := map[string]bool{}
 	for _, tgt := range cfg.Targets {
-		if tgt.Name == "//explicit/name" {
-			found = true
+		found[tgt.Name] = true
+	}
+	if !found["//pkg/name"] || !found["//pkg:colon"] || !found["//pkg"] {
+		t.Fatalf("already-prefixed targets should not be modified, targets=%+v", cfg.Targets)
+	}
+}
+
+func TestLoad_SubconfigTargetOutsideDirRejected(t *testing.T) {
+	for _, name := range []string{"//explicit/name", "//pkgx/name", "//other:x"} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		writeFile(t, filepath.Join(root, "pkg", "mu.cue"),
+			`targets: [{target: "`+name+`", toolchain: "go", sources: ["*.go"]}]`)
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "outside this directory") ||
+			!strings.Contains(err.Error(), filepath.Join(root, "pkg", "mu.cue")) {
+			t.Fatalf("%s: Load error = %v, want outside-directory error naming pkg/mu.cue", name, err)
 		}
 	}
-	if !found {
-		t.Fatalf("already-prefixed target should not be modified, targets=%+v", cfg.Targets)
+}
+
+func TestLoad_SubconfigCommandRewrite(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+	writeFile(t, filepath.Join(root, "sub", "mu.cue"), `
+plugins: [
+  {name: "dot", command: ["./bin/plugin", "./arg", "a/b"]},
+  {name: "up", command: ["../tool", "../x"]},
+  {name: "shell", command: ["sh", "-c", "exec curl https://example.com/x | jq .a/b"]},
+  {name: "bare", command: ["bin/plugin"]},
+]
+`)
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := map[string][]string{}
+	for _, p := range cfg.Plugins {
+		got[p.Name] = p.Command
+	}
+	want := map[string][]string{
+		"dot":   {filepath.Join("sub", "bin", "plugin"), "./arg", "a/b"},
+		"up":    {"." + string(filepath.Separator) + "tool", "../x"},
+		"shell": {"sh", "-c", "exec curl https://example.com/x | jq .a/b"},
+		"bare":  {"bin/plugin"},
+	}
+	for name, w := range want {
+		if strings.Join(got[name], "\x00") != strings.Join(w, "\x00") {
+			t.Errorf("plugin %s command = %q, want %q", name, got[name], w)
+		}
+	}
+}
+
+func TestLoad_SubconfigRootOnlyFieldsRejected(t *testing.T) {
+	for _, field := range []string{
+		`secrets: {writable_refs: []}`,
+		`cache: {}`,
+		`publish: {repository: "ghcr.io/o/r"}`,
+	} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		sub := filepath.Join(root, "sub", "mu.cue")
+		writeFile(t, sub, field+"\n")
+		name := field[:strings.Index(field, ":")]
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), sub) ||
+			!strings.Contains(err.Error(), `"`+name+`" may only be set in the project root`) {
+			t.Fatalf("%s: Load error = %v, want root-only error naming %s", name, err, sub)
+		}
+	}
+}
+
+func TestLoad_DuplicateNamesAcrossConfigsRejected(t *testing.T) {
+	cases := []struct {
+		kind, root, sub, other string
+	}{
+		{"toolchain", minimalCueRoot("//root"), `toolchains: [{toolchain: "go", from: "scratch"}]`, ""},
+		{"plugin", minimalCueRoot("//root") + `plugins: [{name: "p", command: ["p"]}]` + "\n",
+			`plugins: [{name: "p", command: ["q"]}]`, ""},
+		{"plugin", minimalCueRoot("//root"),
+			`plugins: [{name: "p", command: ["q"]}]`, `plugins: [{name: "p", command: ["r"]}]`},
+	}
+	for _, tc := range cases {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), tc.root)
+		first := filepath.Join(root, "mu.cue")
+		second := filepath.Join(root, "sub", "mu.cue")
+		writeFile(t, second, tc.sub+"\n")
+		if tc.other != "" {
+			first = second
+			second = filepath.Join(root, "zz", "mu.cue")
+			writeFile(t, second, tc.other+"\n")
+		}
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), tc.kind+" ") ||
+			!strings.Contains(err.Error(), first+" and "+second) {
+			t.Fatalf("%s: Load error = %v, want duplicate error naming %s and %s", tc.kind, err, first, second)
+		}
+	}
+}
+
+func TestLoad_SkipsNestedModule(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+	// A separate project: its own cue.mod, absolute target names and a
+	// redeclared toolchain would all be errors as a sub-config.
+	writeFile(t, filepath.Join(root, "examples", "demo", "cue.mod", "module.cue"),
+		`module: "example.com/demo"
+language: version: "v0.11.0"
+`)
+	writeFile(t, filepath.Join(root, "examples", "demo", "mu.cue"), `package mu
+`+minimalCueRoot("//demo"))
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Targets) != 1 || cfg.Targets[0].Name != "//root" {
+		t.Fatalf("targets = %+v, want only //root", cfg.Targets)
+	}
+	demo, err := Load(filepath.Join(root, "examples", "demo"))
+	if err != nil {
+		t.Fatalf("Load nested project: %v", err)
+	}
+	if len(demo.Targets) != 1 || demo.Targets[0].Name != "//demo" {
+		t.Fatalf("nested targets = %+v, want only //demo", demo.Targets)
 	}
 }
 
@@ -221,7 +342,6 @@ func TestLoad_SkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(real, "mu.cue"), `
-toolchains: [{toolchain: "go", from: "scratch"}]
 targets: [{target: "lib", toolchain: "go", sources: ["*.go"]}]
 `)
 
@@ -246,7 +366,6 @@ func TestLoad_SkipsSymlinkedFile(t *testing.T) {
 
 	outside := t.TempDir()
 	writeFile(t, filepath.Join(outside, "mu.cue"), `
-toolchains: [{toolchain: "go", from: "scratch"}]
 targets: [{target: "injected", toolchain: "go", sources: ["*.go"]}]
 `)
 
@@ -292,6 +411,17 @@ preprocessor: {extension: "json", command: ["cat"]}
 	_, err := Load(dir)
 	if err == nil || !strings.Contains(err.Error(), "preprocessor was removed") {
 		t.Fatalf("Load error = %v, want \"preprocessor was removed\"", err)
+	}
+}
+
+func TestLoad_RejectsRemovedAdvice(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "mu.cue"), minimalCueRoot("//app")+`
+advice: [{plugin: "void", phases: ["after-build"]}]
+`)
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "advice was removed") {
+		t.Fatalf("Load error = %v, want \"advice was removed\"", err)
 	}
 }
 

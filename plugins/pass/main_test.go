@@ -186,9 +186,8 @@ func TestLocalPluginDirResolvesPassRefs(t *testing.T) {
 				SealedOutputModes: map[string]string{"OUT": "create"},
 			}},
 		},
-		Store:           cs,
-		Workers:         1,
-		NoDiscoverCache: true,
+		Store:   cs,
+		Workers: 1,
 	}
 	ctx := context.Background()
 	plan, err := c.Plan(ctx, []string{"//copy"})

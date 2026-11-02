@@ -109,7 +109,7 @@ mu build //hello
 
 That's the whole loop — no toolchain bootstrap needed for Go plugins. The
 SDK derives capabilities from which handlers (Plan, Observe,
-ResolveSecret, StoreSecret, Advise) are non-nil. Full SDK reference:
+ResolveSecret, StoreSecret) are non-nil. Full SDK reference:
 `mu guide sdk` or [`docs/guide/sdk.md`](docs/guide/sdk.md).
 
 ### Alternative: Babashka (or any other language)
@@ -161,7 +161,7 @@ server.
 Run `mu guide` for the topic index. Each topic has its own page:
 `overview`, `mu.cue`, `plugins`, `build`, `observe`, `cache`,
 `secrets`, `secret-gen`, `toolchains`, `shell`, `protocol`,
-`secret-providers`, `sandbox`, `advice`, `sdk`.
+`secret-providers`, `sandbox`, `sdk`.
 
 ## Topics
 
@@ -195,7 +195,6 @@ Run `mu guide` for the topic index. Each topic has its own page:
 | `remote-file` | Converge a file on a remote host over SSH |
 | `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
 | `terraform` | Infra provisioning + drift + sensitive-output capture |
-| `void` | Build webhook reporter (advice plugin) |
 
 ## Project Status
 

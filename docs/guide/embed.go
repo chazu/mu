@@ -28,7 +28,6 @@ var topicFiles = map[string]string{
 	"secret-providers": "secret-providers.md",
 	"protocol":         "protocol.md",
 	"sandbox":          "sandbox.md",
-	"advice":           "advice.md",
 	"sdk":              "sdk.md",
 }
 
