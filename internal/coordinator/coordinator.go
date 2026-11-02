@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -207,19 +208,21 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	// 6. Plan each target via its toolchain plugin and resolve actions.
 	graph := dag.NewGraph()
 
-	// Cross-target artifact plumbing: as each target is planned (in
-	// topological order, leaves first), record its declared_outputs so
-	// later dependents receive them via DepInfo.Artifacts, and track
-	// which action produces each output path so Resolve can wire
-	// implicit DependsOn edges across target boundaries.
+	// Cross-target artifact plumbing happens in two passes so that path
+	// wiring does not depend on planning order:
+	//
+	//  1. Plan every target (topological order, so each plugin receives its
+	//     deps' declared_outputs via DepInfo.Artifacts) and record which
+	//     action produces each output path.
+	//  2. Resolve every target's actions against the complete producer map.
+	//     An input naming another target's output becomes a deferred input
+	//     with a DependsOn edge to the producer, which orders the two even
+	//     without a deps relationship.
 	declaredByTarget := make(map[string]map[string]string, len(targets))
-	producerForPath := make(map[string]string)
-	// leavesByTarget records each planned target's leaf actions (no
-	// successor inside its own subgraph) so dependents can be ordered after
-	// them. A target with no actions forwards its own deps' leaves.
-	leavesByTarget := make(map[string][]string, len(targets))
+	producers := make(pathProducers)
+	plannedActions := make([][]plugin.ActionSpec, len(targets))
 
-	for _, t := range targets {
+	for i, t := range targets {
 		var planActions []plugin.ActionSpec
 		var declaredOutputs map[string]string
 
@@ -285,18 +288,36 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		// Prefix action IDs with target name to avoid cross-target collisions.
 		prefixActions(t.Name, planActions)
 
-		// Snapshot this target's output producers BEFORE Resolve runs:
-		// the target's own actions need to self-reference via {action:id}
-		// for intra-target wiring, not through the cross-target path map.
-		crossTargetProducers := cloneStringMap(producerForPath)
+		plannedActions[i] = planActions
+		declaredByTarget[t.Name] = cloneStringMap(declaredOutputs)
+		for _, a := range planActions {
+			for _, outPath := range a.Outputs {
+				producers[projectPathKey(c.ProjectRoot, a.WorkDir, outPath)] = pathProducer{
+					target: t.Name, actionID: a.ID, path: outPath,
+				}
+			}
+		}
+	}
 
-		resolved, err := Resolve(ctx, planActions, c.ProjectRoot, c.Store, crossTargetProducers)
+	// leavesByTarget records each resolved target's leaf actions (no
+	// successor inside its own subgraph) so dependents can be ordered after
+	// them. A target with no actions forwards its own deps' leaves.
+	leavesByTarget := make(map[string][]string, len(targets))
+	// pathDeps records, per consumer target, the targets whose outputs it
+	// reads by path; together with deps it must stay acyclic.
+	pathDeps := make(map[string][]string, len(targets))
+
+	for i, t := range targets {
+		// A target's own outputs are excluded: its actions wire to each
+		// other via {action:id}, not through the cross-target path map.
+		resolved, err := Resolve(ctx, plannedActions[i], c.ProjectRoot, c.Store, producers.actionIDsExcept(t.Name))
 		if err != nil {
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}
+		pathDeps[t.Name] = producers.useProducerPaths(c.ProjectRoot, resolved)
 
 		// Target deps order execution: every root action of t waits on
-		// every leaf action of each dep. Deps are planned first
+		// every leaf action of each dep. Deps are resolved first
 		// (resolveTargets sorts leaves first and pulls in unselected deps).
 		depLeaves := targetDepLeaves(t.Deps, leavesByTarget)
 		roots, leaves := subgraphEnds(resolved)
@@ -311,14 +332,10 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 				return nil, fmt.Errorf("coordinator: building DAG: %w", err)
 			}
 		}
+	}
 
-		// Register this target's outputs for any later-planned dependents.
-		declaredByTarget[t.Name] = cloneStringMap(declaredOutputs)
-		for _, a := range planActions {
-			for _, outPath := range a.Outputs {
-				producerForPath[projectPathKey(c.ProjectRoot, a.WorkDir, outPath)] = a.ID
-			}
-		}
+	if err := checkTargetCycles(targets, pathDeps); err != nil {
+		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
 	// Action-level sealed claims can introduce providers unknown until planning.
@@ -971,6 +988,113 @@ func projectPathKey(projectRoot, workDir, p string) string {
 		return filepath.Clean(p)
 	}
 	return filepath.Clean(filepath.Join(workDir, p))
+}
+
+// pathProducer is the action that declares an output path, with the path
+// spelled as the producer declared it (relative to its own work_dir).
+type pathProducer struct {
+	target, actionID, path string
+}
+
+// pathProducers maps projectPathKey-normalised output paths to their
+// producers across every planned target.
+type pathProducers map[string]pathProducer
+
+// actionIDsExcept returns the key -> producing action ID map Resolve uses for
+// cross-target wiring, leaving out the outputs of target self.
+func (p pathProducers) actionIDsExcept(self string) map[string]string {
+	out := make(map[string]string, len(p))
+	for key, prod := range p {
+		if prod.target != self {
+			out[key] = prod.actionID
+		}
+	}
+	return out
+}
+
+// useProducerPaths rewrites the OutputPath of every cross-target deferred
+// input to the producer's own spelling of the path. Resolve records the
+// consumer's project-relative spelling, but the executor looks the output up
+// among the producer's declared outputs and, failing that, opens it relative
+// to the producer's work_dir; both need the producer's form. It returns the
+// sorted, de-duplicated producer targets the actions read from.
+func (p pathProducers) useProducerPaths(projectRoot string, actions []*dag.Action) []string {
+	seen := make(map[string]bool)
+	var targets []string
+	for _, a := range actions {
+		for name, src := range a.InputSources {
+			if src.OutputPath == "" {
+				continue
+			}
+			prod, ok := p[projectPathKey(projectRoot, "", src.OutputPath)]
+			if !ok || prod.actionID != src.ProducerID {
+				continue
+			}
+			src.OutputPath = prod.path
+			a.InputSources[name] = src
+			if !seen[prod.target] {
+				seen[prod.target] = true
+				targets = append(targets, prod.target)
+			}
+		}
+	}
+	sort.Strings(targets)
+	return targets
+}
+
+// checkTargetCycles reports a cycle in the target graph formed by deps plus
+// cross-target path inputs (consumer -> producer). Deps alone are already
+// acyclic (resolveTargets), so any cycle found involves a path input.
+func checkTargetCycles(targets []config.Target, pathDeps map[string][]string) error {
+	edges := make(map[string][]string, len(targets))
+	names := make([]string, 0, len(targets))
+	for _, t := range targets {
+		names = append(names, t.Name)
+		seen := make(map[string]bool)
+		for _, d := range append(append([]string(nil), t.Deps...), pathDeps[t.Name]...) {
+			if !seen[d] {
+				seen[d] = true
+				edges[t.Name] = append(edges[t.Name], d)
+			}
+		}
+		sort.Strings(edges[t.Name])
+	}
+	sort.Strings(names)
+
+	const (
+		unvisited = iota
+		visiting
+		done
+	)
+	state := make(map[string]int, len(targets))
+	var stack []string
+	var visit func(string) error
+	visit = func(name string) error {
+		state[name] = visiting
+		stack = append(stack, name)
+		for _, next := range edges[name] {
+			switch state[next] {
+			case visiting:
+				cycle := append(append([]string(nil), stack[slices.Index(stack, next):]...), next)
+				return fmt.Errorf("target cycle through cross-target inputs: %s", strings.Join(cycle, " -> "))
+			case unvisited:
+				if err := visit(next); err != nil {
+					return err
+				}
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[name] = done
+		return nil
+	}
+	for _, name := range names {
+		if state[name] == unvisited {
+			if err := visit(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // subgraphEnds returns the sorted IDs of a target's root actions (no

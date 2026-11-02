@@ -18,6 +18,10 @@ All notable changes to mu are recorded here. The format follows
   was removed; setting it is a load error. secret-gen targets must declare
   `sealed_outputs: {VALUE: <ref>}` with the matching mode until `config.ref`
   goes away.
+- **Cross-target path inputs are wired regardless of planning order.** An
+  input naming another target's declared output now links to that target
+  even when the consumer sorts first and lists no `deps`. Targets that read
+  each other's outputs are reported as a cycle at plan time.
 
 ### Added
 
