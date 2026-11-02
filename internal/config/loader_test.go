@@ -294,3 +294,16 @@ preprocessor: {extension: "json", command: ["cat"]}
 		t.Fatalf("Load error = %v, want \"preprocessor was removed\"", err)
 	}
 }
+
+func TestLoad_RejectsRemovedKindImplements(t *testing.T) {
+	for _, field := range []string{`kind: "kit"`, `implements: "//iface"`} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "mu.cue"), minimalCueRoot("//root"))
+		writeFile(t, filepath.Join(root, "sub", "mu.cue"),
+			`targets: [{target: "x", toolchain: "shell", sources: [], `+field+`}]`)
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "kind/implements were removed") {
+			t.Fatalf("%s: Load error = %v, want \"kind/implements were removed\"", field, err)
+		}
+	}
+}

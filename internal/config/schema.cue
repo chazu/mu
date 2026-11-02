@@ -64,8 +64,6 @@ package mu
 	sealed_outputs?: {[string]: string}
 	sealed_output_modes?: {[string]: "create" | "overwrite" | "create_if_absent"}
 	sealed_routing?: "strict"
-	kind?:           "relationship" | "interface" | "component" | "kit" | ""
-	implements?:     string
 	...
 }
 

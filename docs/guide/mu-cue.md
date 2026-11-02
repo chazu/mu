@@ -51,9 +51,6 @@ TARGET FIELDS
                        (optional, default overwrite).
   sealed_routing       "strict" — require actions to claim target-level
                        sealed declarations explicitly (optional).
-  kind                 BRICK classification: "relationship",
-                       "interface", "component", "kit" (optional).
-  implements           Interface this component satisfies (optional).
 
 TARGET NAMING
 

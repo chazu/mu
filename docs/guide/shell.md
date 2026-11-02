@@ -24,24 +24,24 @@ CONFIG FIELDS
   outputs           []string (optional) — declared output files.
   observe_command   []string (optional) — command for drift detection.
 
-KIT TARGETS (AGGREGATION)
+AGGREGATION TARGETS
 
-  Use kind "kit" with deps to aggregate multiple targets:
+  A shell target with deps and a no-op command groups other targets
+  under one name:
 
   {
-    "target": "//lint",
-    "toolchain": "shell",
-    "kind": "kit",
-    "sources": [],
-    "deps": ["//lint/go-vet", "//lint/gofmt"],
-    "config": {
-      "command": ["true"],
-      "impure": false
+    target:    "//lint"
+    toolchain: "shell"
+    sources: []
+    deps: ["//lint/go-vet", "//lint/gofmt"]
+    config: {
+      command: ["true"]
+      impure:  false
     }
   }
 
-  Kit targets run after all their deps complete. They can observe
-  aggregated state from their dependencies.
+  Building //lint builds every dep; the "true" action itself does
+  nothing.
 
 IMPURE VS PURE
 

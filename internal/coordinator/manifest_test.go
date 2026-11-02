@@ -35,7 +35,7 @@ func TestNewManifestValidJSON(t *testing.T) {
 	}
 
 	targets := []config.Target{
-		{Name: "//app", Toolchain: "go", Kind: "component", Implements: "interface/app"},
+		{Name: "//app", Toolchain: "go"},
 	}
 
 	elapsed := 2500 * time.Millisecond
@@ -149,7 +149,7 @@ func TestNewManifestEmptyBuild(t *testing.T) {
 	}
 }
 
-func TestNewManifestBRICKMetadata(t *testing.T) {
+func TestNewManifestTargets(t *testing.T) {
 	execResult := &dag.ExecuteResult{
 		Completed: []dag.ActionStatus{
 			{ID: "//app:build", ExitCode: 0},
@@ -157,42 +157,30 @@ func TestNewManifestBRICKMetadata(t *testing.T) {
 	}
 	result := &BuildResult{Completed: 1, ExecResult: execResult}
 	targets := []config.Target{
-		{Name: "//app", Toolchain: "k8s", Kind: "component", Implements: "interface/app"},
-		{Name: "//infra", Toolchain: "terraform", Kind: "component"},
+		{Name: "//app", Toolchain: "k8s"},
+		{Name: "//infra", Toolchain: "terraform"},
 	}
 
 	manifest := NewManifest(result, execResult, targets, time.Second)
 
-	if len(manifest.Targets) != 2 {
-		t.Fatalf("Targets count = %d, want 2", len(manifest.Targets))
+	want := []ManifestTarget{
+		{Name: "//app", Toolchain: "k8s"},
+		{Name: "//infra", Toolchain: "terraform"},
+	}
+	if len(manifest.Targets) != len(want) {
+		t.Fatalf("Targets = %+v, want %+v", manifest.Targets, want)
+	}
+	for i := range want {
+		if manifest.Targets[i] != want[i] {
+			t.Errorf("Targets[%d] = %+v, want %+v", i, manifest.Targets[i], want[i])
+		}
 	}
 
-	app := manifest.Targets[0]
-	if app.Kind != "component" {
-		t.Errorf("app.Kind = %q, want component", app.Kind)
-	}
-	if app.Implements != "interface/app" {
-		t.Errorf("app.Implements = %q, want interface/app", app.Implements)
-	}
-
-	infra := manifest.Targets[1]
-	if infra.Implements != "" {
-		t.Errorf("infra.Implements = %q, want empty", infra.Implements)
-	}
-
-	// Verify BRICK fields round-trip through JSON.
-	data, err := json.Marshal(manifest)
+	data, err := json.Marshal(manifest.Targets[0])
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
-	var rt Manifest
-	if err := json.Unmarshal(data, &rt); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
-	}
-	if rt.Targets[0].Kind != "component" {
-		t.Errorf("round-trip Kind = %q, want component", rt.Targets[0].Kind)
-	}
-	if rt.Targets[0].Implements != "interface/app" {
-		t.Errorf("round-trip Implements = %q, want interface/app", rt.Targets[0].Implements)
+	if got := string(data); got != `{"name":"//app","toolchain":"k8s"}` {
+		t.Errorf("target JSON = %s", got)
 	}
 }
