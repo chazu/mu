@@ -47,7 +47,7 @@ func (c *cliContext) resolveOptionalProject() (int, bool) {
 	if code, ok := c.Resolve(resolveOpts{}); !ok {
 		return code, false
 	}
-	if *c.flagConfig == "" {
+	if c.configPath() == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return c.fail(exitFail, "%v", err), false
@@ -90,7 +90,7 @@ type pluginListItem struct {
 func runPluginList(args []string) int {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("plugin list", fs)
+	cli := newCLIContext("plugin list", fs, useConfig, useJSON, useOffline)
 	if code, ok := parseFlags(fs, args, "plugin list [flags]"); !ok {
 		return code
 	}

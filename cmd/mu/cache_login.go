@@ -27,7 +27,7 @@ import (
 func runCacheLogin(args []string) int {
 	fs := flag.NewFlagSet("cache login", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	c := newCLIContext("cache login", fs)
+	c := newCLIContext("cache login", fs, useConfig, useOffline)
 	username := fs.String("username", "", "registry username")
 	password := fs.String("password", "", "registry password (prefer --password-stdin)")
 	passwordStdin := fs.Bool("password-stdin", false, "read password from stdin")
@@ -94,7 +94,7 @@ func runCacheLogin(args []string) int {
 func runCacheLogout(args []string) int {
 	fs := flag.NewFlagSet("cache logout", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	c := newCLIContext("cache logout", fs)
+	c := newCLIContext("cache logout", fs, useConfig, useOffline)
 	if code, ok := parseFlags(fs, args, "cache logout [flags] [host]"); !ok {
 		return code
 	}

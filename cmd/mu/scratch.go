@@ -6,17 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"time"
 
 	"github.com/chazu/mu/internal/coordinator"
-	"github.com/chazu/mu/internal/scratch"
 )
 
 func runScratch(args []string) int {
 	fs := flag.NewFlagSet("scratch", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("scratch", fs)
+	cli := newCLIContext("scratch", fs, useConfig, useOffline)
 	noCache := fs.Bool("no-cache", false, "skip cache reads")
 	if code, ok := parseFlags(fs, args, "scratch [flags]"); !ok {
 		return code
@@ -24,7 +22,6 @@ func runScratch(args []string) int {
 	if code, ok := cli.Resolve(resolveOpts{
 		NeedConfig:     true,
 		NeedStore:      true,
-		NoCache:        *noCache,
 		ValidateConfig: true,
 	}); !ok {
 		return code
@@ -42,14 +39,7 @@ func runScratch(args []string) int {
 
 	start := time.Now()
 
-	registry := coordinator.NewToolchainRegistry(cli.Store)
-	home, _ := os.UserHomeDir()
-	b := &scratch.Builder{
-		NoCache:  *noCache,
-		Store:    cli.Store,
-		Registry: registry,
-		CacheDir: filepath.Join(home, ".mu", "cache"),
-	}
+	b := newScratchBuilder(cli, coordinator.NewToolchainRegistry(cli.Store), *noCache)
 	if err := b.Build(ctx, cli.Config); err != nil {
 		return cli.fail(exitFail, "%v", err)
 	}

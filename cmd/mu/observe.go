@@ -7,17 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
-
-	"github.com/chazu/mu/internal/coordinator"
-	"github.com/chazu/mu/internal/scratch"
 )
 
 func runObserve(args []string) int {
 	fs := flag.NewFlagSet("observe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	cli := newCLIContext("observe", fs)
+	cli := newCLIContext("observe", fs, useConfig, useJSON, useVerbose, useOffline)
 	ndjsonOut := fs.Bool("ndjson", false, "output current.records as NDJSON (one record per line)")
 	if code, ok := parseFlags(fs, args, "observe [flags] <target>..."); !ok {
 		return code
@@ -39,24 +35,7 @@ func runObserve(args []string) int {
 	ctx, stop := signal.NotifyContext(cli.networkContext(context.Background()), os.Interrupt)
 	defer stop()
 
-	registry := coordinator.NewToolchainRegistry(cli.Store)
-
-	c := &coordinator.Coordinator{
-		ProjectRoot:       cli.ProjectRoot,
-		Config:            cli.Config,
-		Store:             cli.Store,
-		ToolchainRegistry: registry,
-		Verbose:           cli.Verbose,
-	}
-
-	if len(cli.Config.Toolchains) > 0 {
-		home, _ := os.UserHomeDir()
-		c.Builder = &scratch.Builder{
-			Store:    cli.Store,
-			Registry: registry,
-			CacheDir: filepath.Join(home, ".mu", "cache"),
-		}
-	}
+	c := newCoordinator(cli, coordinatorOpts{})
 
 	fmt.Fprintf(os.Stderr, "mu observe %s\n", strings.Join(targets, " "))
 
