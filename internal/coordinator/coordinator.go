@@ -237,6 +237,10 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		} else if t.Toolchain == "secret-gen" {
 			// secret-gen targets are built-in: derive a value, route it
 			// through the configured secret provider via sealed_outputs.
+			// Its output mode defaults to create_if_absent; apply that to
+			// the target too so routing validation sees the same mode.
+			t = builtin.SecretGenDefaults(t)
+			targets[i] = t
 			actions, declared, err := builtin.SecretGenPlan(t)
 			if err != nil {
 				return nil, fmt.Errorf("coordinator: %w", err)

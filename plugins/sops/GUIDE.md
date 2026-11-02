@@ -68,11 +68,11 @@ WRITING SECRETS (sealed_outputs)
 
     target: "//bootstrap/db-pass"
     toolchain: "secret-gen"
+    sealed_outputs:      {VALUE: "sops:secrets/prod.yaml#database.password"}
+    sealed_output_modes: {VALUE: "create_if_absent"}
     config: {
-        ref:        "sops:secrets/prod.yaml#database.password"
         derivation: ["openssl", "rand", "-base64", "24"]
     }
-    sealed_output_modes: {VALUE: "create_if_absent"}
 
   Or capture a TF output via the terraform plugin's
   config.sealed_output_outputs and route it to a sops file:

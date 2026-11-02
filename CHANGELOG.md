@@ -15,9 +15,12 @@ All notable changes to mu are recorded here. The format follows
   action and never checked an action's own claims, so a plugin could claim a
   ref the target never declared. One convenience remains: a plan with exactly
   one action and no claims gets the target's maps. The `sealed_routing` field
-  was removed; setting it is a load error. secret-gen targets must declare
-  `sealed_outputs: {VALUE: <ref>}` with the matching mode until `config.ref`
-  goes away.
+  was removed; setting it is a load error.
+- **secret-gen names its destination only in `sealed_outputs`.** A
+  secret-gen target declares exactly one `sealed_outputs` entry (any name,
+  conventionally `VALUE`) and optionally its `sealed_output_modes` entry,
+  which defaults to `create_if_absent`. `config.ref` and `config.mode` were
+  removed; setting either fails planning with the replacement to write.
 - **Cross-target path inputs are wired regardless of planning order.** An
   input naming another target's declared output now links to that target
   even when the consumer sorts first and lists no `deps`. Targets that read

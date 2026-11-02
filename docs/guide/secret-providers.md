@@ -76,7 +76,8 @@ store_secret
 
   The mode comes from sealed_output_modes. Target authors may declare it in
   mu.cue, and action plugins forward the per-name mode onto each ActionSpec at
-  plan time. Missing modes default to "overwrite". Validate the effective mode
+  plan time. Missing modes default to "overwrite" (secret-gen targets
+  default to "create_if_absent"). Validate the effective mode
   and reject anything else explicitly.
 
   Like resolve_secret, never log the value. If your backend's CLI

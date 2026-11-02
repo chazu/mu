@@ -29,7 +29,6 @@ func TestReadOnlySDKProviderRejectsSealedOutputAtPlan(t *testing.T) {
 				SealedOutputs:     map[string]string{"VALUE": "ro:dest"},
 				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
-					"ref":        "ro:dest",
 					"derivation": []any{"echo", "abc"},
 				},
 			}},

@@ -153,8 +153,9 @@ One convenience: when a target declares sealed maps and its plan has
 exactly ONE action that makes no sealed claims, mu fills that action's
 claims from the target maps. This covers simple single-action targets
 (shell, most plugins). Multi-action plans must claim explicitly.
-secret-gen claims its VALUE output itself, so its target must declare
-sealed_outputs: {VALUE: <ref>} with the matching mode (see
+secret-gen takes its destination from the target's single
+sealed_outputs entry, e.g. sealed_outputs: {VALUE: <ref>}; its mode
+defaults to create_if_absent rather than overwrite (see
 'mu guide secret-gen').
 
 Routing is always strict. The old `sealed_routing` field was removed;
