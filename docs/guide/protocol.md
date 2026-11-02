@@ -31,6 +31,7 @@ METHODS
     Request:  {"method": "discover"}
     Response: {
       "name": "myplugin",
+      "description": "one-line summary (optional)",
       "version": "0.1.0",
       "protocol_version": 1,
       "consumes": ["source:any"],
@@ -40,19 +41,20 @@ METHODS
     }
 
     Plugins must declare every supported method in `capabilities`.
-    `plan` is required only for build/convergence plugins. The old
-    `observe` method was removed (mu is a build tool); a plugin that
-    still advertises it fails discover with a removal error.
+    `plan` is required only for build plugins. The only methods are
+    discover, plan, resolve_secret and store_secret: the old `observe`
+    and `advise` methods were removed (mu is a build tool), and a plugin
+    that still advertises `observe` fails discover with a removal error.
 
     Plan-capable plugins should declare `config_schema` (field name ->
     {"type", "description", "default", "required"}): mu validates each
     target's config against it before planning, so a typo or wrong type
     fails early. When a plan-capable plugin declares none and a target
     passes it config, mu prints one warning per plugin per run. Plugins
-    that do not plan (secret providers, advisers) take no target config
+    that do not plan (secret providers) take no target config
     and need no schema.
 
-  plan (optional; required for build/convergence plugins)
+  plan (optional; required for build plugins)
     Request:  {
       "method": "plan",
       "target": {"name": "//app", "toolchain": "go", "sources": [...], "config": {...}},
@@ -147,6 +149,10 @@ ACTION SPEC FIELDS
   retries             int — additional attempts on failure (network actions only).
   retry_backoff_ms    int — sleep between retries.
 
+  Any other field is ignored, except the removed `body` and `ewe_source`,
+  which fail the plan with "action bodies were removed" / "ewe actions were
+  removed; emit a command instead".
+
 ACTION ENVIRONMENT
 
   mu builds each action's environment in one place, in this order (later
@@ -198,5 +204,3 @@ CROSS-TARGET ARTIFACTS
   Listing a target in "deps" also orders execution on its own: every
   action of the dependent with no predecessor in its own subgraph waits
   for every action of each dep with no successor in the dep's subgraph.
-
-  See 'mu guide pudl' for the terraform → pudl ingest end-to-end example.

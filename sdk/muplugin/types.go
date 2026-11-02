@@ -11,7 +11,7 @@
 //	            return muplugin.PlanResponse{
 //	                Actions: []muplugin.ActionSpec{{
 //	                    ID:      "greet",
-//	                    Command: []string{"echo", "hello"},
+//	                    Command: []string{"sh", "-c", "echo hello > hello.txt"},
 //	                    Outputs: []string{"hello.txt"},
 //	                }},
 //	                Outputs: map[string]string{"text": "hello.txt"},
@@ -98,7 +98,7 @@ type TargetInfo struct {
 // DepInfo carries what a dependency produced.
 type DepInfo struct {
 	Target    string            `json:"target"`    // e.g. "//lib/utils"
-	Artifacts map[string]string `json:"artifacts"` // artifact type -> digest string
+	Artifacts map[string]string `json:"artifacts"` // artifact type -> project-relative output path (the dep's declared_outputs)
 }
 
 // ActionSpec is the plugin's output -- an action template with file paths (not resolved digests).
