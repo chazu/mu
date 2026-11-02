@@ -264,6 +264,10 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 	// implicit DependsOn edges across target boundaries.
 	declaredByTarget := make(map[string]map[string]string, len(targets))
 	producerForPath := make(map[string]string)
+	// leavesByTarget records each planned target's leaf actions (no
+	// successor inside its own subgraph) so dependents can be ordered after
+	// them. A target with no actions forwards its own deps' leaves.
+	leavesByTarget := make(map[string][]string, len(targets))
 
 	for _, t := range targets {
 		var planActions []plugin.ActionSpec
@@ -416,6 +420,17 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 			return nil, fmt.Errorf("coordinator: resolving target %q: %w", t.Name, err)
 		}
 
+		// Target deps order execution: every root action of t waits on
+		// every leaf action of each dep. Deps are planned first
+		// (resolveTargets sorts leaves first and pulls in unselected deps).
+		depLeaves := targetDepLeaves(t.Deps, leavesByTarget)
+		roots, leaves := subgraphEnds(resolved)
+		addDependsOn(resolved, roots, depLeaves)
+		if len(resolved) == 0 {
+			leaves = depLeaves
+		}
+		leavesByTarget[t.Name] = leaves
+
 		for _, a := range resolved {
 			if err := graph.AddAction(a); err != nil {
 				return nil, fmt.Errorf("coordinator: building DAG: %w", err)
@@ -426,7 +441,7 @@ func (c *Coordinator) Plan(ctx context.Context, targetNames []string) (*PlanResu
 		declaredByTarget[t.Name] = cloneStringMap(declaredOutputs)
 		for _, a := range planActions {
 			for _, outPath := range a.Outputs {
-				producerForPath[outPath] = a.ID
+				producerForPath[projectPathKey(c.ProjectRoot, a.WorkDir, outPath)] = a.ID
 			}
 		}
 	}
@@ -1195,6 +1210,98 @@ func aggregateKitState(name string, deps []string, results []ObserveResult) Obse
 // snapshot per-target state (declared outputs, producer map) so that
 // downstream mutations by plugins or later planning iterations don't
 // reach back into earlier targets.
+// projectPathKey normalises a path to the project-relative form used to
+// match one action's outputs against another action's inputs. Outputs are
+// relative to the producing action's work_dir; inputs are relative to the
+// project root (pass workDir ""). Absolute paths inside projectRoot are made
+// relative, so "./x", "x", and "<root>/x" all yield the same key.
+func projectPathKey(projectRoot, workDir, p string) string {
+	if filepath.IsAbs(p) {
+		if rel, err := filepath.Rel(projectRoot, p); err == nil && filepath.IsLocal(rel) {
+			return rel
+		}
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(filepath.Join(workDir, p))
+}
+
+// subgraphEnds returns the sorted IDs of a target's root actions (no
+// predecessor inside the subgraph) and leaf actions (no successor inside it).
+// Edges to actions outside the subgraph are ignored.
+func subgraphEnds(actions []*dag.Action) (roots, leaves []string) {
+	ids := make(map[string]bool, len(actions))
+	for _, a := range actions {
+		ids[a.ID] = true
+	}
+	hasPred := make(map[string]bool)
+	hasSucc := make(map[string]bool)
+	for _, a := range actions {
+		for _, d := range a.DependsOn {
+			if ids[d] && d != a.ID {
+				hasPred[a.ID] = true
+				hasSucc[d] = true
+			}
+		}
+	}
+	for _, a := range actions {
+		if !hasPred[a.ID] {
+			roots = append(roots, a.ID)
+		}
+		if !hasSucc[a.ID] {
+			leaves = append(leaves, a.ID)
+		}
+	}
+	sort.Strings(roots)
+	sort.Strings(leaves)
+	return roots, leaves
+}
+
+// targetDepLeaves returns the sorted, de-duplicated leaf action IDs of the
+// given dependency targets.
+func targetDepLeaves(deps []string, leavesByTarget map[string][]string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, dep := range deps {
+		for _, id := range leavesByTarget[dep] {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// addDependsOn appends each of edges (already sorted) to the DependsOn of
+// the actions named by ids, skipping edges an action already declares.
+func addDependsOn(actions []*dag.Action, ids, edges []string) {
+	if len(edges) == 0 {
+		return
+	}
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	for _, a := range actions {
+		if !want[a.ID] {
+			continue
+		}
+		have := make(map[string]bool, len(a.DependsOn))
+		merged := append([]string(nil), a.DependsOn...)
+		for _, d := range merged {
+			have[d] = true
+		}
+		for _, e := range edges {
+			if !have[e] {
+				have[e] = true
+				merged = append(merged, e)
+			}
+		}
+		a.DependsOn = merged
+	}
+}
+
 func cloneStringMap(m map[string]string) map[string]string {
 	if len(m) == 0 {
 		return nil

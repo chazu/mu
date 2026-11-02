@@ -180,6 +180,12 @@ CROSS-TARGET ARTIFACTS
     "inputs": {"cryptolib": "lib/crypto/libcrypto.a"}
   mu detects that the path is produced by an already-planned action,
   defers the input digest, and injects an implicit DependsOn edge to the
-  producing action so the consumer runs after the producer.
+  producing action so the consumer runs after the producer. Paths are
+  compared after cleaning: outputs relative to the producer's work_dir,
+  inputs relative to the project root ("./x" and "x" match).
+
+  Listing a target in "deps" also orders execution on its own: every
+  action of the dependent with no predecessor in its own subgraph waits
+  for every action of each dep with no successor in the dep's subgraph.
 
   See 'mu guide pudl' for the terraform → pudl ingest end-to-end example.
