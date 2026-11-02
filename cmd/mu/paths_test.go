@@ -52,3 +52,56 @@ targets: [{
 		t.Fatalf("~/.mu/cache was created (stat err %v)", err)
 	}
 }
+
+// MU_HOME relocates the whole state directory: a build, `mu cache ls`,
+// `mu plugin list`, `mu login` and the staging sweep write under MU_HOME and
+// nothing under ~/.mu.
+func TestMuHomeRelocatesAllState(t *testing.T) {
+	host, _ := loginFixture(t) // HOME is a fresh temp dir; cwd is outside any project
+	home, _ := os.UserHomeDir()
+	muHome := filepath.Join(t.TempDir(), "mu-home")
+	t.Setenv("MU_HOME", muHome)
+	t.Setenv("MU_NO_STAGING_SWEEP", "")
+
+	project := t.TempDir()
+	config := `package mu
+targets: [{
+	target:    "//out"
+	toolchain: "shell"
+	config: {impure: false, command: ["sh", "-c", "printf hi > \"$MU_OUT/out\""], outputs: ["out"]}
+}]
+`
+	if err := os.WriteFile(filepath.Join(project, "mu.cue"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(project)
+
+	startStagingSweep()
+	if code := captureBuildCode(t, func() int { return runBuild([]string{"//out"}) }); code != exitOK {
+		t.Fatalf("build exit = %d", code)
+	}
+	if code := captureBuildCode(t, func() int { return runCacheLs(nil) }); code != exitOK {
+		t.Fatalf("cache ls exit = %d", code)
+	}
+	if code := captureBuildCode(t, func() int { return runPluginList(nil) }); code != exitOK {
+		t.Fatalf("plugin list exit = %d", code)
+	}
+	code := withStdin(t, "s3cret\n", func() int {
+		return runLogin([]string{"--username", "alice", "--password-stdin", host})
+	})
+	if code != exitOK {
+		t.Fatalf("login exit = %d", code)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".mu")); !os.IsNotExist(err) {
+		t.Fatalf("~/.mu was created (stat err %v)", err)
+	}
+	for _, p := range []string{
+		filepath.Join(muHome, "cache", ".lock"),
+		filepath.Join(muHome, "credentials.json"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("expected %s: %v", p, err)
+		}
+	}
+}

@@ -242,7 +242,7 @@ func (c *cliContext) requireRegistry() bool {
 
 // localCacheDir returns the local disk cache directory for the cache
 // subcommands: the cache.path of the project named by --config or
-// discovered from the working directory, else the default ~/.mu/cache.
+// discovered from the working directory, else $MU_HOME/cache or ~/.mu/cache.
 func (c *cliContext) localCacheDir() (string, int, bool) {
 	if code, ok := c.resolveOptionalProject(); !ok {
 		return "", code, false

@@ -107,5 +107,6 @@ Commands:
   version    Print the mu version
   help       Show help for mu or a command (mu help <command> [<subcommand>])
 
-Flags may come before or after positional arguments; "--" ends flags.`)
+Flags may come before or after positional arguments; "--" ends flags.
+MU_HOME relocates mu's state directory (default ~/.mu; see mu guide cache).`)
 }
