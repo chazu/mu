@@ -7,6 +7,14 @@ All notable changes to mu are recorded here. The format follows
 
 ### Changed
 
+- **`pass` and `keypair-gen` are Go plugins that must be built.** Their
+  `plugin.bb` files are gone and each manifest's entrypoint is a compiled
+  binary named `plugin`, which is not committed. Build it before a project
+  references the directory with `script:`:
+  `go build -trimpath -o plugins/<name>/plugin ./plugins/<name>`. Until you
+  do, resolution fails with "entrypoint ... not found". `mu plugin install`
+  builds catalog packages itself (Go must be installed). pass now rejects an
+  empty `secret_value` the way it rejects a missing one.
 - **mu warns about unvalidated plugin config.** When a plan-capable plugin
   declares no `config_schema` and a target passes it config, `mu build`
   prints one warning per plugin. Every in-tree plan-capable plugin now
@@ -105,6 +113,15 @@ All notable changes to mu are recorded here. The format follows
 
 ### Removed
 
+- The `scratch`, `envsecret`, `cowsay`, `zig` and `void` plugins, and the
+  `cowsay` and `scratch` examples. `scratch` duplicated the built-in
+  `from: "scratch"` toolchain handling (`mu scratch`); `envsecret`
+  duplicated the built-in `env:` secret scheme; `cowsay` was a toy whose
+  example target leaked into the root project through sub-config merging;
+  `zig` was unused and untested; `void` was the only advice plugin and went
+  with the advice lifecycle (it signed webhooks with the unresolved secret
+  ref). A project that still lists one of them fails to resolve it; use
+  `mu scratch`, `env:NAME` refs, or a `shell` target instead.
 - The pith VM. Targets can no longer carry inline `plan` or `transform`
   programs, and actions can no longer carry a `body`. A `mu.cue` target that
   sets `plan`, `transform` or `body` fails to load, and a plugin plan response
