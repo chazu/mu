@@ -141,7 +141,7 @@ mu scratch    Build toolchains from scratch
 mu cache      Inspect/manage CAS cache (ls, inspect, size, clean, push, login)
 mu target     List and inspect targets
 mu graph      Show dependency chains (ASCII/DOT/JSON)
-mu plugin     Search, install, update, list, inspect, add plugins
+mu plugin     List, inspect, and install plugins
 mu observe    Drift detection (pipe --json into pudl)
 mu verify     Validate CAS integrity
 mu guide      Quick-reference help topics
@@ -150,11 +150,10 @@ mu version
 
 Shared flags: `--json`, `--verbose`, `--config PATH`.
 
-The official source-package catalog is available through `mu plugin search`.
-Use `mu plugin install NAME[@VERSION]` to download and verify a GitHub release
+Plugins are distributed through the official GitHub release catalog.
+Use `mu plugin install NAME[@VERSION]` to download and verify a release
 asset, bundle it into the local CAS, register its digest in `mu.cue`, and pin
-the source and bundle digests in `mu.lock`. `mu plugin update` refreshes one or
-all locked catalog plugins; `mu plugin lock --json` displays the lockfile.
+the source and bundle digests in `mu.lock`. Re-run install to update.
 Use `--catalog URL` or `MU_PLUGIN_CATALOG` for a catalog mirror or local test
 server.
 

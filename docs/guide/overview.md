@@ -33,7 +33,7 @@ THE DAY-TO-DAY VERBS
   mu build --plan <target>  Show the planned actions, don't run them.
   mu observe <target>...    Ask each plugin to report current state.
   mu cache ls               List cached action results.
-  mu plugin list            Show registered plugins.
+  mu plugin list            Show project and installed plugins.
   mu plugin info <name>     Show capabilities/metadata for one plugin.
   mu target list            Show targets defined in this project.
 
