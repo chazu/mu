@@ -2,11 +2,8 @@
 // Paired with testdata/mu.json — cue_decoder_test asserts that the
 // cueDecoder output deep-equals the jsonDecoder output on this pair.
 cache: {
-	backends: [
-		{type: "disk", path: "~/.mu/cache"},
-		{type: "oci", registry: "registry.loosh.cloud/mu", write: false},
-	]
-	read_repair: true
+	path:   "~/.mu/cache"
+	remote: "registry.loosh.cloud/mu"
 	push: {
 		registry:   "registry.loosh.cloud"
 		repository: "mu"

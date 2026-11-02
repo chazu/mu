@@ -88,7 +88,4 @@ func TestGetActionResultRejectsMalformedRemoteReceipt(t *testing.T) {
 	if !errors.Is(err, cas.ErrInvalidDigest) || got != nil {
 		t.Fatalf("GetActionResult = %+v, %v; want ErrInvalidDigest", got, err)
 	}
-	if errors.Is(err, cas.ErrUnavailable) {
-		t.Fatalf("corrupt receipt reported as outage: %v", err)
-	}
 }

@@ -135,38 +135,50 @@ func TestCueDecoder_NumberRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCueDecoder_TriStateBoolPreserved asserts that *bool fields
-// distinguish "absent" (nil) from "present with value false". This is
-// the semantics the per-layer Read/Write gating relies on.
-func TestCueDecoder_TriStateBoolPreserved(t *testing.T) {
-	cfg, err := cueDecoder{}.Decode("testdata/tristate")
+func writeMuCue(t *testing.T, source string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mu.cue"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestCueDecoder_CacheConfig(t *testing.T) {
+	dir := writeMuCue(t, `cache: {
+	path:   "~/cache"
+	remote: "registry.example.com/acme/mu-cache"
+	push: {registry: "registry.example.com", repository: "acme/mu-cache"}
+}
+`)
+	cfg, err := cueDecoder{}.Decode(dir)
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
-	if cfg.Cache == nil || len(cfg.Cache.Backends) != 3 {
-		t.Fatalf("expected 3 backends, got %#v", cfg.Cache)
+	c := cfg.Cache
+	if c == nil || c.Path != "~/cache" || c.Remote != "registry.example.com/acme/mu-cache" ||
+		c.Push == nil || c.Push.Registry != "registry.example.com" || c.Push.Repository != "acme/mu-cache" {
+		t.Fatalf("cache = %#v", c)
 	}
-	b0, b1, b2 := cfg.Cache.Backends[0], cfg.Cache.Backends[1], cfg.Cache.Backends[2]
+}
 
-	if b0.Read != nil {
-		t.Errorf("b0.Read = %v, want nil", *b0.Read)
-	}
-	if b0.Write != nil {
-		t.Errorf("b0.Write = %v, want nil", *b0.Write)
-	}
-
-	if b1.Read != nil {
-		t.Errorf("b1.Read = %v, want nil", *b1.Read)
-	}
-	if b1.Write == nil || *b1.Write != false {
-		t.Errorf("b1.Write = %v, want *false", b1.Write)
-	}
-
-	if b2.Read == nil || *b2.Read != true {
-		t.Errorf("b2.Read = %v, want *true", b2.Read)
-	}
-	if b2.Write == nil || *b2.Write != false {
-		t.Errorf("b2.Write = %v, want *false", b2.Write)
+// The tiered-cache fields were removed; loading them must fail with a hint
+// showing the replacement shape rather than silently ignoring them.
+func TestCueDecoder_RejectsRemovedCacheFields(t *testing.T) {
+	for _, src := range []string{
+		`cache: backends: [{type: "disk", path: "/tmp/a"}, {type: "oci", registry: "r/x", write: false}]`,
+		`cache: read_repair: true`,
+		`cache: write_through: true`,
+	} {
+		_, err := cueDecoder{}.Decode(writeMuCue(t, src+"\n"))
+		if err == nil {
+			t.Fatalf("%s: expected load error", src)
+		}
+		for _, want := range []string{"was removed", "remote?:", "path?:", "push?:"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q lacks %q", src, err, want)
+			}
+		}
 	}
 }
 

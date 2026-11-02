@@ -105,19 +105,10 @@ func Validate(cfg *ProjectConfig) error {
 	}
 
 	// Validate cache config.
-	if cfg.Cache != nil {
-		for i, b := range cfg.Cache.Backends {
-			label := fmt.Sprintf("cache.backends[%d]", i)
-
-			if b.Type != "disk" && b.Type != "oci" {
-				errs = append(errs, fmt.Sprintf("%s: type must be \"disk\" or \"oci\", got %q", label, b.Type))
-			}
-			if b.Type == "disk" && b.Path == "" {
-				errs = append(errs, fmt.Sprintf("%s: disk backend requires \"path\"", label))
-			}
-			if b.Type == "oci" && b.Registry == "" {
-				errs = append(errs, fmt.Sprintf("%s: oci backend requires \"registry\"", label))
-			}
+	if cfg.Cache != nil && cfg.Cache.Remote != "" {
+		r := cfg.Cache.Remote
+		if strings.Contains(r, "://") || !strings.Contains(r, "/") {
+			errs = append(errs, fmt.Sprintf("cache.remote: want a repository reference \"host/namespace/repo\" without a scheme, got %q", r))
 		}
 	}
 
