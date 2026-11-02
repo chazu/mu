@@ -10,9 +10,6 @@ FLAGS
   --dry-run         Alias for --plan.
   --json            Output as JSON.
   --emit-manifest   Emit a build manifest to stdout (for pudl's ACUTE loop).
-  --expect-plan-sha256 HEX
-                    Plan once, compare exact plan-v2 identity, and execute that
-                    same in-memory graph only on a match.
   --no-cache        Skip action-result reads; retain dependency CAS storage.
   --offline         Use local dependencies; disable Mu-owned remote access.
   --no-discover-cache
@@ -34,7 +31,7 @@ EXAMPLES
   mu build //cmd/myapp                     Build a single target.
   mu build //cmd/myapp //lib/utils         Build multiple targets.
   mu build --plan //cmd/myapp              Preview the action DAG.
-  mu build --plan --json //cmd/myapp       Emit exact plan schema v2.
+  mu build --plan --json //cmd/myapp       Emit plan schema v2 as JSON.
   mu build --emit-manifest //cmd/myapp     Build and emit manifest JSON.
   mu build --no-cache //cmd/myapp          Force full rebuild.
   mu build --jobs 4 //cmd/myapp            Limit parallelism.
@@ -42,8 +39,7 @@ EXAMPLES
 JSON PLAN CONTRACT
 
   `mu build --plan --json` emits plan schema version 2. Its top-level fields
-  are version, plan_sha256, targets, plugins, actions, and summary. The digest
-  commits the canonical document with plan_sha256 omitted. Plugin rows commit
+  are version, targets, plugins, actions, and summary. Plugin rows record
   resolved content digest, version, protocol version, and capabilities. Each
   action includes its ID,
   computed action_key, and every execution-affecting field: command or body,
@@ -57,13 +53,9 @@ JSON PLAN CONTRACT
   pending_inputs instead, and their digests in inputs are zero placeholders.
 
   Planning resolves file and toolchain digests but never secret values. Sealed
-  provider refs and modes are non-secret plan metadata and are projected so an
-  exact-plan consumer such as PUDL can validate and hash the executable plan.
-  Build manifests remain a separate schema and omit provider refs and values.
-
-  `--expect-plan-sha256` is mutually exclusive with planning and publishing.
-  It rejects mutable zero-digest command plugins, compares before any secret
-  read or action, and executes the same PlanResult that was compared.
+  provider refs and modes are non-secret plan metadata and are projected for
+  inspection. Build manifests remain a separate schema and omit provider refs
+  and values.
 
 BUILD PIPELINE
 

@@ -32,8 +32,7 @@ HOW CACHING WORKS
   Key encoding is versioned and length-prefixed, so embedded newlines or
   separators in arguments and metadata cannot alias another action. This
   encoding replaces legacy keys: existing action results miss once and
-  rebuild; their content-addressed blobs remain reusable. Saved exact-plan
-  approvals must be regenerated because plans include action keys.
+  rebuild; their content-addressed blobs remain reusable.
 
   Cache key INCLUDES (non-secret metadata):
     sealed_input refs       Changing pass:foo/v1 → pass:foo/v2 invalidates.

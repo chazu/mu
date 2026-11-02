@@ -5,7 +5,6 @@ import (
 	"flag"
 	"io"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/chazu/mu/internal/cas"
@@ -157,10 +156,9 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 	}
 
 	var plan struct {
-		Version    int                          `json:"version"`
-		PlanSHA256 string                       `json:"plan_sha256"`
-		Plugins    []coordinator.PluginIdentity `json:"plugins"`
-		Actions    []struct {
+		Version int                          `json:"version"`
+		Plugins []coordinator.PluginIdentity `json:"plugins"`
+		Actions []struct {
 			ID                string            `json:"id"`
 			ActionKey         string            `json:"action_key"`
 			Command           []string          `json:"command"`
@@ -191,8 +189,8 @@ func TestPrintPlanJSONProjectsCompleteActionIdentity(t *testing.T) {
 	if plan.Version != 2 {
 		t.Fatalf("plan version = %d, want 2", plan.Version)
 	}
-	if len(plan.PlanSHA256) != 64 || len(plan.Plugins) != 1 || plan.Plugins[0].Digest == "" {
-		t.Fatalf("plan identity incomplete: digest=%q plugins=%#v", plan.PlanSHA256, plan.Plugins)
+	if len(plan.Plugins) != 1 || plan.Plugins[0].Digest == "" {
+		t.Fatalf("plan plugin identity incomplete: plugins=%#v", plan.Plugins)
 	}
 	action := plan.Actions[0]
 	if action.ActionKey == "" || action.ID != "//app:apply" {
@@ -245,27 +243,5 @@ func TestPlanJSONProjectsBodyAndEweExecutionForms(t *testing.T) {
 	}
 	if document.Actions[1].EweDigest != eweDigest.String() || document.Actions[1].Command != nil {
 		t.Errorf("ewe action projection = %#v", document.Actions[1])
-	}
-}
-
-func TestValidateExpectedPlanRequiresExactDigestAndImmutablePlugins(t *testing.T) {
-	graph := dag.NewGraph()
-	if err := graph.AddAction(&dag.Action{ID: "//app:run", Command: []string{"true"}}); err != nil {
-		t.Fatal(err)
-	}
-	plan := &coordinator.PlanResult{Graph: graph}
-	digest, err := planJSONDigest(plan, []string{"//app"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateExpectedPlan(plan, []string{"//app"}, digest); err != nil {
-		t.Fatalf("matching exact plan rejected: %v", err)
-	}
-	if err := validateExpectedPlan(plan, []string{"//app"}, strings.Repeat("0", 64)); err == nil {
-		t.Fatal("changed exact plan digest was accepted")
-	}
-	plan.Plugins = []coordinator.PluginIdentity{{Name: "mutable", Version: "1", ProtocolVersion: 1}}
-	if err := validateExpectedPlan(plan, []string{"//app"}, digest); err == nil || !strings.Contains(err.Error(), "mutable command plugin") {
-		t.Fatalf("mutable plugin error = %v", err)
 	}
 }
