@@ -8,7 +8,7 @@ import (
 	"github.com/chazu/mu/internal/plugin"
 )
 
-func TestValidateStrictSealedRouting(t *testing.T) {
+func TestValidateSealedRouting(t *testing.T) {
 	target := config.Target{
 		SealedInputs:      map[string]string{"TOKEN": "env:TOKEN"},
 		SealedInputModes:  map[string]string{"TOKEN": "file"},
@@ -106,10 +106,10 @@ func TestValidateStrictSealedRouting(t *testing.T) {
 			if tt.mutate != nil {
 				tt.mutate(&gotTarget, &gotActions)
 			}
-			err := validateStrictSealedRouting(gotTarget, gotActions)
+			err := validateSealedRouting(gotTarget, gotActions)
 			if tt.wantErr == "" {
 				if err != nil {
-					t.Fatalf("validateStrictSealedRouting: %v", err)
+					t.Fatalf("validateSealedRouting: %v", err)
 				}
 				return
 			}

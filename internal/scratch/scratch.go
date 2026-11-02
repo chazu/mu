@@ -3,25 +3,23 @@
 package scratch
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"math"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
-	"github.com/chazu/mu/internal/archivelimit"
-	"github.com/chazu/mu/internal/builtin"
+	"github.com/chazu/mu/internal/archive"
 	"github.com/chazu/mu/internal/cas"
 	"github.com/chazu/mu/internal/config"
 	"github.com/chazu/mu/internal/coordinator"
+	"github.com/chazu/mu/internal/registryhttp"
 )
 
 // Builder fetches, extracts, verifies, and registers toolchains.
@@ -29,7 +27,8 @@ type Builder struct {
 	NoCache  bool // rebuild toolchain results; verified archives remain inputs
 	Store    cas.Store
 	Registry *coordinator.ToolchainRegistry
-	CacheDir string // directory for downloaded archives and extracted trees
+	CacheDir string    // directory for downloaded archives and extracted trees
+	Warnings io.Writer // non-fatal notices (skipped symlinks); nil means os.Stderr
 }
 
 // Build processes all toolchains in cfg. For each toolchain it checks the
@@ -82,7 +81,7 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 		return err == nil && actual.Hash == tc.Config.SHA256
 	}()
 	if !cached {
-		if err := builtin.ForgeFetch(ctx, tc.Config.URL, tc.Config.SHA256, archivePath); err != nil {
+		if err := registryhttp.Fetch(ctx, tc.Config.URL, tc.Config.SHA256, archivePath); err != nil {
 			return fmt.Errorf("required toolchain archive unavailable locally: %w", err)
 		}
 	}
@@ -101,7 +100,7 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	}
 	defer os.RemoveAll(extractDir)
 
-	if err := extract(archivePath, extractDir, tc.Config.StripPrefix); err != nil {
+	if err := extract(ctx, archivePath, extractDir, tc.Config.StripPrefix, name); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
 
@@ -111,9 +110,17 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 	}
 
 	// Build manifest by walking extracted files and storing each in CAS.
-	artifacts, err := b.storeArtifacts(ctx, extractDir)
+	artifacts, skipped, err := b.storeArtifacts(ctx, extractDir)
 	if err != nil {
 		return fmt.Errorf("store artifacts: %w", err)
+	}
+	if len(skipped) > 0 {
+		w := b.Warnings
+		if w == nil {
+			w = os.Stderr
+		}
+		fmt.Fprintf(w, "warning: toolchain %s %s: %d symlink(s) not stored (toolchain manifests hold regular files only): %s\n",
+			name, version, len(skipped), strings.Join(skipped, ", "))
 	}
 
 	manifest := &coordinator.ToolchainManifest{
@@ -130,37 +137,47 @@ func (b *Builder) buildOne(ctx context.Context, tc config.Toolchain) error {
 }
 
 // storeArtifacts walks dir and stores each regular file in CAS, returning a
-// map of relative path -> CAS digest string.
-func (b *Builder) storeArtifacts(ctx context.Context, dir string) (map[string]string, error) {
-	artifacts := make(map[string]string)
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+// map of slash-separated relative path -> CAS digest string. Symlinks are
+// never read through (an archive could point one at ~/.ssh and get its
+// content into CAS); the manifest cannot represent links, so they are
+// returned in skipped instead.
+func (b *Builder) storeArtifacts(ctx context.Context, dir string) (artifacts map[string]string, skipped []string, err error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer root.Close()
+	artifacts = make(map[string]string)
+	err = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		switch {
+		case d.IsDir():
 			return nil
+		case d.Type()&fs.ModeSymlink != 0:
+			skipped = append(skipped, rel)
+			return nil
+		case !d.Type().IsRegular():
+			return fmt.Errorf("%s: unsupported file type %s", rel, d.Type())
 		}
-
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-
-		f, err := os.Open(path)
+		f, err := root.Open(rel)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", rel, err)
 		}
 		defer f.Close()
-
+		if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("open %s: not a regular file", rel)
+		}
 		dgst, err := b.Store.Put(ctx, f)
 		if err != nil {
 			return fmt.Errorf("put %s: %w", rel, err)
 		}
-
 		artifacts[rel] = dgst.String()
 		return nil
 	})
-	return artifacts, err
+	sort.Strings(skipped)
+	return artifacts, skipped, err
 }
 
 // verify runs "<name> --version" and checks for a zero exit code.
@@ -183,43 +200,31 @@ func verify(ctx context.Context, extractDir, name string) error {
 	return fmt.Errorf("%s: neither 'version' nor '--version' succeeded", binPath)
 }
 
-// extract dispatches to the appropriate extractor based on the archive file extension.
-func extract(archivePath, destDir, stripPrefix string) error {
-	lower := strings.ToLower(archivePath)
-	switch {
-	case strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
-		return extractTarGz(archivePath, destDir, stripPrefix)
-	case strings.HasSuffix(lower, ".tar.xz") || strings.HasSuffix(lower, ".txz"):
-		return extractTarXz(archivePath, destDir, stripPrefix)
-	case strings.HasSuffix(lower, ".zip"):
-		return extractZip(archivePath, destDir, stripPrefix)
-	default:
-		// Not an archive — treat as a raw binary. Copy to bin/<name>.
-		return extractRawBinary(archivePath, destDir)
+// extract expands a toolchain archive (by file extension) into destDir. A
+// non-archive download is installed as bin/<name>. Toolchains may contain
+// symlinks, but only relative ones that stay inside the tree.
+func extract(ctx context.Context, archivePath, destDir, stripPrefix, name string) error {
+	format, ok := archive.DetectFormat(archivePath)
+	if !ok {
+		return extractRawBinary(archivePath, destDir, name)
 	}
+	return archive.ExtractFile(ctx, archivePath, destDir, format, archive.Policy{
+		Limits:        archive.Toolchain,
+		AllowSymlinks: true,
+		StripPrefix:   stripPrefix,
+	})
 }
 
-// extractRawBinary copies a single binary file to <destDir>/bin/<name> and makes
-// it executable. The binary name is derived from the download filename, stripping
-// common platform suffixes.
-func extractRawBinary(srcPath, destDir string) error {
+// extractRawBinary copies a single binary file to <destDir>/bin/<name> and
+// makes it executable. name is the toolchain name, so verify finds the binary
+// where it looks for it regardless of how the download or staging dir is named.
+func extractRawBinary(srcPath, destDir, name string) error {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("toolchain name %q is not a valid binary file name", name)
+	}
 	binDir := filepath.Join(destDir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
-	}
-
-	// Derive binary name: strip platform suffixes from the download name.
-	// e.g. "jq-1.7.1" from archive path "jq-1.7.1" → use the toolchain name
-	// which is in the parent dir name like "jq-1.7.1".
-	// Since we don't have the toolchain name here, use the destDir basename.
-	dirBase := filepath.Base(destDir) // e.g. "jq-1.7.1"
-	// Strip version: everything before the first dash followed by a digit.
-	name := dirBase
-	for i := 0; i < len(dirBase)-1; i++ {
-		if dirBase[i] == '-' && dirBase[i+1] >= '0' && dirBase[i+1] <= '9' {
-			name = dirBase[:i]
-			break
-		}
 	}
 
 	destPath := filepath.Join(binDir, name)
@@ -239,213 +244,6 @@ func extractRawBinary(srcPath, destDir string) error {
 		return err
 	}
 	return out.Close()
-}
-
-// extractTarGz extracts a .tar.gz archive with optional strip-prefix.
-func extractTarGz(archivePath, destDir, stripPrefix string) error {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	budget, err := archivelimit.New(archivelimit.Toolchain)
-	if err != nil {
-		return err
-	}
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
-	}
-	defer gz.Close()
-
-	return extractTar(tar.NewReader(gz), destDir, stripPrefix, budget)
-}
-
-// extractTarXz extracts a .tar.xz archive by piping through the xz command.
-func extractTarXz(archivePath, destDir, stripPrefix string) error {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	budget, err := archivelimit.New(archivelimit.Toolchain)
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command("xz", "--decompress", "--stdout")
-	cmd.Stdin = f
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("xz pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("xz start: %w", err)
-	}
-
-	extractErr := extractTar(tar.NewReader(stdout), destDir, stripPrefix, budget)
-	if extractErr != nil {
-		// Stop decompression we no longer read; otherwise xz blocks on a full
-		// pipe and Wait never returns.
-		_ = cmd.Process.Kill()
-	}
-
-	if err := cmd.Wait(); err != nil && extractErr == nil {
-		return fmt.Errorf("xz: %w", err)
-	}
-	return extractErr
-}
-
-// extractTar reads entries from a tar reader and writes them to destDir,
-// stripping the given prefix from entry names. Every header counts against
-// budget, including entries that are skipped.
-func extractTar(tr *tar.Reader, destDir, stripPrefix string, budget *archivelimit.Budget) error {
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("tar next: %w", err)
-		}
-		if err := budget.Entry(hdr.Name); err != nil {
-			return err
-		}
-
-		name := stripPrefixFromPath(hdr.Name, stripPrefix)
-		if name == "" || name == "." {
-			continue
-		}
-
-		target := filepath.Join(destDir, name)
-
-		// Guard against path traversal.
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			continue
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			if err := budget.Declared(hdr.Name, hdr.Size); err != nil {
-				return err
-			}
-			if err := writeFile(target, tr, hdr.FileInfo().Mode(), hdr.Name, budget); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			os.Remove(target) // remove any existing symlink
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-// extractZip extracts a .zip archive with optional strip-prefix.
-func extractZip(archivePath, destDir, stripPrefix string) error {
-	zr, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return fmt.Errorf("zip open: %w", err)
-	}
-	defer zr.Close()
-
-	budget, err := archivelimit.New(archivelimit.Toolchain)
-	if err != nil {
-		return err
-	}
-	// The central directory is read up front, so the entry count can be
-	// rejected before anything is written.
-	for _, f := range zr.File {
-		if err := budget.Entry(f.Name); err != nil {
-			return err
-		}
-	}
-	for _, f := range zr.File {
-		name := stripPrefixFromPath(f.Name, stripPrefix)
-		if name == "" || name == "." {
-			continue
-		}
-
-		target := filepath.Join(destDir, name)
-
-		// Guard against path traversal.
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			continue
-		}
-
-		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-
-		// Declared sizes can lie; Copy enforces the bytes actually inflated.
-		if err := budget.Declared(f.Name, int64(min(f.UncompressedSize64, math.MaxInt64))); err != nil {
-			return err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return fmt.Errorf("zip entry %s: %w", f.Name, err)
-		}
-		writeErr := writeFile(target, rc, f.Mode(), f.Name, budget)
-		rc.Close()
-		if writeErr != nil {
-			return writeErr
-		}
-	}
-	return nil
-}
-
-// writeFile creates (or truncates) a file at path and copies content from r.
-func writeFile(path string, r io.Reader, mode os.FileMode, name string, budget *archivelimit.Budget) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := budget.Copy(f, r, name); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
-}
-
-// stripPrefixFromPath removes the leading prefix directory from a path.
-// If stripPrefix is empty, the path is returned as-is.
-func stripPrefixFromPath(path, stripPrefix string) string {
-	if stripPrefix == "" {
-		return path
-	}
-	// Normalise: ensure stripPrefix ends with "/".
-	prefix := stripPrefix
-	if !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
-	}
-	if strings.HasPrefix(path, prefix) {
-		return path[len(prefix):]
-	}
-	// The path might be the prefix directory itself.
-	if strings.TrimSuffix(path, "/") == strings.TrimSuffix(stripPrefix, "/") {
-		return ""
-	}
-	return path
 }
 
 // archiveExt extracts the compound extension from a URL path

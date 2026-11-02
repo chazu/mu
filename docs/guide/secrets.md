@@ -134,24 +134,31 @@ ENFORCEMENT
   before calling store_secret.
 
 ────────────────────────────────────────────────────────────────────
-STRICT ACTION ROUTING — sealed_routing: "strict"
+ACTION ROUTING — target maps are the allow-list
 ────────────────────────────────────────────────────────────────────
 
-By default mu preserves its convenience behavior: target-level sealed
-inputs are attached to emitted actions that do not declare their own map,
-and target outputs may be attached to a single emitted action.
+A target's sealed_inputs / sealed_outputs (and their modes) are the
+complete set of secrets its actions may touch. Each action claims the
+names it uses, with the exact target-level ref and effective mode:
 
-Set `sealed_routing: "strict"` on a target when its planner must use
-least-privilege action routing. In strict mode mu does not inherit either
-map. Each action must claim the exact target-level ref and effective mode
-for every sealed name it uses. Inputs may be claimed by multiple actions,
-but every declared input must be claimed at least once. Each declared output
-must be claimed by exactly one action. Undeclared claims, unused declarations,
-ref or mode changes, and ambiguous outputs fail during planning.
+  - every action claim must match a declared name, ref, and mode
+  - every declared input must be claimed by at least one action
+  - every declared output must be claimed by exactly one action
 
-The mode is opt-in so existing handwritten targets and plugins retain their
-current behavior. Generated targets can use it as a planning-time capability
-boundary.
+Undeclared claims, unused declarations, ref or mode changes, and
+outputs with zero or several writers fail during planning, before any
+secret is resolved.
+
+One convenience: when a target declares sealed maps and its plan has
+exactly ONE action that makes no sealed claims, mu fills that action's
+claims from the target maps. This covers simple single-action targets
+(shell, most plugins). Multi-action plans must claim explicitly.
+secret-gen claims its VALUE output itself, so its target must declare
+sealed_outputs: {VALUE: <ref>} with the matching mode (see
+'mu guide secret-gen').
+
+Routing is always strict. The old `sealed_routing` field was removed;
+setting it is a load error — delete it.
 
 ────────────────────────────────────────────────────────────────────
 SECURITY MODEL
@@ -177,12 +184,13 @@ sealed_outputs go through store_secret.
 THE PASS PLUGIN
 ────────────────────────────────────────────────────────────────────
 
-The bundled pass plugin (plugins/pass/plugin.bb, v0.3.0) implements:
+The bundled pass plugin (plugins/pass, a Go plugin, v0.3.0) implements:
   discover, resolve_secret, store_secret
 
-Register it:
+Build its binary, then register the directory:
 
-  plugins: [{name: "pass", script: "plugins/pass/plugin.bb"}]
+  go build -trimpath -o plugins/pass/plugin ./plugins/pass
+  plugins: [{name: "pass", script: "plugins/pass"}]
 
 Resolution: "pass:foo/bar" → 'pass show foo/bar' (first line).
             "pass:raw:foo/bar" → full content (newline-trimmed).

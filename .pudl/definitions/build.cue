@@ -67,13 +67,10 @@ plugins_kit: brick.#Kit & {
 	desc: "All bundled mu plugins"
 	composes: [
 		"//plugins/go",
-		"//plugins/cowsay",
 		"//plugins/docker",
 		"//plugins/file",
 		"//plugins/k8s",
-		"//plugins/zig",
 		"//plugins/terraform",
-		"//plugins/scratch",
 		"//plugins/lint",
 	]
 }

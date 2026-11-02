@@ -20,7 +20,6 @@ var topicFiles = map[string]string{
 	"build":            "build.md",
 	"plugins":          "plugins.md",
 	"observe":          "observe.md",
-	"pudl":             "pudl.md",
 	"cache":            "cache.md",
 	"secrets":          "secrets.md",
 	"secret-gen":       "secret-gen.md",

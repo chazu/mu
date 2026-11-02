@@ -87,7 +87,8 @@ done
 				{Name: "cfg", Command: mockPluginCommand(t, "mock_plugin_config_actions.sh")},
 			},
 			Targets: []config.Target{{
-				Name: "//app", SealedRouting: "strict", Toolchain: "cfg",
+				Name:             "//app",
+				Toolchain:        "cfg",
 				SealedInputs:     map[string]string{"TOKEN": "fake:apps/token"},
 				SealedInputModes: map[string]string{"TOKEN": "env"},
 				Config: map[string]any{"actions": []any{map[string]any{

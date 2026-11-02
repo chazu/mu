@@ -86,8 +86,10 @@ func TestPlan_SealedOutputDeniedByPolicy(t *testing.T) {
 		ProjectRoot: t.TempDir(),
 		Config: &config.ProjectConfig{
 			Targets: []config.Target{{
-				Name:      "//secrets/admin",
-				Toolchain: "secret-gen",
+				Name:              "//secrets/admin",
+				Toolchain:         "secret-gen",
+				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
+				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
 					"ref":        "pass:registry/admin",
 					"derivation": []any{"true"},
@@ -115,8 +117,10 @@ func TestPlan_SealedOutputAllowedByPolicy(t *testing.T) {
 		ProjectRoot: t.TempDir(),
 		Config: &config.ProjectConfig{
 			Targets: []config.Target{{
-				Name:      "//secrets/admin",
-				Toolchain: "secret-gen",
+				Name:              "//secrets/admin",
+				Toolchain:         "secret-gen",
+				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
+				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
 					"ref":        "pass:registry/admin",
 					"derivation": []any{"true"},
@@ -149,7 +153,9 @@ func TestExecuteRechecksSealedOutputPolicyAgainstTamperedPlan(t *testing.T) {
 		Config: &config.ProjectConfig{
 			Targets: []config.Target{{
 				Name: "//secrets/admin", Toolchain: "secret-gen",
-				Config: map[string]any{"ref": "pass:registry/admin", "derivation": []any{"echo", "hunter2"}},
+				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
+				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
+				Config:            map[string]any{"ref": "pass:registry/admin", "derivation": []any{"echo", "hunter2"}},
 			}},
 			Secrets: &config.SecretsConfig{WritableRefs: []string{"pass:registry/*"}},
 			Plugins: []config.PluginDef{{Name: "pass", Command: mockPluginCommand(t, "mock_provider.sh")}},
@@ -183,8 +189,10 @@ func TestPlan_DenyAllPolicyBlocksWrites(t *testing.T) {
 		ProjectRoot: t.TempDir(),
 		Config: &config.ProjectConfig{
 			Targets: []config.Target{{
-				Name:      "//secrets/admin",
-				Toolchain: "secret-gen",
+				Name:              "//secrets/admin",
+				Toolchain:         "secret-gen",
+				SealedOutputs:     map[string]string{"VALUE": "pass:registry/admin"},
+				SealedOutputModes: map[string]string{"VALUE": "create_if_absent"},
 				Config: map[string]any{
 					"ref":        "pass:registry/admin",
 					"derivation": []any{"true"},

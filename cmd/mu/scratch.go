@@ -42,23 +42,16 @@ func runScratch(args []string) int {
 
 	start := time.Now()
 
-	if ext := os.Getenv("MU_SCRATCH"); ext != "" {
-		fmt.Fprintf(os.Stderr, "  using external scratch build: %s\n", ext)
-		if err := scratch.External(ctx, ext, cli.ProjectRoot, cli.Config, cli.Store); err != nil {
-			return cli.fail(exitFail, "%v", err)
-		}
-	} else {
-		registry := coordinator.NewToolchainRegistry(cli.Store)
-		home, _ := os.UserHomeDir()
-		b := &scratch.Builder{
-			NoCache:  *noCache,
-			Store:    cli.Store,
-			Registry: registry,
-			CacheDir: filepath.Join(home, ".mu", "cache"),
-		}
-		if err := b.Build(ctx, cli.Config); err != nil {
-			return cli.fail(exitFail, "%v", err)
-		}
+	registry := coordinator.NewToolchainRegistry(cli.Store)
+	home, _ := os.UserHomeDir()
+	b := &scratch.Builder{
+		NoCache:  *noCache,
+		Store:    cli.Store,
+		Registry: registry,
+		CacheDir: filepath.Join(home, ".mu", "cache"),
+	}
+	if err := b.Build(ctx, cli.Config); err != nil {
+		return cli.fail(exitFail, "%v", err)
 	}
 
 	elapsed := time.Since(start)

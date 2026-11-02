@@ -13,6 +13,19 @@ date: 2026-05-23
 > session with an OCI test target. The `plugins/internal/ssh` helper
 > refactor is also still open. See the checklist below for per-task
 > status.
+>
+> **Status update (2026-11-01, mu-lx8.1/mu-lx8.4):** OCI plugin push is
+> being deleted (mu-x57.4), so the only distribution paths are a local
+> `script:` plugin directory and `mu plugin install` from the GitHub
+> catalog; no OCI verification is needed. mu does not compile Go plugins:
+> a local directory's manifest names the prebuilt binary as its
+> entrypoint (no toolchain), and the catalog's `build.command` builds it
+> at install time (documented in `mu guide plugins`, GO PLUGINS).
+> `pass` and `keypair-gen` are flipped to Go and their `plugin.bb` deleted
+> (no `legacy/` copy), with bb-parity goldens and tests. The `scratch`
+> plugin (bb and Go) was deleted as a duplicate of the built-in
+> `from: "scratch"` handling. `file`, `host`, `remote-exec` and
+> `remote-file` still run their bb entrypoints (mu-lx8.2, mu-lx8.3).
 
 # Go Plugin SDK + bb Deprecation
 
@@ -174,7 +187,7 @@ bb is not deleted; it is no longer privileged.
 
 ### Tier 1 ports
 
-- [x] Port `scratch` plugin to Go (`plugins/scratch/main.go`). Discover + plan structurally equivalent to `plugin.bb`. *Acceptance against `mu scratch` end-to-end deferred until Phase 4 entrypoint flip.*
+- [x] ~~Port `scratch` plugin to Go (`plugins/scratch/main.go`).~~ *Deleted along with the bb version (mu-lx8.4): the built-in `from: "scratch"` toolchain handling and `mu scratch` already cover it.*
 - [x] Port `file` plugin to Go (`plugins/file/main.go`). All 6 plan branches + capture branch verified equivalent.
 - [x] Port `host` plugin to Go (`plugins/host/main.go`); `gather.sh` embedded via `//go:embed`. *Live SSH acceptance against the Odroid HC2 is still useful to run.*
 
@@ -183,15 +196,15 @@ bb is not deleted; it is no longer privileged.
 - [ ] Factor `plugins/internal/ssh` helper. *Each port currently builds SSH commands inline; payoff is modest and the variant shapes (Go `[]string` argv vs. embedded bash heredoc) make a single helper awkward. Open for a follow-up.*
 - [x] Port `remote-exec` (`plugins/remote-exec/main.go`). SSH command construction matches bb byte-for-byte; sudo / env / work_dir / check-guard / sealed-output capture preserved.
 - [x] Port `remote-file` (`plugins/remote-file/main.go`). Plan + Observe handlers ported; record shape preserved for pudl ingestion.
-- [x] Port `keypair-gen` (`plugins/keypair-gen/main.go`). ed25519 / ECDSA generation into sealed outputs; error messages match bb verbatim (incl. Clojure-style `#{}` set rendering).
-- [x] Port `pass` (`plugins/pass/main.go`). Built on `SecretPlugin` helper — validates the secret-provider story.
+- [x] Port `keypair-gen` (`plugins/keypair-gen/main.go`). ed25519 / ECDSA generation into sealed outputs; error messages match bb verbatim (incl. Clojure-style `#{}` set rendering). **Flipped (mu-lx8.1):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses in `testdata/`. Deliberate difference: the action env is `PATH=/usr/bin:/bin` instead of bb's `{}` (the SDK omits empty maps, and an absent env would let the impure action inherit mu's environment).
+- [x] Port `pass` (`plugins/pass/main.go`). Built on `SecretPlugin` helper — validates the secret-provider story. **Flipped (mu-lx8.1):** entrypoint is the Go binary, `plugin.bb` deleted; parity against captured bb responses (fake `pass` in `testdata/`), plus an end-to-end test that registers the plugin directory with `script:` and round-trips `pass:` refs through a strict sealed build. Deliberate difference: an empty `secret_value` is rejected like a missing one.
 
 ### Demotion
 
 - [x] Strip bb from the default README Quick Start; bb now appears only in the "Alternative" subsection alongside its scratch-toolchain block.
 - [x] Update README Quick Start to use a Go plugin.
 - [ ] Strip bb from `examples/*` configs (the `examples/` projects still reference bb plugins; not blocking, but should land before v0.2.0).
-- [ ] Move bb plugin sources to `plugins/legacy/<name>/` for one release. *Coupled to flipping each `plugins/<name>/mu.cue` `entrypoint` and `toolchain` to point at the compiled Go binary. Needs end-to-end test of Go-plugin bundling through CAS.*
+- [ ] ~~Move bb plugin sources to `plugins/legacy/<name>/` for one release.~~ *Superseded: each flip deletes `plugin.bb` outright after a parity check against captured bb responses. Done for `pass` and `keypair-gen` (mu-lx8.1); `file` (mu-lx8.2) and `remote-exec`/`remote-file` (mu-lx8.3) remain. `host` has no ticket yet.*
 - [ ] Cut `v0.2.0` release: "Go SDK + bb-optional". *Gated on the legacy/ move and the entrypoint flip.*
 
 ### Distribution polish (parallel)

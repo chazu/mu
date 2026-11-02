@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/chazu/mu/internal/config"
@@ -118,6 +119,11 @@ printf '%%s' "$v" > "$MU_SEALED_OUT_DIR/%s"`, argv, emptyErr, outName)
 		SealedOutputModes: map[string]string{
 			outName: mode,
 		},
+		// The derivation may read the target's sealed inputs (e.g. a
+		// plaintext to hash); claim them explicitly since this action
+		// already claims its output and so gets no automatic claims.
+		SealedInputs:     maps.Clone(target.SealedInputs),
+		SealedInputModes: maps.Clone(target.SealedInputModes),
 	}
 
 	return []plugin.ActionSpec{action}, nil, nil

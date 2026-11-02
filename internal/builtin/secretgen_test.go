@@ -42,6 +42,27 @@ func TestSecretGenPlan_DefaultsToCreateIfAbsent(t *testing.T) {
 	}
 }
 
+func TestSecretGenPlan_ClaimsTargetSealedInputs(t *testing.T) {
+	target := config.Target{
+		Name:             "//secrets/htpasswd",
+		Toolchain:        "secret-gen",
+		SealedInputs:     map[string]string{"RAW_PASS": "pass:registry/raw"},
+		SealedInputModes: map[string]string{"RAW_PASS": "env"},
+		Config: map[string]any{
+			"ref":        "pass:registry/htpasswd",
+			"derivation": []any{"sh", "-c", `printf '%s' "$RAW_PASS"`},
+		},
+	}
+	actions, _, err := SecretGenPlan(target)
+	if err != nil {
+		t.Fatalf("SecretGenPlan: %v", err)
+	}
+	a := actions[0]
+	if a.SealedInputs["RAW_PASS"] != "pass:registry/raw" || a.SealedInputModes["RAW_PASS"] != "env" {
+		t.Fatalf("sealed input claims = %v / %v, want the target's RAW_PASS", a.SealedInputs, a.SealedInputModes)
+	}
+}
+
 func TestSecretGenPlan_RejectsBadRef(t *testing.T) {
 	target := config.Target{
 		Name:      "//x",
