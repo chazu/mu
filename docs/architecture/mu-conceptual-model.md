@@ -64,12 +64,18 @@ Action = {
   depends_on: []string                # other action IDs (ordering constraints)
   env:        map[string -> string]   # environment variables (explicit, hermetic)
   network:    bool                    # whether network access is allowed
+  impure:     bool                    # side effects: run on the host, never cached
+  toolchains: []string                # scratch toolchains unpacked into the sandbox
+  host_paths: []string                # host files/dirs granted read+exec in the sandbox
 }
 ```
 
-An action's **cache key** is derived from its command, sorted input digests,
-and environment. If the key matches a previous execution, the outputs are
-restored from cache and the action is skipped.
+An action's **cache key** is derived from its command, sorted input digests
+and paths, environment, toolchain files, granted host paths and flags (see
+`mu guide cache`). If the key matches a previous execution, the outputs are
+restored from cache and the action is skipped. Pure actions run in the
+sandbox (see [Sandbox Execution](#sandbox-execution)); impure actions run on
+the host and are never cached.
 
 Actions are the only things mu actually executes. Everything else is
 bookkeeping to produce a graph of actions.
@@ -154,7 +160,8 @@ other targets consume. The only thing that makes it special is:
 
 - Its `from` field is `"scratch"` — mu handles it internally
 - Its config specifies where to download the toolchain (`url`, `sha256`)
-- Its output artifacts are passed to downstream plugins as `toolchain_artifacts`
+- Actions name it in `toolchains`, and mu unpacks its artifacts into their
+  sandbox; a plugin of the same name also receives them as `toolchain_artifacts`
 
 ```json
 {
@@ -264,7 +271,7 @@ targets: [{
     target:    "//cmd/server"
     toolchain: "go"
     sources: ["cmd/server/main.go", "go.mod", "go.sum"]
-    config: {output: "server"}
+    config: {output: "server", pkg: "./cmd/server"}
 }]
 ```
 
@@ -287,15 +294,16 @@ Step 3: Resolve target graph
 Step 4: Plan //cmd/server
          Plugin is "go" → send plan request to go.bb plugin
          Include toolchain_artifacts: {"bin/go": "sha256:def...", ...}
-         Plugin responds with actions:
-           mod-download: go mod download [network: true]
-           build: go build -o server ./cmd/server
+         Plugin responds with one action:
+           build: go build -trimpath -o=server ./cmd/server
+                  [toolchains: [go], network: true (go.mod present)]
 
 Step 5: Merge all actions into global DAG
-         mod-download → build
 
 Step 6: Execute DAG
          Run actions in dependency order, skip cached ones
+         build is pure: it runs in a sandbox holding the go toolchain and
+         its declared sources, and downloads its modules itself
          Store outputs in CAS
 
 Step 7: Done
@@ -357,72 +365,91 @@ Step 6: Nothing to execute
 ## Hermeticity Model
 
 Every action declares its inputs and outputs explicitly. The cache key is
-computed from the command, input digests, and environment — nothing else.
-If anything changes, the cache misses and the action re-executes. If nothing
-changes, the cached result is used regardless of wall-clock time, filesystem
-state, or anything else.
+computed from what the action declares: command, input digests and paths,
+environment, toolchain files and granted host paths. If any of it changes,
+the cache misses and the action re-executes. If nothing changes, the cached
+result is used regardless of wall-clock time or filesystem state.
+
+The sandbox is what makes the declarations trustworthy: a pure action runs
+where it can see only what the key covers, plus the platform's read-only
+system directories (which are not hashed). Two gaps are deliberate. A
+granted host directory enters the key by path only, so its contents are
+trusted. And a `network: true` action can fetch anything; the key covers
+the request, not the response, so such actions should pin what they fetch
+(go.sum, lockfiles).
 
 Toolchains built from scratch are fully content-addressed. The Go 1.26.2
 toolchain is not "the go binary on my PATH" — it's a specific set of artifacts
 at specific SHA-256 digests, downloaded from a specific URL whose checksum was
-verified. When a plugin receives `toolchain_artifacts`, it references binaries
-by their CAS digest, not by filesystem path. Any change to the toolchain
-(version bump, different platform build) changes the digests, which changes the
-cache keys of all downstream actions, which forces a rebuild.
+verified. An action that names it in `toolchains` gets those files unpacked
+into its sandbox, and every digest, mode and symlink enters its key. Any
+change to the toolchain (version bump, different platform build) changes the
+keys of the actions that use it, which forces a rebuild.
 
-The `network: true` flag on actions marks the boundary between hermetic and
-non-hermetic. Only scratch build fetch actions (and explicitly marked plugin
-actions) may access the network. Everything else is sealed.
-
-```
-network boundary
-─────────────────────────────────────────────
-     fetch (network: true)
-         │
-         ▼
-     extract, verify, compile, link, test ...
-     (network: false — hermetic from here down)
-```
+`network: false` is the default, and in the sandbox it is enforced by the
+kernel under Seatbelt and Linux namespaces. Impure actions (convergence,
+anything with `sealed_outputs`) are outside this model entirely: they run on
+the host with its filesystem and network and are never cached.
 
 ## Sandbox Execution
 
-Actions execute inside a **sandbox** — a temporary directory that serves as an
-isolated filesystem for the build step. The sandbox lifecycle:
+Every pure action executes inside a **sandbox** — a temporary directory that
+serves as an isolated filesystem for the build step. The sandbox lifecycle:
 
-1. Create a temp directory with standard subdirs: `bin/`, `work/`, `out/`, `tmp/`
-2. Unpack toolchain artifacts from CAS into the rootfs (e.g. `bin/go`)
-3. Copy/hardlink source files into `work/`
-4. Execute the command with `PATH` restricted to `bin/`, `TMPDIR` to `tmp/`
-5. Extract declared outputs from `work/` back to the project
+1. Create a temp directory with standard subdirs: `bin/`, `work/`, `out/`,
+   `tmp/`, `home/`
+2. Unpack the named toolchains' artifacts from CAS into the root (e.g.
+   `bin/go`), with their file modes and in-tree symlinks
+3. Place each file input in `work/` at its project-relative path, fetched
+   from CAS (upstream outputs) or the project and checked against its digest
+4. Execute the command in `work/<work_dir>` with `bin/` first on `PATH`,
+   `TMPDIR` set to `tmp/` and `HOME` to `home/`
+5. Copy declared outputs from `out/` or the working directory back to the
+   project
 6. Clean up the temp directory
 
 ### Isolation Levels
 
-mu auto-detects the strongest isolation available on the current platform:
+mu auto-detects the strongest isolation available on the current platform
+and records it per action in the build manifest (`isolation`):
 
-- **Linux (Namespace):** User, mount, PID, IPC, UTS, and (optionally) network
-  namespaces. Bind-mounts the rootfs, sets up minimal `/dev`, remounts most of
-  the filesystem read-only except `/work`, `/out`, `/tmp`. No root required.
-  Network blocked via network namespace unless `network: true`.
+- **Linux (Namespace):** User, mount, PID, IPC, UTS, and (unless
+  `network: true`) network namespaces. pivot_root into the sandbox root,
+  minimal `/dev`, system directories and `host_paths` bind-mounted
+  read-only, everything read-only except `/work`, `/out`, `/tmp`, `/home`.
+  No root required. This path builds for Linux but has not yet been run on
+  a Linux host.
 - **macOS (Seatbelt):** `sandbox-exec` with a deny-default SBPL profile.
-  Restricts filesystem reads/writes to declared sandbox directories only.
-  Network controlled per-action.
-- **Copy (fallback):** Cross-platform temp directory with restricted `PATH` and
-  `env`. Actions cannot *accidentally* read host files, but there is no OS-level
-  enforcement preventing it.
+  Writes are confined to the sandbox; data reads and exec are limited to the
+  sandbox, granted `host_paths` and system trees. Network is denied unless
+  `network: true`.
+- **Copy (fallback):** Cross-platform temp directory with restricted `PATH`
+  and `env`. Relative paths resolve inside the sandbox, but nothing stops the
+  command from reading or writing absolute host paths or using the network;
+  mu warns once per process when it falls back to this.
+
+See `mu guide sandbox` for the exact profile and mounts.
 
 ## Plugin Runtime
 
 Plugins are external executables that speak NDJSON over stdin/stdout. The
-bundled plugins use `.bb` (Babashka) scripts — mu builds Babashka from scratch
-as a toolchain, downloading a specific version by URL and SHA-256, and uses
-the cached binary to run plugin scripts. This means:
+bundled plugins come in two kinds:
 
-- Plugins are distributed as plain `.bb` files (no compilation needed)
-- The bb runtime is hermetic and version-pinned
+- **Babashka scripts** (`docker`, `doppler`, `go`, `k8s`, `lint`, `sops`,
+  `terraform`): mu builds Babashka from scratch as a toolchain, downloading a
+  specific version by URL and SHA-256, and runs each `plugin.bb` with the
+  cached binary, so the runtime is hermetic and version-pinned.
+- **Go binaries** (`file`, `keypair-gen`, `pass`, `remote-exec`,
+  `remote-file`), written with the Go SDK (`mu guide sdk`). The binary is not
+  committed; build it into the plugin directory first, or let
+  `mu plugin install` build a catalog package.
+
+Either way:
+
 - Plugin authors implement `discover`, plus `plan` when the plugin builds
   targets, and may add optional methods
   (`resolve_secret`, `store_secret`)
-- Plugins can also be compiled binaries (Go, Rust, etc.) — any language works
-- Plugin directories are deterministically bundled and stored in CAS for
-  distribution via digest references
+- Any language works; a plugin only has to speak the protocol
+- Plugin directories are deterministically bundled and stored in CAS, and
+  third-party plugins are distributed through the GitHub release catalog
+  (`mu plugin install`)

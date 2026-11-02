@@ -61,8 +61,9 @@ SSH keys you typically use the file on the builder side (e.g.
 `ssh -i "$DEPLOY_KEY" ...` from within `command`). The temp directory is
 removed when the action exits regardless of success.
 
-`file` mode is rejected in toolchain-pinned (sandbox) actions; remote-exec
-runs bare and supports it.
+remote-exec actions are impure by default and run on the host. With
+`impure: false` the action runs in mu's sandbox, which delivers file-mode
+inputs inside the sandbox instead.
 
 ## Sealed outputs
 

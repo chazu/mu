@@ -82,8 +82,10 @@ ENVIRONMENT
 
     GOPROXY GOPRIVATE GONOPROXY GONOSUMDB GOSUMDB GOINSECURE
 
-  cgo builds need a C toolchain inside the sandbox; grant it with the
-  action-level host_paths or use a scratch toolchain.
+  cgo builds need a C toolchain inside the sandbox. This plugin names only
+  the go toolchain and grants no host_paths, so with cgo: true the C
+  compiler must run from the sandbox's system directories, or the build
+  fails.
 
 CAPABILITIES
 

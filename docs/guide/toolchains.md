@@ -24,7 +24,8 @@ DECLARING A TOOLCHAIN
 
 CONFIG FIELDS
 
-  toolchain       Name (must match plugin names that use this toolchain).
+  toolchain       Name. Actions name it in "toolchains"; a plugin runtime
+                  (plugin.toolchain, e.g. "bb") names it too.
   from            Currently only "scratch" is supported.
   config.version  Version string (for cache key and display).
   config.url      Download URL for the toolchain archive.
@@ -139,13 +140,28 @@ EXTRACTION SAFETY
     works. Manifests use receipt format v2: toolchains registered by older
     mu versions are rebuilt once from their verified archives.
 
-USING TOOLCHAINS IN PLUGINS
+USING TOOLCHAINS IN ACTIONS
 
-  When mu plans a target, it passes toolchain_artifacts to the plugin:
+  An action uses a toolchain by naming it in "toolchains" (`mu guide
+  protocol`):
 
-    {"method": "plan", "toolchain_artifacts": {"go": "/path/to/go"}, ...}
+    {"id": "build", "command": ["go", "build", "-o=app", "."],
+     "toolchains": ["go"], ...}
 
-  Plugins use these paths instead of system-installed tools.
+  The action must be pure: its toolchains' files are unpacked into its
+  sandbox root with their recorded modes and symlinks, bin/ comes first on
+  PATH, and every file's digest, mode and link enters the action key, so a
+  toolchain change rebuilds its consumers. A raw-binary toolchain lands at
+  bin/<name>. An impure action, which runs on the host, cannot name one.
+
+  When a scratch toolchain has the same name as the plugin a target uses,
+  the plan request also carries its manifest as toolchain_artifacts
+  (path in the toolchain tree -> digest):
+
+    {"method": "plan", "toolchain_artifacts": {"bin/go": "sha256:..."}, ...}
+
+  It is informational; naming the toolchain in "toolchains" is what puts
+  it in the sandbox.
 
 COMMANDS
 

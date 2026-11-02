@@ -24,7 +24,7 @@ Plugins decide what to build and how. mu executes.
 ### Core Primitives
 
 - **Artifacts** — content-addressed blobs stored by SHA-256 hash
-- **Actions** — commands that turn input artifacts into output artifacts, cached by a key over their inputs
+- **Actions** — commands that turn input artifacts into output artifacts, cached by a key over their inputs; pure actions run in a sandbox that sees only what they declare, impure ones on the host ([`docs/guide/sandbox.md`](docs/guide/sandbox.md))
 - **Plugins** — external executables that emit action subgraphs via NDJSON protocol
 - **Toolchains** — built from scratch as content-addressed artifacts (download, verify, extract)
 - **Sealed I/O** — provider-backed values resolved at execution time, never

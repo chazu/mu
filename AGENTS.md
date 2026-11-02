@@ -47,6 +47,13 @@ target into actions; mu runs the combined action graph in parallel and caches
 results in a content-addressed store. `shell` and `secret-gen` are built-in
 toolchains that need no plugin.
 
+Pure actions (the default for plugin actions) run in a sandbox: they see only
+their declared inputs, named scratch toolchains, granted `host_paths` and
+system directories, and have no network unless `network: true`. Impure
+actions (shell targets by default, anything with `sealed_outputs`) run on the
+host and are never cached. A granted host file is hashed into the cache key;
+a granted directory only by path. See `mu guide sandbox`.
+
 `mu guide` is the reference and ships inside the binary; its sources are in
 `docs/guide/*.md`. Start with `mu guide overview`, then `mu guide mu.cue`.
 

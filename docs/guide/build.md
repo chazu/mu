@@ -9,7 +9,8 @@ FLAGS
   --plan            Show planned actions without executing (dry run).
   --json            With --plan, emit the plan as JSON (requires --plan; use
                     --emit-manifest for a machine-readable build result).
-  --emit-manifest   Emit a build manifest as JSON to stdout (for CI).
+  --emit-manifest   Emit a build manifest as JSON to stdout (for CI). Each
+                    action records its "isolation" (`mu guide sandbox`).
   --no-cache        Skip action-result reads; retain dependency CAS storage.
   --offline         Use local dependencies; disable Mu-owned remote access.
   --jobs N          Max parallel actions (default: NumCPU).
@@ -42,8 +43,10 @@ JSON PLAN CONTRACT
   action includes its ID,
   computed action_key, and every execution-affecting field: command, input
   digests, outputs, dependencies, environment, sealed refs
-  and modes, network/work-dir/project-root/impure/retry settings, toolchain digests, and
-  sources. Empty optional fields may be omitted.
+  and modes, network/work-dir/project-root/impure/retry settings, toolchain
+  digests, granted host_paths with their identities, input_paths, and
+  "sandboxed" (true for every pure action). Empty optional fields may be
+  omitted.
 
   An action whose inputs are produced by other actions ("{action:id}" refs or
   a dependency's output paths) has no action_key in the plan: its key depends
@@ -72,15 +75,16 @@ BUILD PIPELINE
      - check cache (skip if impure or sealed_outputs declared)
      - resolve and inject that action's sealed_inputs (env or file mode)
      - mint $MU_SEALED_OUT_DIR if sealed_outputs declared
-     - run command
+     - run command: pure actions in the sandbox, impure ones on the host
      - capture sealed_outputs and route via store_secret
      - hash outputs into CAS, write action result entry
 
 ACTION CACHING
 
   See 'mu guide cache' for the full cache-key contract. Summary:
-  command + sorted input digests + env + network + impure +
-  sealed-input refs/modes + sealed-output refs are hashed.
+  command + sorted input digests and input paths + env + env_passthrough
+  names + toolchain files + host_paths identities + network + impure +
+  sandboxed + sealed-input refs/modes + sealed-output refs are hashed.
   Sealed-input/output VALUES are never hashed.
   Build manifests omit both sealed values and provider refs.
 
@@ -100,12 +104,15 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
   initial executable. An explicit PATH controls lookup; ambient parent PATH
   cannot select another binary. Every pure action runs in the sandbox, where
   the toolchain bin/ comes first on PATH and only declared inputs, named
-  toolchains, granted host_paths and system directories are visible (see
-  `mu guide sandbox`). Impure actions run on the host.
+  toolchains, granted host_paths and system directories are visible, and
+  network access is denied unless network: true. Seatbelt (macOS) and Linux
+  namespaces enforce this; copy isolation, the fallback, does not, and mu
+  warns once when it is in use (see `mu guide sandbox`). Impure actions run
+  on the host.
 
   Impure bare commands with no env declaration retain parent inheritance for
   direct host operations. Explicit env maps, including {}, replace inheritance.
-  VM and sandbox execution never imports arbitrary parent variables. Any
+  Sandboxed execution never imports arbitrary parent variables. Any
   action may name host variables in env_passthrough; they are copied at
   execution time and only their names enter the cache key. Sealed inputs and
   MU_OUT / MU_SEALED_OUT_DIR are layered on top without dropping the rest.
@@ -114,9 +121,10 @@ ACTION ENVIRONMENT AND WORK DIRECTORY
   the work directory relative to it, so it does not depend on checkout path.
   Working-directory resolution permits internal relative symlinks and rejects
   external links. Execution reopens and pins the directory before cache or
-  provider access; the child uses fchdir on its inherited descriptor. Relative
-  restores, output collection, and sandbox source reads use that pinned root.
-  A later symlink swap cannot redirect those operations. This native descriptor
+  provider access; a host (impure) command's child uses fchdir on its
+  inherited descriptor. Relative restores and output collection use that
+  pinned root, and sandbox input reads go through an os.Root opened at the
+  project root. A later symlink swap cannot redirect those operations. This native descriptor
   execution is supported on Linux and macOS. Impure (host) commands remain
   intentional host commands, not a filesystem sandbox; their explicit absolute
   outputs retain their host-path contract. Pure actions must declare outputs

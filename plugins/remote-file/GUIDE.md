@@ -54,8 +54,8 @@ the path:
 "sealed_input_modes": {"DEPLOY_KEY": "file"}
 ```
 
-remote-file runs bare (no sandbox), so `file` mode is supported. Reach for
-it whenever the secret would not survive shell quoting as an env value.
+remote-file's action is impure and runs on the host. Reach for `file`
+mode whenever the secret would not survive shell quoting as an env value.
 
 ## Sealed outputs
 
