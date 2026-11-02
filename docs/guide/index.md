@@ -24,7 +24,6 @@ Plugins and integration:
   mu guide secret-providers Authoring secret-aware plugins (resolve/store, sealed_outputs)
   mu guide pith-plugins     Writing inline plugins with pith VM programs
   mu guide plugin <name>    Show guide text bundled with a plugin
-  mu guide pudl             How mu and pudl work together
 
 Execution:
 

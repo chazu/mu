@@ -43,7 +43,7 @@ WHAT TO READ NEXT
   Writing a plugin:       mu guide plugins → mu guide protocol
   Inline pith plugins:   mu guide pith-plugins
   Working with secrets:   mu guide secrets → mu guide secret-gen
-  Drift / convergence:    mu guide observe → mu guide pudl
+  Drift detection:        mu guide observe
   Hermetic toolchains:    mu guide toolchains
   Caching/CAS internals:  mu guide cache
 
@@ -54,5 +54,4 @@ KEY DESIGN PRINCIPLES
      after it's built.
   3. Secrets values never enter the cache, manifests, or logs.
      Refs and modes do — they're non-secret metadata.
-  4. mu and pudl are decoupled. mu builds; pudl reasons about state.
-  5. mu.cue is the single source of authoring truth.
+  4. mu.cue is the single source of authoring truth.
