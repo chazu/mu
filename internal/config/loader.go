@@ -79,7 +79,17 @@ func LoadOffline(projectRoot string, offline bool) (*ProjectConfig, error) {
 //
 // Symlinked mu.cue files inside otherwise-real subdirectories are
 // filtered out via Lstat + Mode().IsRegular().
+//
+// A subdirectory with its own cue.mod/ is a separate CUE module and so a
+// separate mu project; it is skipped along with everything under it.
+//
+// Sub-configs are restricted: they may not set project-wide fields
+// (cache, publish, secrets), may not redeclare a plugin or toolchain name
+// already declared elsewhere, and may only declare targets under their
+// own directory.
 func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool) error {
+	rootFile := filepath.Join(projectRoot, configFileCUE)
+	origins := newNameOrigins(cfg, rootFile)
 	return filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -95,7 +105,7 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 		}
 
 		name := d.Name()
-		if strings.HasPrefix(name, ".") || name == "testdata" {
+		if strings.HasPrefix(name, ".") || name == "testdata" || isNestedModule(path) {
 			return filepath.SkipDir
 		}
 
@@ -106,6 +116,9 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 		partial, err := cueDecoder{offline: len(offline) > 0 && offline[0]}.Decode(path)
 		if err != nil {
 			return fmt.Errorf("loading %s: %w", subFile, err)
+		}
+		if err := rejectRootOnlyFields(partial, subFile); err != nil {
+			return err
 		}
 
 		relDir, err := filepath.Rel(projectRoot, path)
@@ -131,6 +144,8 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 				} else {
 					t.Name = prefix + "/" + t.Name
 				}
+			} else if !targetUnder(t.Name, prefix) {
+				return fmt.Errorf("%s: target %q is outside this directory; name it %s/... or use a relative name", subFile, t.Name, prefix)
 			}
 			for j := range t.Sources {
 				if !filepath.IsAbs(t.Sources[j]) {
@@ -151,20 +166,102 @@ func mergeSubdirConfigs(cfg *ProjectConfig, projectRoot string, offline ...bool)
 					p.Script = rel
 				}
 			}
-			for j := range p.Command {
-				arg := p.Command[j]
-				if !filepath.IsAbs(arg) && strings.ContainsAny(arg, "/\\") {
-					abs := filepath.Join(subDir, arg)
-					if rel, err := filepath.Rel(projectRoot, abs); err == nil {
-						p.Command[j] = rel
+			if len(p.Command) > 0 && isDotRelative(p.Command[0]) {
+				abs := filepath.Join(subDir, p.Command[0])
+				if rel, err := filepath.Rel(projectRoot, abs); err == nil {
+					if !strings.ContainsRune(rel, filepath.Separator) {
+						rel = "." + string(filepath.Separator) + rel
 					}
+					p.Command[0] = rel
 				}
 			}
 		}
 
+		if err := origins.claim(partial, subFile); err != nil {
+			return err
+		}
 		merge(cfg, partial)
 		return nil
 	})
+}
+
+// isNestedModule reports whether dir holds its own cue.mod directory,
+// marking it as the root of a separate project.
+func isNestedModule(dir string) bool {
+	info, err := os.Lstat(filepath.Join(dir, "cue.mod"))
+	return err == nil && info.IsDir()
+}
+
+// isDotRelative reports whether a plugin command's executable is written
+// as an explicit relative path ("./x" or "../x"). Only such a command[0]
+// is rebased onto the project root; arguments are never rewritten.
+func isDotRelative(arg string) bool {
+	arg = filepath.ToSlash(arg)
+	return strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../")
+}
+
+// targetUnder reports whether an absolute target name lies in the package
+// prefix ("//sub") or below it ("//sub/x", "//sub:x").
+func targetUnder(name, prefix string) bool {
+	if name == prefix {
+		return true
+	}
+	return strings.HasPrefix(name, prefix+"/") || strings.HasPrefix(name, prefix+":")
+}
+
+// rejectRootOnlyFields fails when a sub-directory mu.cue sets a field that
+// only the project root may set. These fields are project-wide, so merging
+// them from a sub-config would be ambiguous; silently dropping them hides
+// the mistake.
+func rejectRootOnlyFields(partial *ProjectConfig, file string) error {
+	var field string
+	switch {
+	case partial.Cache != nil:
+		field = "cache"
+	case partial.Publish != nil:
+		field = "publish"
+	case partial.Secrets != nil:
+		field = "secrets"
+	default:
+		return nil
+	}
+	return fmt.Errorf("%s: %q may only be set in the project root mu.cue", file, field)
+}
+
+// nameOrigins records which config file declared each plugin and toolchain
+// name, so a redeclaration can name both files.
+type nameOrigins struct {
+	plugins    map[string]string
+	toolchains map[string]string
+}
+
+func newNameOrigins(root *ProjectConfig, rootFile string) *nameOrigins {
+	o := &nameOrigins{plugins: map[string]string{}, toolchains: map[string]string{}}
+	for _, p := range root.Plugins {
+		o.plugins[p.Name] = rootFile
+	}
+	for _, tc := range root.Toolchains {
+		o.toolchains[tc.Name] = rootFile
+	}
+	return o
+}
+
+// claim registers every plugin and toolchain name in partial as declared
+// by file, failing on any name another config (or file itself) declared.
+func (o *nameOrigins) claim(partial *ProjectConfig, file string) error {
+	for _, p := range partial.Plugins {
+		if prev, ok := o.plugins[p.Name]; ok {
+			return fmt.Errorf("plugin %q is declared in both %s and %s", p.Name, prev, file)
+		}
+		o.plugins[p.Name] = file
+	}
+	for _, tc := range partial.Toolchains {
+		if prev, ok := o.toolchains[tc.Name]; ok {
+			return fmt.Errorf("toolchain %q is declared in both %s and %s", tc.Name, prev, file)
+		}
+		o.toolchains[tc.Name] = file
+	}
+	return nil
 }
 
 // isGlob reports whether s contains glob meta-characters.
@@ -234,30 +331,10 @@ func hasHiddenSegment(p string) bool {
 }
 
 // merge appends targets, toolchains, and plugins from src into dst.
-// Toolchains and plugins with names that already exist in dst are skipped
-// (the parent/root definition wins).
+// Callers reject duplicate plugin and toolchain names (nameOrigins.claim)
+// before merging.
 func merge(dst, src *ProjectConfig) {
 	dst.Targets = append(dst.Targets, src.Targets...)
-
-	existingTC := make(map[string]bool, len(dst.Toolchains))
-	for _, tc := range dst.Toolchains {
-		existingTC[tc.Name] = true
-	}
-	for _, tc := range src.Toolchains {
-		if !existingTC[tc.Name] {
-			dst.Toolchains = append(dst.Toolchains, tc)
-			existingTC[tc.Name] = true
-		}
-	}
-
-	existingPl := make(map[string]bool, len(dst.Plugins))
-	for _, p := range dst.Plugins {
-		existingPl[p.Name] = true
-	}
-	for _, p := range src.Plugins {
-		if !existingPl[p.Name] {
-			dst.Plugins = append(dst.Plugins, p)
-			existingPl[p.Name] = true
-		}
-	}
+	dst.Toolchains = append(dst.Toolchains, src.Toolchains...)
+	dst.Plugins = append(dst.Plugins, src.Plugins...)
 }

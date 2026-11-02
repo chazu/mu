@@ -57,7 +57,9 @@ TARGET FIELDS
 TARGET NAMING
 
   Targets are named "//path/name". Subdirectory targets are auto-prefixed:
-  a target "mylib" in foo/mu.cue becomes "//foo/mylib".
+  a target "mylib" in foo/mu.cue becomes "//foo/mylib". A subdirectory
+  mu.cue may also use absolute names, but only under its own directory
+  ("//foo", "//foo/...", "//foo:..."); anything else is a load error.
 
 CONFIG MERGING
 
@@ -65,6 +67,19 @@ CONFIG MERGING
   mu.cue files in subdirectories. Targets from subdirectories are merged
   with paths rebased relative to the project root. Globs in sources are
   expanded. Hidden directories (.git, .claude, etc.) and testdata/ are skipped.
+  A subdirectory with its own cue.mod/ is a separate project and is not
+  merged (nor is anything below it).
+
+  Rules for subdirectory mu.cue files (each violation is a load error
+  naming the file):
+
+  - cache, publish and secrets are project-wide and may only be set in
+    the root mu.cue.
+  - A plugin or toolchain name may be declared in only one mu.cue across
+    the project; a redeclaration names both files.
+  - Plugin paths are rebased onto the project root: script always, and
+    command[0] only when it starts with "./" or "../". Other command
+    elements are passed through unchanged, so "sh -c '...a/b...'" is safe.
 
 SECRETS POLICY
 
