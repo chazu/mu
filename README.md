@@ -191,7 +191,6 @@ refs/modes instead of inheriting target-wide access. The retired
 | Plugin | Description |
 |--------|-------------|
 | `aws` | AWS resource observer (EC2, VPC, subnets) via AWS CLI |
-| `cowsay` | Demo text transformation |
 | `docker` | Docker image builder |
 | `doppler` | Read-only secret provider over the [Doppler](https://doppler.com) CLI |
 | `file` | File convergence (write/copy/symlink/delete) + sealed-output capture |
@@ -199,15 +198,13 @@ refs/modes instead of inheriting target-wide access. The retired
 | `host` | Remote host observer over SSH |
 | `k8s` | Kubernetes convergence + drift + Secret capture |
 | `keypair-gen` | ed25519/ECDSA keypair generator → sealed outputs |
-| `lint` | Linter wrapper (observe + fix) |
+| `lint` | Linter wrapper (check; fix only with `fix: true`) |
 | `pass` | Bidirectional secret provider over [pass](https://passwordstore.org) |
 | `remote-exec` | Run commands over SSH with sealed-output fetch |
 | `remote-file` | Converge a file on a remote host over SSH |
-| `scratch` | Toolchain bootstrapping |
 | `sops` | Bidirectional secret provider over [SOPS](https://github.com/getsops/sops) |
 | `terraform` | Infra provisioning + drift + sensitive-output capture |
 | `void` | Build webhook reporter (advice plugin) |
-| `zig` | Zig toolchain |
 
 ## Project Status
 

@@ -9,8 +9,6 @@
 # Stray plugin binaries built at repo root from `go build ./plugins/<name>`
 /file
 /host
-/scratch
-/cowsay
 /docker
 /aws
 /k8s
@@ -22,22 +20,14 @@
 /sops
 /terraform
 /void
-/zig
 
 # Examples build output
 examples/*/hello
 
-# Misc
-greeting.txt
-
 # The global ~/.gitignore has a `*secret*` rule that would swallow the
-# envsecret provider plugin and the env-secret test fixture. Both are
-# intentional source, not secrets — re-include them.
-!plugins/envsecret/
-!plugins/envsecret/**
+# env-secret test fixture. It is intentional source, not a secret —
+# re-include it.
 !internal/coordinator/testdata/mock_env_secret.sh
-# ...but never the compiled plugin binary.
-plugins/envsecret/envsecret
 
 # dlktk local discussion-selection state (dialectics are exported to docs/design/dialectics/)
 .dlktk/
